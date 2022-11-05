@@ -1,0 +1,100 @@
+// Ignored
+WHITESPACE = _{ " " | "\t" }
+COMMENT = _{ "--." ~ (!NEWLINE ~ ANY)* }
+
+// keywords
+key_true  = { "true" }
+key_false = { "false" }
+key_do = { "do" }
+key_end = { "end" }
+key_if = { "if" }
+key_then = { "then" }
+key_else = { "else" }
+key_case = { "case" }
+key_in = { "in" }
+key_for = { "for" }
+key_nil = { "nil" }
+key_assert = { "assert" }
+
+//built-in methods
+//// nil related
+fn_then = { "then" }
+fn_and_then = { "and_then" }
+fn_or_else = { "or_else" }
+
+//// iterator
+fn_map = { "map" }
+fn_zip = { "zip" }
+fn_flat = { "flat" }
+fn_enumerate = { "enumerate" }
+fn_rev = { "rev" }
+fn_once = { "once" }
+fn_take = { "take" }
+fn_collect = { "collect" }
+fn_max = { "max" }
+fn_min = { "min" }
+fn_sort = { "sort" }
+
+// op - arithmetic
+op_plus = { "+" }
+op_minus = { "-" }
+op_exp = { "**" }
+op_mul = { "*" }
+op_div_floor = { "//" }
+op_div = { "/" }
+op_mod = { "%" }
+op_range = { ".." }
+
+// op - compare
+op_and = { "and" }
+op_or = { "or" }
+op_not = { "not" }
+op_gt = { ">" }
+op_ge = { ">=" }
+op_eq = { "==" }
+op_ne = { "<>" }
+op_lt = { "<" }
+op_le = { "<=" }
+
+// op - assign
+op_plus_asign = { "+=" }
+op_minus_asign = { "-=" }
+op_exp_assign = { "**=" }
+op_mul_asign = { "*=" }
+op_div_floor_assign = { "//=" }
+op_div_asign = { "/=" }
+op_asign = { "=" }
+
+// op - member access
+op_member = { "." }
+op_builtin = { "->" }
+
+// ident
+ident = { ( ASCII_ALPHA | "_" ) ~ ( ASCII_ALPHANUMERIC | "_" )* ~ "?"? }
+
+// numeric
+int = { num_bin | num_oct | num_hex | num_dec } // DO NOT REORDER!
+num_bin = @{ ^"0b" ~ ASCII_BIN_DIGIT ~ ( "_" | ASCII_BIN_DIGIT )* }
+num_dec = @{ ASCII_DIGIT ~ ( "_" | ASCII_DIGIT )* }
+num_oct = @{ ^"0o" ~ ASCII_OCT_DIGIT ~ ( "_" | ASCII_OCT_DIGIT )* }
+num_hex = @{ ^"0x" ~ ASCII_HEX_DIGIT ~ ( "_" | ASCII_HEX_DIGIT )* }
+
+// float-point
+float = @{
+    num_dec ~ "." ~ num_dec? ~ float_exp? |
+    num_dec ~ float_exp
+}
+
+float_exp = _{ ^"e" ~ (op_plus | op_minus)? ~ num_dec }
+
+// strings
+string = @{ "'" ~ (raw_string | str_escape)* ~ "'" }
+raw_string = _{ (!("\\" | "\'") ~ ANY)+ }
+str_predefined = _{ "n" | "r" | "t" | "\\" | "0" | "'" }
+str_byte       = _{ "x" ~ ASCII_HEX_DIGIT{2} }
+str_unicode    = _{ "u" ~ ASCII_HEX_DIGIT{4} | "U" ~ ASCII_HEX_DIGIT{8} }
+str_escape     = _{ "\\" ~ (str_predefined | str_byte | str_unicode) }
+
+// expr
+//TODO expr = { op_prefix* ~ expr_primary ~ op_postfix* ~ (op_infix ~ op_prefix* ~ expr_primary ~ op_postfix* )* }
+expr_primary = { ident | string | float | int } // DO NOT REORDER!
