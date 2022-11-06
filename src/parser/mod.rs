@@ -1,6 +1,44 @@
+use pest::pratt_parser::PrattParser;
+
 #[derive(Parser)]
 #[grammar = "parser/grammar.pest"]
 pub struct DiatomParser;
+
+struct ExprParser {
+    parser: PrattParser<Rule>,
+}
+
+impl ExprParser {
+    fn new() -> Self {
+        use pest::pratt_parser::{Assoc::*, Op};
+        use Rule::*;
+
+        // Precedence is defined lowest to highest
+        let parser = PrattParser::new()
+            .op(Op::infix(op_assign, Right))
+            .op(Op::postfix(op_condition))
+            .op(Op::infix(op_range, Left))
+            .op(Op::infix(op_or, Left))
+            .op(Op::infix(op_and, Left))
+            .op(Op::infix(op_eq, Left)
+                | Op::infix(op_ne, Left)
+                | Op::infix(op_le, Left)
+                | Op::infix(op_lt, Left)
+                | Op::infix(op_ge, Left)
+                | Op::infix(op_gt, Left))
+            .op(Op::infix(op_plus, Left) | Op::infix(op_minus, Left))
+            .op(Op::infix(op_mul, Left)
+                | Op::infix(op_div, Left)
+                | Op::infix(op_mod, Left)
+                | Op::infix(op_div_floor, Left))
+            .op(Op::prefix(op_plus) | Op::prefix(op_minus) | Op::prefix(op_not))
+            .op(Op::postfix(op_index)
+                | Op::postfix(op_call)
+                | Op::postfix(op_chain)
+                | Op::postfix(op_chain));
+        ExprParser { parser }
+    }
+}
 
 #[cfg(test)]
 mod tests {
