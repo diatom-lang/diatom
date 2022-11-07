@@ -3,7 +3,7 @@ WHITESPACE = _{ " " | "\t" }
 COMMENT = _{ "--." ~ (!NEWLINE ~ ANY)* }
 SHEBANG = _{ "#!" ~ (!NEWLINE ~ ANY)* }
 
-main = { SOI ~ SHEBANG? ~ expr ~ EOI }
+main = ${ SOI ~ SHEBANG? ~ expr ~ EOI }
 
 // keywords
 key_true  = { "true" }

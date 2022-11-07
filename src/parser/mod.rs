@@ -1,9 +1,59 @@
-use pest::pratt_parser::PrattParser;
+use pest::{error::Error, iterators::Pairs, pratt_parser::PrattParser};
 
 #[derive(Parser)]
 #[grammar = "parser/grammar.pest"]
-pub struct DiatomParser;
+struct RawDiatomParser;
 
+/// # Main Parser for the Diatom language
+/// Take a mutable str as input and return an AST for mid-end.
+/// # Examples
+/// ```
+/// use diatom::parser::DiatomParser;
+/// 
+/// let mut program = r#"
+/// a = 5
+/// b = [a, 6, 's'].len()
+/// "#.to_string();
+///
+/// let result = DiatomParser::parse_main(&mut program);
+/// match result {
+///     Ok(ast) => println!("{:?}", ast),
+///     Err(err) => println!("{:?}", err)
+/// };
+/// ```
+pub struct DiatomParser {}
+
+impl pest::Parser<Rule> for DiatomParser {
+    /// Parse raw input without preprocessing.  
+    /// Note that this will **disable** the use of **newline** in parentheses!
+    fn parse<'i>(rule: Rule, input: &'i str) -> Result<Pairs<'i, Rule>, Error<Rule>> {
+        RawDiatomParser::parse(rule, input)
+    }
+}
+
+impl DiatomParser {
+    fn remove_unnecessary_newline(input: &mut str) {
+        unimplemented!()
+    }
+
+    /// Parse a single grammar rule.  
+    /// Automatically remove **newline** in parentheses, since these are redundant and can confuse
+    /// the parser.
+    pub fn parse_processed<'i>(
+        rule: Rule,
+        input: &'i mut str,
+    ) -> Result<Pairs<'i, Rule>, Error<Rule>> {
+        Self::remove_unnecessary_newline(input);
+        <RawDiatomParser as pest::Parser<Rule>>::parse(rule, input)
+    }
+
+    /// Parse the whole programme.  
+    /// Automatically remove **newline** in parentheses, since these are reduntant and can confuse
+    /// the parser.
+    pub fn parse_main<'i>(input: &'i mut str) -> Result<Pairs<'i, Rule>, Error<Rule>> {
+        Self::parse_processed(Rule::main, input)
+    }
+}
 struct ExprParser {
     parser: PrattParser<Rule>,
 }
