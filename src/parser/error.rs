@@ -1,4 +1,8 @@
-pub enum ErrorType {}
+#[cfg_attr(test, derive(Debug))]
+pub enum ErrorType {
+    InvalidNum(String),
+    InvalidStr(String),
+}
 
 /// This struct is used to generate nice error messages that the lexer & parser emitted.
 pub struct ErrorReporter {
@@ -15,6 +19,7 @@ impl ErrorReporter {
     ///
     /// This function will append render result to the string passed in so that we do not allocate
     /// a new string.
+    #[allow(unused)]
     fn render_one(
         error_string: &mut String,
         source: &str,
@@ -48,25 +53,28 @@ impl ErrorReporter {
     }
 
     /// Check if there is any error.
-    pub fn is_empty(&self) -> bool{
+    pub fn is_empty(&self) -> bool {
         self.errors.is_empty()
     }
 }
 
 /// Indicate a location in a specific line.
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
 pub struct LineLocation {
     pub line: usize,
     pub offset: usize,
+    pub global_offset: usize
 }
 
 impl LineLocation {
-    pub fn new(line: usize, offset: usize) -> Self {
-        Self { line, offset }
+    pub fn new(line: usize, offset: usize, global_offset: usize) -> Self {
+        Self { line, offset, global_offset }
     }
 }
 
 /// Indicate location of a range of text in a specific file.
+#[cfg_attr(test, derive(Debug))]
 pub struct FileLocation {
     pub start: LineLocation,
     pub end: LineLocation,
