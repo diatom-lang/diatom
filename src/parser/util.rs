@@ -8,7 +8,7 @@ pub struct FileIterator<'a> {
 impl<'a> FileIterator<'a> {
     pub fn new(file_content: &'a str) -> Self {
         Self {
-            location: LineLocation::new(0, 0, 0),
+            location: LineLocation::new(0, 0),
             iterator: file_content.chars(),
         }
     }
@@ -46,7 +46,6 @@ impl<'a> Iterator for FileIterator<'a> {
                 } else {
                     self.location.offset += 1;
                 };
-                self.location.global_offset += 1;
             }
             None => (),
         };
@@ -60,15 +59,13 @@ impl<'a> Iterator for FileIterator<'a> {
 pub struct LineLocation {
     pub line: usize,
     pub offset: usize,
-    pub global_offset: usize,
 }
 
 impl LineLocation {
-    pub fn new(line: usize, offset: usize, global_offset: usize) -> Self {
+    pub fn new(line: usize, offset: usize) -> Self {
         Self {
             line,
             offset,
-            global_offset,
         }
     }
 }
