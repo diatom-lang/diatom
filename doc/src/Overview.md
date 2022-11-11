@@ -1,1 +1,0 @@
-# The Diatom Programming Language
