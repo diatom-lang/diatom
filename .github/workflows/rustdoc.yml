@@ -22,7 +22,7 @@ jobs:
       run: rustup update --no-self-update stable
 
     - name: Build Documentation
-      run: cargo doc --no-deps
+      run: cargo doc --no-deps && echo "<meta http-equiv=\"refresh\" content=\"0; url=diatom/index.html\">" > ./target/doc/index.html
 
     - name: Deploy Docs
       uses: peaceiris/actions-gh-pages@v3
