@@ -5,6 +5,9 @@ pub enum ErrorType {
     InvalidNum(String),
     InvalidStr(String),
     InvalidOp(String),
+    UnexpectedToken((String, String)),
+    IrError(String),
+    EofError(),
 }
 
 /// Record and report errors.
@@ -76,6 +79,15 @@ impl ErrorReporter {
             }
             ErrorType::InvalidOp(s) => {
                 format!("Invalid operator: `{s}`")
+            }
+            ErrorType::UnexpectedToken((s, msg)) => {
+                format!("Unexpected Token: `{s}` is not allowed here. {msg}")
+            }
+            ErrorType::IrError(s) => {
+                format!("Ir Builder Error: {s}")
+            }
+            ErrorType::EofError() => {
+                format!("Unexpected end of file")
             }
         }
         .as_str();
@@ -287,7 +299,7 @@ impl ErrorReporter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::util::*;
+    use crate::frontend::util::*;
 
     #[test]
     fn render_test() {
