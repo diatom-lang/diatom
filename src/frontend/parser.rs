@@ -3,28 +3,8 @@ use super::{
     lexer::{Keyword, Operator, Token},
     util::TokenIterator,
     ErrorReporter, Lexer,
+    ast::{Type, OpInfix, OpPrefix, OpPostfix, Expr, Expr_, Const}
 };
-use crate::backend::{IrBuilder, Type};
-
-#[derive(Clone, Copy)]
-enum OpInfix {
-    Range,
-    Or,
-    And,
-    Eq,
-    Ne,
-    Le,
-    Lt,
-    Ge,
-    Gt,
-    Plus,
-    Minus,
-    Mul,
-    Div,
-    DivFloor,
-    Mod,
-    Exp,
-}
 
 const fn precedence_infix(op: OpInfix) -> (u32, u32) {
     use OpInfix::*;
@@ -45,19 +25,16 @@ const fn precedence_prefix() -> u32 {
 const fn precedence_postfix() -> u32 {
     101
 }
+
 /// The parser for Diatom.
-pub struct Parser<Builder>
-where
-    Builder: IrBuilder,
+pub struct Parser
 {
-    builder: Builder,
     error_reporter: ErrorReporter,
 }
 
-impl<'a, Builder: IrBuilder> Parser<Builder> {
+impl Parser {
     pub fn new() -> Self {
         Self {
-            builder: Builder::new(),
             error_reporter: ErrorReporter::new(),
         }
     }
@@ -66,7 +43,7 @@ impl<'a, Builder: IrBuilder> Parser<Builder> {
         !self.error_reporter.is_empty()
     }
 
-    pub fn parse(&mut self, lexer: &'a mut Lexer) {
+    pub fn parse(&mut self, lexer: &mut Lexer) {
         use Keyword::*;
         use Operator::*;
         use Token::*;
@@ -84,68 +61,83 @@ impl<'a, Builder: IrBuilder> Parser<Builder> {
         }
     }
 
-    fn consume_type(&mut self, iter: &'a mut TokenIterator) -> Type {
+    fn consume_type(&mut self, iter: &mut TokenIterator) -> Type {
         todo!()
     }
 
-    fn consume_id(&mut self, iter: &'a mut TokenIterator) -> (&'a String, Type) {
-        match iter.next() {
-            Some(Token::Id(s)) => {
-                if let Some(Token::Op(Operator::Colon)) = iter.peek() {
-                    iter.next();
-                    (s, self.consume_type(iter))
-                } else {
-                    (s, Type::Any)
-                }
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    fn consume_if(&mut self, iter: &'a mut TokenIterator) {
+    fn consume_if(&mut self, iter: &mut TokenIterator) {
         todo!()
     }
 
-    fn consume_case(&mut self, iter: &'a mut TokenIterator) {
+    fn consume_case(&mut self, iter: &mut TokenIterator) {
         todo!()
     }
 
-    fn consume_loop_if(&mut self, iter: &'a mut TokenIterator) {
+    fn consume_loop_if(&mut self, iter: &mut TokenIterator) {
         todo!()
     }
 
-    fn consume_loop(&mut self, iter: &'a mut TokenIterator) {
+    fn consume_loop(&mut self, iter: &mut TokenIterator) {
         todo!()
     }
 
-    fn consume_class(&mut self, iter: &'a mut TokenIterator) {
+    fn consume_class(&mut self, iter: &mut TokenIterator) {
         todo!()
     }
 
-    fn consume_def(&mut self, iter: &'a mut TokenIterator) {
+    fn consume_def(&mut self, iter: &mut TokenIterator) {
         todo!()
     }
 
-    fn consume_pattern(&mut self, iter: &'a mut TokenIterator) {
+    fn consume_pattern(&mut self, iter: &mut TokenIterator) {
         todo!()
     }
 
-    fn consume_expr(&mut self, iter: &'a mut TokenIterator, min_precedence: u32) -> String {
+    fn consume_expr(&mut self, iter: &mut TokenIterator, min_precedence: u32) -> Box<Expr> {
         use Operator::*;
         use Token::*;
-        let lhs = match iter.peek() {
-            Some(Id(s)) => s.clone(),
-            Some(Op(LPar)) => {
-                iter.reset_location_counter();
+        let mut start = iter.get_location();
+        let mut lhs = match iter.peek() {
+            Some(Id(s)) => {
+                let s = s.clone();
                 iter.next();
                 let location = iter.get_location();
+                Box::new(Expr{location, val: Expr_::Id(s.clone())})
+            },
+            Some(Str(s)) => {
+                let s = s.clone();
+                iter.next();
+                let location = iter.get_location();
+                Box::new(Expr{location, val: Expr_::Const(Const::Str(s.clone()))})
+            }
+            Some(Float(f)) => {
+                let f = *f;
+                iter.next();
+                let location = iter.get_location();
+                Box::new(Expr{location, val: Expr_::Const(Const::Float(f))})
+            }
+            Some(Integer(i)) => {
+                let i = *i;
+                iter.next();
+                let location = iter.get_location();
+                Box::new(Expr{location, val: Expr_::Const(Const::Int(i))})
+            }
+            Some(Key(val@(Keyword::TRUE | Keyword::FALSE))) => {
+                let val = if matches!(val, Keyword::TRUE) {true} else {false};
+                iter.next();
+                let location = iter.get_location();
+                Box::new(Expr{location, val: Expr_::Const(Const::Bool(val))})
+            }
+            Some(Op(LPar)) => {
+                let location = iter.get_location();
+                iter.next();
                 let lhs = self.consume_expr(iter, 0);
                 if !matches!(iter.peek(), Some(Op(RPar))) {
                     iter.next();
                     let location_now = iter.get_location();
                     self.error_reporter.append(
                         "Parser",
-                        location | location_now,
+                        location + location_now,
                         ErrorType::UnexpectedToken((
                             "Missing parentheses".to_string(),
                             "Expected \")\" here.".to_string(),
@@ -156,25 +148,20 @@ impl<'a, Builder: IrBuilder> Parser<Builder> {
                 lhs
             }
             Some(Op(op @ (Not | Minus))) => {
-                let op = *op;
-                iter.reset_location_counter();
+                let op = match op {
+                    Not => OpPrefix::Not,
+                    Minus => OpPrefix::Neg,
+                    _ => unreachable!()
+                };
+                let start = iter.get_location();
                 iter.next();
-                let location = iter.get_location();
                 let rhs = self.consume_expr(iter, precedence_prefix());
-                let res = self.builder.get_intermediate();
-                if let Err(s) = match op {
-                    Not => self.builder.not(&rhs, &res),
-                    Minus => self.builder.neg(&rhs, &res),
-                    _ => unreachable!(),
-                } {
-                    self.error_reporter
-                        .append("IrBuilder", location, ErrorType::IrError(s));
-                }
-                res
+                let end = iter.get_location();
+                Box::new(Expr{location: start+end, val: Expr_::Prefix(op, rhs)})
             }
             Some(token) => {
                 let token = format!("{:?}", token);
-                iter.reset_location_counter();
+                let location = iter.get_location();
                 iter.next();
                 self.error_reporter.append(
                     "Parser",
@@ -184,13 +171,13 @@ impl<'a, Builder: IrBuilder> Parser<Builder> {
                         "This token is not allowed at the beginning of an expression.".to_string(),
                     )),
                 );
-                return self.builder.get_intermediate();
+                return Box::new(Expr{location, val: Expr_::Error});
             }
             None => {
-                iter.reset_location_counter();
+                let location = iter.get_location();
                 self.error_reporter
                     .append("Parser", iter.get_location(), ErrorType::EofError());
-                return self.builder.get_intermediate();
+                return Box::new(Expr{location, val: Expr_::Error});
             }
         };
 
@@ -232,111 +219,35 @@ impl<'a, Builder: IrBuilder> Parser<Builder> {
                 break;
             }
 
-            iter.reset_location_counter();
             iter.next();
-            let location = iter.get_location();
 
             let rhs = self.consume_expr(iter, precedence.1);
+            let end = iter.get_location();
 
-            let res = self.builder.get_intermediate();
-            if let Err(s) = match op {
-                OpInfix::Range => self.builder.range(&lhs, &rhs, &res),
-                OpInfix::Or => self.builder.or(&lhs, &rhs, &res),
-                OpInfix::And => self.builder.and(&lhs, &rhs, &res),
-                OpInfix::Eq => self.builder.eq(&lhs, &rhs, &res),
-                OpInfix::Ne => self.builder.ne(&lhs, &rhs, &res),
-                OpInfix::Le => self.builder.le(&lhs, &rhs, &res),
-                OpInfix::Lt => self.builder.lt(&lhs, &rhs, &res),
-                OpInfix::Ge => self.builder.ge(&lhs, &rhs, &res),
-                OpInfix::Gt => self.builder.gt(&lhs, &rhs, &res),
-                OpInfix::Plus => self.builder.and(&lhs, &rhs, &res),
-                OpInfix::Minus => self.builder.sub(&lhs, &rhs, &res),
-                OpInfix::Mul => self.builder.mul(&lhs, &rhs, &res),
-                OpInfix::Div => self.builder.div(&lhs, &rhs, &res),
-                OpInfix::DivFloor => self.builder.div_floor(&lhs, &rhs, &res),
-                OpInfix::Mod => self.builder.modulo(&lhs, &rhs, &res),
-                OpInfix::Exp => self.builder.exp(&lhs, &rhs, &res),
-            } {
-                self.error_reporter
-                    .append("IrBuilder", location, ErrorType::IrError(s));
-            }
-            return res;
+            lhs = Box::new(Expr{location: start.clone() + end.clone(), val: Expr_::Infix(op, lhs, rhs)});
+            start = end;
         }
 
         lhs
     }
 
-    fn consume_assign(&mut self, iter: &'a mut TokenIterator) {
-        let mut vars = Vec::<String>::new();
-        // Read var list
-        loop {
-            iter.reset_location_counter();
-            match iter.peek() {
-                Some(Token::Id(_)) => {
-                    let var = self.consume_id(iter);
-                    vars.push(var.0.clone());
-                    match self.builder.declare_var(var.0, var.1) {
-                        Ok(_) => (),
-                        Err(s) => self.error_reporter.append(
-                            "IrBuilder",
-                            iter.get_location(),
-                            ErrorType::IrError(s),
-                        ),
-                    };
-                }
-                Some(Token::Op(Operator::Comma)) => {
-                    iter.next();
-                    continue;
-                }
-                Some(Token::Op(Operator::Assign)) => {
-                    iter.next();
-                    break;
-                }
-                Some(token) => {
-                    self.error_reporter.append(
-                        "Parser",
-                        iter.get_location(),
-                        ErrorType::UnexpectedToken((
-                            format!("{:?}", token),
-                            "Assign expression does not allow this token here.".to_string(),
-                        )),
-                    );
-                    // omit everything till next "="
-                    loop {
-                        match iter.next() {
-                            Some(Token::Op(Operator::Assign)) => {
-                                break;
-                            }
-                            Some(_) => continue,
-                            None => {
-                                return;
-                            }
-                        }
-                    }
-                }
-                None => {
-                    self.error_reporter.append(
-                        "Parser",
-                        iter.get_location(),
-                        ErrorType::EofError(),
-                    );
-                }
-            }
-        }
+    fn consume_assign(&mut self, iter: &mut TokenIterator) {
+        todo!()
+    }
+}
 
-        iter.next();
+#[cfg(test)]
+mod tests{
+    use super::*;
 
-        let value = self.consume_expr(iter, 0);
-
-        for (i, var) in vars.iter().enumerate() {
-            match self.builder.load_unpack(&value, i, var) {
-                Ok(_) => (),
-                Err(s) => self.error_reporter.append(
-                    "IrBuilder",
-                    iter.get_location(),
-                    ErrorType::IrError(s),
-                ),
-            }
-        }
+    #[test]
+    fn test_expr(){
+        let code = "not 32 * 15+8.9e13//(12+\"asdf\") or false and -23";
+        let lexer = Lexer::new(code, Some("test.dm"));
+        let mut parser = Parser::new();
+        let expr = parser.consume_expr(&mut lexer.iter(), 0);
+        // This is manually verified to be correct =)
+        let result = "Expr { location: FileLocation { start: LineLocation { line: 0, offset: 40 }, end: LineLocation { line: 0, offset: 48 } }, val: Infix(And, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 31 }, end: LineLocation { line: 0, offset: 40 } }, val: Infix(Or, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 11 }, end: LineLocation { line: 0, offset: 31 } }, val: Infix(Plus, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 0 }, end: LineLocation { line: 0, offset: 11 } }, val: Infix(Mul, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 0 }, end: LineLocation { line: 0, offset: 6 } }, val: Prefix(Not, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 4 }, end: LineLocation { line: 0, offset: 6 } }, val: Const(Int(32)) }) }, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 9 }, end: LineLocation { line: 0, offset: 11 } }, val: Const(Int(15)) }) }, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 12 }, end: LineLocation { line: 0, offset: 31 } }, val: Infix(DivFloor, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 12 }, end: LineLocation { line: 0, offset: 18 } }, val: Const(Float(89000000000000.0)) }, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 21 }, end: LineLocation { line: 0, offset: 30 } }, val: Infix(Plus, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 21 }, end: LineLocation { line: 0, offset: 23 } }, val: Const(Int(12)) }, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 24 }, end: LineLocation { line: 0, offset: 30 } }, val: Const(Str(\"asdf\")) }) }) }) }, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 35 }, end: LineLocation { line: 0, offset: 40 } }, val: Const(Bool(false)) }) }, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 44 }, end: LineLocation { line: 0, offset: 48 } }, val: Prefix(Neg, Expr { location: FileLocation { start: LineLocation { line: 0, offset: 46 }, end: LineLocation { line: 0, offset: 48 } }, val: Const(Int(23)) }) }) }";
+        assert_eq!(format!("{:?}", expr), result);
     }
 }

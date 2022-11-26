@@ -1,2 +1,2 @@
-mod ir_builder;
-pub use ir_builder::{FuncArgType, IrBuilder, Type};
+#[cfg(feature = "vm")]
+pub mod vm;

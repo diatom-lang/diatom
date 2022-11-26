@@ -1,4 +1,4 @@
-use std::{ops::BitOr, str::Chars};
+use std::{ops::Add, str::Chars};
 
 use super::lexer::Token;
 
@@ -56,8 +56,7 @@ impl<'a> Iterator for FileIterator<'a> {
 }
 
 /// Indicate a location in a specific line.
-#[derive(Clone, PartialEq, Eq)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct LineLocation {
     pub line: usize,
     pub offset: usize,
@@ -93,8 +92,7 @@ impl Ord for LineLocation {
     }
 }
 /// Indicate location of a range of text in a specific file.
-#[cfg_attr(test, derive(Debug))]
-#[derive(Clone)]
+#[derive(Clone, Debug, Default)]
 pub struct FileLocation {
     pub start: LineLocation,
     pub end: LineLocation,
@@ -106,33 +104,15 @@ impl FileLocation {
     }
 }
 
-impl Default for FileLocation {
-    fn default() -> Self {
-        Self {
-            start: Default::default(),
-            end: Default::default(),
+impl Add for FileLocation{
+    type Output = FileLocation;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self{
+            start: self.end,
+            end: rhs.end,
         }
     }
 }
-
-impl BitOr for FileLocation {
-    type Output = Self;
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Self {
-            start: if self.start > rhs.start {
-                rhs.start
-            } else {
-                self.start
-            },
-            end: if self.end < rhs.end {
-                rhs.end
-            } else {
-                self.end
-            },
-        }
-    }
-}
-
 pub struct TokenIterator<'a> {
     iterator: std::slice::Iter<'a, (Token, FileLocation)>,
     location: FileLocation,
@@ -172,9 +152,6 @@ impl<'a> TokenIterator<'a> {
         self.location.clone()
     }
 
-    pub fn reset_location_counter(&mut self) {
-        self.location.start = self.location.end.clone();
-    }
 }
 
 impl<'a> Iterator for TokenIterator<'a> {
@@ -182,7 +159,7 @@ impl<'a> Iterator for TokenIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iterator.next().and_then(|x| {
-            self.location.end = x.1.end.clone();
+            self.location = x.1.clone();
             Some(&x.0)
         })
     }

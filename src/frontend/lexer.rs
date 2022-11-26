@@ -125,13 +125,13 @@ pub enum Operator {
 ///
 /// ```rust
 /// extern crate diatom;
-/// use diatom::frontend::Lexer;
+/// use diatom::Lexer;
 ///
 /// let file =
 /// r#"#!/usr/bin/env diatom
 ///
 /// a = 1..5
-/// fn plus_one(l) do
+/// def plus_one(l) do
 ///     for x in l do x = x + 1 end
 /// end
 /// plus_one(a)
@@ -172,7 +172,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Return an iterator tokens.
-    pub fn iter(&self) -> TokenIterator {
+    pub(crate) fn iter(&self) -> TokenIterator {
         TokenIterator::new(&self.tokens)
     }
 
