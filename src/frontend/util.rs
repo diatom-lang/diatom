@@ -1,4 +1,4 @@
-use std::{ops::Add, str::Chars};
+use std::{ops::Add, str::Chars, fmt::Debug};
 
 use super::lexer::Token;
 
@@ -56,7 +56,7 @@ impl<'a> Iterator for FileIterator<'a> {
 }
 
 /// Indicate a location in a specific line.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct LineLocation {
     pub line: usize,
     pub offset: usize,
@@ -68,31 +68,14 @@ impl LineLocation {
     }
 }
 
-impl Default for LineLocation {
-    fn default() -> Self {
-        Self { line: 0, offset: 0 }
+impl Debug for LineLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.line, self.offset)
     }
 }
 
-impl PartialOrd for LineLocation {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(match self.line.cmp(&other.line) {
-            std::cmp::Ordering::Equal => self.offset.cmp(&other.offset),
-            ord => ord,
-        })
-    }
-}
-
-impl Ord for LineLocation {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match self.line.cmp(&other.line) {
-            std::cmp::Ordering::Equal => self.offset.cmp(&other.offset),
-            ord => ord,
-        }
-    }
-}
 /// Indicate location of a range of text in a specific file.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct FileLocation {
     pub start: LineLocation,
     pub end: LineLocation,
@@ -113,13 +96,20 @@ impl Add for FileLocation{
         }
     }
 }
+
+impl Debug for FileLocation{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}-{:?}", self.start, self.end)
+    }
+}
+
 pub struct TokenIterator<'a> {
     iterator: std::slice::Iter<'a, (Token, FileLocation)>,
     location: FileLocation,
 }
 
 impl<'a> TokenIterator<'a> {
-    pub fn new(vec: &'a Vec<(Token, FileLocation)>) -> Self {
+    pub fn new(vec: &'a [(Token, FileLocation)]) -> Self {
         TokenIterator {
             iterator: vec.iter(),
             location: Default::default(),
@@ -128,17 +118,17 @@ impl<'a> TokenIterator<'a> {
 
     pub fn peek(&self) -> Option<&Token> {
         let mut iter = self.iterator.clone();
-        iter.next().and_then(|x| Some(&x.0))
+        iter.next().map(|x| &x.0)
     }
 
     pub fn peek2(&self) -> (Option<&Token>, Option<&Token>) {
         let mut iter = self.iterator.clone();
         match iter.next() {
             t1 @ Some(_) => {
-                let t1 = t1.and_then(|x| Some(&x.0));
+                let t1 = t1.map(|x| &x.0);
                 match iter.next() {
                     t2 @ Some(_) => {
-                        let t2 = t2.and_then(|x| Some(&x.0));
+                        let t2 = t2.map(|x| &x.0);
                         (t1, t2)
                     }
                     None => (t1, None),
@@ -158,9 +148,9 @@ impl<'a> Iterator for TokenIterator<'a> {
     type Item = &'a Token;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iterator.next().and_then(|x| {
+        self.iterator.next().map(|x| {
             self.location = x.1.clone();
-            Some(&x.0)
+            &x.0
         })
     }
 }

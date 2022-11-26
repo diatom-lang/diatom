@@ -82,6 +82,6 @@ pub enum Const {
     Bool(bool),
 }
 
-pub struct AST{
+pub struct Ast{
     
 }

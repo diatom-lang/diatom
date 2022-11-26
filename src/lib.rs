@@ -17,7 +17,7 @@ mod frontend;
 pub use frontend::{Lexer, Parser};
 
 #[cfg(feature = "vm")]
-pub use backend::vm::vm::VM;
+pub use backend::vm::runtime::VM;
 
 #[cfg(feature = "vm")]
 extern crate ahash;

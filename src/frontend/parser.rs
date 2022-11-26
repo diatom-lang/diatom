@@ -102,13 +102,13 @@ impl Parser {
                 let s = s.clone();
                 iter.next();
                 let location = iter.get_location();
-                Box::new(Expr{location, val: Expr_::Id(s.clone())})
+                Box::new(Expr{location, val: Expr_::Id(s)})
             },
             Some(Str(s)) => {
                 let s = s.clone();
                 iter.next();
                 let location = iter.get_location();
-                Box::new(Expr{location, val: Expr_::Const(Const::Str(s.clone()))})
+                Box::new(Expr{location, val: Expr_::Const(Const::Str(s))})
             }
             Some(Float(f)) => {
                 let f = *f;
@@ -123,7 +123,7 @@ impl Parser {
                 Box::new(Expr{location, val: Expr_::Const(Const::Int(i))})
             }
             Some(Key(val@(Keyword::TRUE | Keyword::FALSE))) => {
-                let val = if matches!(val, Keyword::TRUE) {true} else {false};
+                let val = !matches!(val, Keyword::TRUE);
                 iter.next();
                 let location = iter.get_location();
                 Box::new(Expr{location, val: Expr_::Const(Const::Bool(val))})

@@ -145,14 +145,12 @@ impl ErrorReporter {
             } else if line == location.start.line {
                 *error_string += format!("{} | ", " ".repeat(line_number_len)).as_str();
                 for (i, c) in code[line - location.start.line].chars().enumerate() {
-                    let push_char;
-                    if i < location.start.offset {
-                        push_char = ' ';
-                    } else if i == location.start.offset {
-                        push_char = '^'
-                    } else {
-                        push_char = '~'
-                    }
+                    let offset = location.start.offset;
+                    let push_char = match i {
+                        i if i < offset => ' ',
+                        i if i == offset => '^',
+                        _ => '~'
+                    };
                     error_string.push(push_char);
                     if c == '\t' {
                         error_string.push(push_char);
@@ -270,8 +268,8 @@ impl ErrorReporter {
             ErrorReporter::render_one(
                 &mut result,
                 source,
-                &location,
-                &error,
+                location,
+                error,
                 file_content,
                 file_name,
             )?;

@@ -319,7 +319,7 @@ impl<'a> Lexer<'a> {
                     None => break,
                 }
             }
-            return Ok(i);
+            Ok(i)
         }
         let mut num = String::new();
         let start = iter.get_location();
@@ -365,14 +365,14 @@ impl<'a> Lexer<'a> {
         if float_flag {
             let float = num.parse::<f64>();
             match float {
-                Ok(f) => return Ok((Token::Float(f), location)),
-                Err(e) => return Err((ErrorType::InvalidNum(format!("{e}")), location)),
+                Ok(f) => Ok((Token::Float(f), location)),
+                Err(e) => Err((ErrorType::InvalidNum(format!("{e}")), location)),
             }
         } else {
             let int = consume_int(&num);
             match int {
-                Ok(i) => return Ok((Token::Integer(i), location)),
-                Err(e) => return Err((ErrorType::InvalidNum(e), location)),
+                Ok(i) => Ok((Token::Integer(i), location)),
+                Err(e) => Err((ErrorType::InvalidNum(e), location)),
             }
         }
     }
@@ -466,16 +466,11 @@ impl<'a> Lexer<'a> {
         let start = iter.get_location();
         let start_char = iter.next();
         let mut result = String::new();
-        let is_single_quote;
         let mut invalid = false;
 
-        match start_char {
-            Some('"') => {
-                is_single_quote = false;
-            }
-            Some('\'') => {
-                is_single_quote = true;
-            }
+        let is_single_quote = match start_char {
+            Some('"') => false,
+            Some('\'') => true,
             _ => unreachable!(),
         };
         loop {
@@ -537,7 +532,7 @@ impl<'a> Lexer<'a> {
             iter.next();
             iter.next();
             let end = iter.get_location();
-            return FileLocation::new(start, end);
+            FileLocation::new(start, end)
         }
         match iter.peek2() {
             (Some('/'), Some('/')) => {
@@ -585,13 +580,12 @@ impl<'a> Lexer<'a> {
     fn consume(&mut self) {
         let mut iter = FileIterator::new(self.file_content);
         // Ignore shebang (#!...) at the beginning of the file
-        match iter.peek2() {
-            (Some('#'), Some('!')) => loop {
+        if let (Some('#'), Some('!')) = iter.peek2() {
+            loop {
                 if let Some('\n') = iter.next() {
                     break;
                 }
-            },
-            _ => (),
+            }
         }
         // Start consuming characters
         loop {
