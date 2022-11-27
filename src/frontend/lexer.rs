@@ -16,43 +16,43 @@ pub enum Token {
 #[derive(Debug, Clone, Copy)]
 pub enum Keyword {
     /// true
-    TRUE,
+    True,
     /// false
-    FALSE,
+    False,
     /// do
-    DO,
+    Do,
     /// end
-    END,
+    End,
     /// if
-    IF,
+    If,
     /// then
-    THEN,
+    Then,
     /// else
-    ELSE,
+    Else,
     /// elsif
-    ELSIF,
+    Elsif,
     /// case
-    CASE,
+    Case,
     /// in
-    IN,
+    In,
     /// for
-    FOR,
+    For,
     /// nil
-    NIL,
+    Nil,
     /// assert
-    ASSERT,
+    Assert,
     /// return
-    RETURN,
+    Return,
     /// break
-    BREAK,
+    Break,
     /// continue
-    CONTINUE,
+    Continue,
     /// loop
-    LOOP,
+    Loop,
     /// class
-    CLASS,
+    Class,
     /// def
-    DEF,
+    Def,
 }
 
 /// A enum of all operators
@@ -135,20 +135,20 @@ pub enum Operator {
 ///     for x in l do x = x + 1 end
 /// end
 /// plus_one(a)
-/// "#;
-/// let lexer = Lexer::new(file, None);
+/// "#.to_string();
+/// let lexer = Lexer::new(file, "test.dm".to_string());
 ///
 /// assert!(!lexer.has_error());
 /// ```
-pub struct Lexer<'a> {
-    file_content: &'a str,
-    file_name: Option<&'a str>,
+pub struct Lexer {
+    file_content: String,
+    file_name: String,
     error_reporter: ErrorReporter,
     tokens: Vec<(Token, FileLocation)>,
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(file_content: &'a str, file_name: Option<&'a str>) -> Self {
+impl Lexer {
+    pub fn new(file_content: String, file_name: String) -> Self {
         let mut lexer = Self {
             file_content,
             file_name,
@@ -165,7 +165,7 @@ impl<'a> Lexer<'a> {
 
     pub fn render_error(&self) -> String {
         self.error_reporter
-            .render(self.file_content, self.file_name)
+            .render(&self.file_content, &self.file_name)
             .expect(
                 "Render error message failed. If you see this message, please make a bug report.",
             )
@@ -399,25 +399,25 @@ impl<'a> Lexer<'a> {
             "and" => Ok((Token::Op(Operator::And), location)),
             "or" => Ok((Token::Op(Operator::Or), location)),
             "not" => Ok((Token::Op(Operator::Not), location)),
-            "true" => Ok((Token::Key(Keyword::TRUE), location)),
-            "false" => Ok((Token::Key(Keyword::FALSE), location)),
-            "do" => Ok((Token::Key(Keyword::DO), location)),
-            "end" => Ok((Token::Key(Keyword::END), location)),
-            "if" => Ok((Token::Key(Keyword::IF), location)),
-            "then" => Ok((Token::Key(Keyword::THEN), location)),
-            "else" => Ok((Token::Key(Keyword::ELSE), location)),
-            "elsif" => Ok((Token::Key(Keyword::ELSIF), location)),
-            "case" => Ok((Token::Key(Keyword::CASE), location)),
-            "in" => Ok((Token::Key(Keyword::IN), location)),
-            "for" => Ok((Token::Key(Keyword::FOR), location)),
-            "nil" => Ok((Token::Key(Keyword::NIL), location)),
-            "return" => Ok((Token::Key(Keyword::RETURN), location)),
-            "assert" => Ok((Token::Key(Keyword::ASSERT), location)),
-            "continue" => Ok((Token::Key(Keyword::CONTINUE), location)),
-            "break" => Ok((Token::Key(Keyword::BREAK), location)),
-            "loop" => Ok((Token::Key(Keyword::LOOP), location)),
-            "class" => Ok((Token::Key(Keyword::CLASS), location)),
-            "def" => Ok((Token::Key(Keyword::DEF), location)),
+            "true" => Ok((Token::Key(Keyword::True), location)),
+            "false" => Ok((Token::Key(Keyword::False), location)),
+            "do" => Ok((Token::Key(Keyword::Do), location)),
+            "end" => Ok((Token::Key(Keyword::End), location)),
+            "if" => Ok((Token::Key(Keyword::If), location)),
+            "then" => Ok((Token::Key(Keyword::Then), location)),
+            "else" => Ok((Token::Key(Keyword::Else), location)),
+            "elsif" => Ok((Token::Key(Keyword::Elsif), location)),
+            "case" => Ok((Token::Key(Keyword::Case), location)),
+            "in" => Ok((Token::Key(Keyword::In), location)),
+            "for" => Ok((Token::Key(Keyword::For), location)),
+            "nil" => Ok((Token::Key(Keyword::Nil), location)),
+            "return" => Ok((Token::Key(Keyword::Return), location)),
+            "assert" => Ok((Token::Key(Keyword::Assert), location)),
+            "continue" => Ok((Token::Key(Keyword::Continue), location)),
+            "break" => Ok((Token::Key(Keyword::Break), location)),
+            "loop" => Ok((Token::Key(Keyword::Loop), location)),
+            "class" => Ok((Token::Key(Keyword::Class), location)),
+            "def" => Ok((Token::Key(Keyword::Def), location)),
             _ => Ok((Token::Id(name), location)),
         }
     }
@@ -578,7 +578,7 @@ impl<'a> Lexer<'a> {
 
     /// Consume all tokens
     fn consume(&mut self) {
-        let mut iter = FileIterator::new(self.file_content);
+        let mut iter = FileIterator::new(&self.file_content);
         // Ignore shebang (#!...) at the beginning of the file
         if let (Some('#'), Some('!')) = iter.peek2() {
             loop {
@@ -653,16 +653,14 @@ mod tests {
                     "Expected parse success! source = {s}, result = {:?}",
                     result
                 );
+            } else if let Ok((Token::Integer(j), _)) = result {
+                assert_eq!(i, j);
             } else {
-                if let Ok((Token::Integer(j), _)) = result {
-                    assert_eq!(i, j);
-                } else {
-                    assert!(
-                        false,
-                        "Expected parse failure! source = {s} , result = {:?}",
-                        result
-                    );
-                }
+                assert!(
+                    false,
+                    "Expected parse failure! source = {s} , result = {:?}",
+                    result
+                );
             }
         }
 
@@ -708,16 +706,14 @@ mod tests {
                     "Expected parse success! source = {s}, result = {:?}",
                     result
                 );
+            } else if let Ok((Token::Float(j), _)) = result {
+                assert_eq!(i, j);
             } else {
-                if let Ok((Token::Float(j), _)) = result {
-                    assert_eq!(i, j);
-                } else {
-                    assert!(
-                        false,
-                        "Expected parse failure! source = {s} , result = {:?}",
-                        result
-                    );
-                }
+                assert!(
+                    false,
+                    "Expected parse failure! source = {s} , result = {:?}",
+                    result
+                );
             }
         }
 
@@ -725,7 +721,7 @@ mod tests {
         test_helper("1_23e_14", 123e14, false);
         test_helper("123E-14", 123e-14, false);
         test_helper("123.", 123., false);
-        test_helper("0.01__2", 0.01__2, false);
+        test_helper("0.01__2", 0.012, false);
         test_helper("123e1y", 0., true);
     }
 
@@ -740,16 +736,14 @@ mod tests {
                     "Expected parse success! source = {s}, result = {:?}",
                     result
                 );
+            } else if let Ok((Token::Str(j), _)) = result {
+                assert_eq!(i, j);
             } else {
-                if let Ok((Token::Str(j), _)) = result {
-                    assert_eq!(i, j);
-                } else {
-                    assert!(
-                        false,
-                        "Expected parse failure! source = {s} , result = {:?}",
-                        result
-                    );
-                }
+                assert!(
+                    false,
+                    "Expected parse failure! source = {s} , result = {:?}",
+                    result
+                );
             }
         }
 
@@ -784,7 +778,7 @@ mod tests {
             set = {'s', 'ma\u00E9', 65e52, 0b00110} dict = {:}.insert(('key', 98)) 
             🐶🐱 <> "Doa\x09 and cat'?'" 
             "#;
-        let lexer = Lexer::new(file, Some("unit_test.dm"));
+        let lexer = Lexer::new(file.to_string(), "unit_test.dm".to_string());
         for token in lexer.tokens.iter() {
             println!("{:?}", token.0);
         }

@@ -6,7 +6,6 @@ pub enum ErrorType {
     InvalidStr(String),
     InvalidOp(String),
     UnexpectedToken((String, String)),
-    IrError(String),
     EofError(),
 }
 
@@ -31,7 +30,7 @@ impl ErrorReporter {
         location: &FileLocation,
         error: &ErrorType,
         file_content: &str,
-        file_name: Option<&str>,
+        file_name: &str,
     ) -> Result<(), ()> {
         // Try to get the source code
         let mut code: Vec<String> = vec![];
@@ -83,28 +82,21 @@ impl ErrorReporter {
             ErrorType::UnexpectedToken((s, msg)) => {
                 format!("Unexpected Token: `{s}` is not allowed here. {msg}")
             }
-            ErrorType::IrError(s) => {
-                format!("Ir Builder Error: {s}")
-            }
-            ErrorType::EofError() => {
-                format!("Unexpected end of file")
-            }
+            ErrorType::EofError() => "Unexpected end of file".to_string(),
         }
         .as_str();
         error_string.push('\n');
         let line_number_len = location.end.line.to_string().len();
 
-        if let Some(s) = file_name {
-            *error_string += format!(
-                "{}--> {s}: {}:{} - {}:{}\n",
-                " ".repeat(line_number_len).as_str(),
-                location.start.line,
-                location.start.offset,
-                location.end.line,
-                location.end.offset
-            )
-            .as_str();
-        }
+        *error_string += format!(
+            "{}--> {file_name}: {}:{} - {}:{}\n",
+            " ".repeat(line_number_len).as_str(),
+            location.start.line,
+            location.start.offset,
+            location.end.line,
+            location.end.offset
+        )
+        .as_str();
         // Render error with source code
         *error_string += format!("{} |\n", " ".repeat(line_number_len)).as_str();
         for line in location.start.line..=location.end.line {
@@ -149,7 +141,7 @@ impl ErrorReporter {
                     let push_char = match i {
                         i if i < offset => ' ',
                         i if i == offset => '^',
-                        _ => '~'
+                        _ => '~',
                     };
                     error_string.push(push_char);
                     if c == '\t' {
@@ -262,7 +254,7 @@ impl ErrorReporter {
     /// 3 | efg
     ///   | ~~^
     /// ```
-    pub fn render(&self, file_content: &str, file_name: Option<&str>) -> Result<String, ()> {
+    pub fn render(&self, file_content: &str, file_name: &str) -> Result<String, ()> {
         let mut result = String::new();
         for (source, location, error) in self.errors.iter() {
             ErrorReporter::render_one(
@@ -313,7 +305,7 @@ mod tests {
             &location,
             &error,
             file_content,
-            Some(file_name),
+            file_name,
         )
         .expect("Render should success.");
         println!("{error_string}");
@@ -326,7 +318,7 @@ mod tests {
             &location,
             &error,
             file_content,
-            Some(file_name),
+            file_name,
         )
         .expect("Render should success.");
         println!("{error_string}");
@@ -339,7 +331,7 @@ mod tests {
             &location,
             &error,
             file_content,
-            Some(file_name),
+            file_name,
         )
         .expect("Render should success.");
         println!("{error_string}");
@@ -352,7 +344,7 @@ mod tests {
             &location,
             &error,
             file_content,
-            Some(file_name),
+            file_name,
         )
         .expect("Render should success.");
         println!("{error_string}");
@@ -365,7 +357,7 @@ mod tests {
             &location,
             &error,
             file_content,
-            Some(file_name),
+            file_name,
         )
         .expect("Render should success");
         println!("{error_string}");
@@ -378,7 +370,7 @@ mod tests {
             &location,
             &error,
             file_content,
-            Some(file_name),
+            file_name,
         )
         .expect_err("Render should fail.");
         assert_eq!(error_string, "");

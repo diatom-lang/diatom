@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_cbor::to_vec;
 
 pub const VM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -30,13 +29,6 @@ impl AsmFile {
             md5,
             vm_version: VM_VERSION,
             instructions,
-        }
-    }
-
-    pub fn to_vec(&self) -> Vec<u8> {
-        match to_vec(&self) {
-            Ok(vec) => vec,
-            Err(err) => panic!("Diatom: CBor serialize failed: {:?}\nThis is an internal bug. Please report it to diatom maintainers.", err)
         }
     }
 

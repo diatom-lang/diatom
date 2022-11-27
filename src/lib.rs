@@ -24,4 +24,4 @@ extern crate ahash;
 #[cfg(feature = "vm")]
 extern crate serde;
 #[cfg(feature = "vm")]
-extern crate serde_cbor;
+extern crate ciborium;

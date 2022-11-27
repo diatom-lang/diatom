@@ -16,7 +16,7 @@ pub enum Type {
 
 #[derive(Debug)]
 pub enum Stat_ {
-    Assign,
+    Expr(Box<Expr>),
 }
 
 #[derive(Debug)]
@@ -43,6 +43,7 @@ pub enum OpInfix {
     DivFloor,
     Mod,
     Exp,
+    Comma
 } 
 
 #[derive(Clone, Copy, Debug)]
@@ -55,13 +56,15 @@ pub enum OpPrefix {
 pub enum OpPostfix{
     Index,
     Call,
-    Pipeline
 }
 
 #[derive(Debug)]
 pub enum Expr_ {
+    If(Vec<Box<Expr>>),
+    Block(Vec<Box<Expr>>),
     Prefix(OpPrefix, Box<Expr>),
-    Postfix(OpPostfix, Box<Expr>),
+    /// `call func arg` or `index array num`
+    Postfix(OpPostfix, Box<Expr>, Box<Expr>),
     Infix(OpInfix, Box<Expr>, Box<Expr>),
     Id(String),
     Const(Const),
@@ -80,8 +83,12 @@ pub enum Const {
     Float(f64),
     Str(String),
     Bool(bool),
+    List(Box<Expr>),
 }
 
+#[derive(Default)]
 pub struct Ast{
-    
+    pub statements: Vec<Stat>,
 }
+
+
