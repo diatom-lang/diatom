@@ -12,4 +12,16 @@
 //! Work in progress...
 //!
 //!
-pub mod parser;
+mod backend;
+mod frontend;
+pub use frontend::{Lexer, Parser};
+
+#[cfg(feature = "vm")]
+pub use backend::vm::runtime::VM;
+
+#[cfg(feature = "vm")]
+extern crate ahash;
+#[cfg(feature = "vm")]
+extern crate serde;
+#[cfg(feature = "vm")]
+extern crate ciborium;
