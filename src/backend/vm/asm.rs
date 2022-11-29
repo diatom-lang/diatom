@@ -48,7 +48,7 @@ pub enum OpCode {
     ///
     /// A push must be used before call. e.g. `call 10` (10 at rd)
     call,
-    /// Load a const 
+    /// Load a const
     ///
     /// Load a const from const pool(indexed by rs1) to rd. e.g. `load 1, 5`
     load,

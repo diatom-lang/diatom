@@ -309,11 +309,7 @@ mod tests {
             Inst::new(mul, 0, 1, 5),
             Inst::new(div, 0, 1, 6),
         ];
-        let consts = vec![
-            Data::Int(12), 
-            Data::Int(23), 
-            Data::Float(1.234)
-        ];
+        let consts = vec![Data::Int(12), Data::Int(23), Data::Float(1.234)];
         vm.push_instructions(instructions.iter());
         vm.push_consts(consts.iter());
         vm.exec().expect("Execution failed");
@@ -333,7 +329,7 @@ mod tests {
             panic!("Wrong type");
         }
         if let Data::Float(data) = vm.load_register(6).unwrap() {
-            assert!(f64::abs(data - 12.0/23.0) < 1e-10);
+            assert!(f64::abs(data - 12.0 / 23.0) < 1e-10);
         } else {
             panic!("Wrong type");
         }
