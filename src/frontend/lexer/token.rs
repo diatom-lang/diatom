@@ -50,6 +50,8 @@ pub enum Keyword {
     Class,
     /// def
     Def,
+    /// begin
+    Begin,
 }
 
 /// A enum of all operators
@@ -154,6 +156,7 @@ impl Display for Keyword {
             Keyword::Loop => "loop",
             Keyword::Class => "class",
             Keyword::Def => "def",
+            Keyword::Begin => "begin",
         };
         write!(f, "{}", name)
     }

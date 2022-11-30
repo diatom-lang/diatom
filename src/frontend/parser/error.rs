@@ -14,9 +14,9 @@ pub enum ErrorCode {
     /// E1001 Unexpected token
     ///
     /// Parameters:
-    /// - 1. Token met (None if eof is met)
-    /// - 2. Token expected here (None if not expected a specific one)
-    /// - 3. Previous token to match the expected token (None if there is not any)
+    /// - 1 Token met (None if eof is met)
+    /// - 2 Token expected here (None if not expected a specific one)
+    /// - 3 Previous token to match the expected token (None if there is not any)
     UnexpectedToken(Option<Token>, Option<Token>, Option<(Token, Loc)>),
     /// E1002 Unexpected end of file
     UnexpectedEof,
@@ -57,10 +57,10 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
             .with_labels(vec![Label::primary(file_id, loc)]),
         ErrorCode::MissingExpr(loc_pre) => Diagnostic::error()
             .with_code("E1003")
-            .with_message("Missing expression in parentheses")
+            .with_message("Missing expression here")
             .with_labels(vec![
                 Label::primary(file_id, loc),
-                Label::secondary(file_id, loc_pre).with_message("Parentheses start here"),
+                Label::secondary(file_id, loc_pre).with_message("Previous token here"),
             ]),
     }
 }

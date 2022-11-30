@@ -75,6 +75,9 @@ pub enum OpPostfix {
 #[derive(Debug)]
 pub enum Expr_ {
     Block(Vec<Box<Expr>>),
+    /// An `if..then..elsif..then..else..end`
+    /// Expression is in order
+    If(Vec<Box<Expr>>),
     Prefix(OpPrefix, Box<Expr>),
     /// `call func arg` or `index array num`
     /// If func call does not have any arguments, the third parameter is None.
@@ -102,6 +105,9 @@ impl Debug for Expr {
             Expr_::Id(id) => write!(f, "{:?}", id),
             Expr_::Const(c) => write!(f, "{:?}", c),
             Expr_::Error => write!(f, "Error"),
+            Expr_::If(v) => {
+                f.debug_tuple("").field(&"if").field(&v).finish()
+            },
         }
     }
 }

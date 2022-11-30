@@ -37,6 +37,9 @@ impl Console {
                     if self.parser.diagnostic_count() > 0 {
                         self.parser.print_diagnoses();
                         self.parser.clear_diagnoses();
+                        let _ = self.parser.get_incremental();
+                    } else {
+                        println!("{:?}", self.parser.get_incremental().collect::<Vec<_>>());
                     }
                     line.clear();
                 }

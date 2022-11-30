@@ -306,6 +306,7 @@ impl Lexer {
             "loop" => Ok((Token::Key(Keyword::Loop), loc)),
             "class" => Ok((Token::Key(Keyword::Class), loc)),
             "def" => Ok((Token::Key(Keyword::Def), loc)),
+            "begin" => Ok((Token::Key(Keyword::Begin), loc)),
             _ => Ok((Token::Id(name), loc)),
         }
     }
@@ -657,7 +658,7 @@ mod tests {
 
     #[test]
     fn test_invalid_op() {
-        let file ="<< >>";
+        let file = "<< >>";
         let file = SharedFile::from_str(file);
         let lexer = Lexer::new(OsString::from_str("unit_test.dm").unwrap(), file);
         for token in lexer.tokens.iter() {
