@@ -39,22 +39,22 @@ impl Highlighter for DiatomHighlighter {
                 let end = index + m.end();
                 let id = &line[index..end];
                 if is_key(id) {
-                    styled_text.push((KEY_STYLE.clone(), id.to_string()));
+                    styled_text.push((*KEY_STYLE, id.to_string()));
                 } else {
-                    styled_text.push((DEFAULT_STYLE.clone(), id.to_string()));
+                    styled_text.push((*DEFAULT_STYLE, id.to_string()));
                 }
                 index = end;
             } else if let Some(m) = RE_STR.find(&line[index..]) {
                 let end = index + m.end();
-                styled_text.push((STR_STYLE.clone(), line[index..end].to_string()));
+                styled_text.push((*STR_STYLE, line[index..end].to_string()));
                 index = end;
             } else if let Some(m) = RE_NUM.find(&line[index..]) {
                 let end = index + m.end();
-                styled_text.push((NUM_STYLE.clone(), line[index..end].to_string()));
+                styled_text.push((*NUM_STYLE, line[index..end].to_string()));
                 index = end;
             } else if let Some(m) = RE_ANY.find(&line[index..]) {
                 let end = index + m.end();
-                styled_text.push((DEFAULT_STYLE.clone(), line[index..end].to_string()));
+                styled_text.push((*DEFAULT_STYLE, line[index..end].to_string()));
                 index = end;
             } else {
                 unreachable!()

@@ -93,7 +93,7 @@ impl<'a> TokenIterator<'a> {
         let mut iter = self.iter.clone();
         match iter.next() {
             Some((_, loc)) => loc.clone(),
-            None => self.loc().clone(),
+            None => self.loc(),
         }
     }
 }

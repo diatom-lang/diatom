@@ -27,7 +27,7 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
             .with_labels(vec![Label::primary(file_id, loc)]),
         ErrorCode::IntegerOverflow => Diagnostic::error()
             .with_code("E0002")
-            .with_message(format!("Integer literal overflow 64-bits integer"))
+            .with_message("Integer literal overflow 64-bits integer".to_string())
             .with_labels(vec![Label::primary(file_id, loc)]),
         ErrorCode::ParseFloatError(s) => Diagnostic::error()
             .with_code("E0003")
