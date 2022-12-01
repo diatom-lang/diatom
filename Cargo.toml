@@ -1,12 +1,12 @@
 [package]
 name = "diatom"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-authors = [ "Terence Ng" ]
+authors = [ "Terence Ng", "Aoyang Yu" ]
 description = "The diatom programming language"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/TerenceNg03/diatom.git"
+repository = "https://github.com/diatom-lang/diatom.git"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
