@@ -341,6 +341,16 @@ mod tests {
         Inst::new(t.0, t.1, t.2, t.3)
     }
 
+    const EPSILON : f64 = 1e-10;
+
+    fn same_data(a: Data, b: Data) -> bool {
+        match (a, b) {
+            (Int(x), Int(y)) => x == y,
+            (Float(x), Float(y)) => f64::abs(x - y) < EPSILON,
+            (_, _) => false
+        }
+    }
+
     #[test]
     fn test_push_call() {
         let mut vm = VM::new();
@@ -384,42 +394,14 @@ mod tests {
         vm.push_instructions(instructions.iter());
         vm.push_consts(consts.iter());
         vm.exec().expect("Execution failed");
-        if let Data::Int(data) = vm.load_register(3).unwrap() {
-            assert_eq!(data, 12 + 23);
-        } else {
-            panic!("Wrong type");
-        }
-        if let Data::Int(data) = vm.load_register(4).unwrap() {
-            assert_eq!(data, 12 - 23);
-        } else {
-            panic!("Wrong type");
-        }
-        if let Data::Int(data) = vm.load_register(5).unwrap() {
-            assert_eq!(data, 12 * 23);
-        } else {
-            panic!("Wrong type");
-        }
-        if let Data::Float(data) = vm.load_register(6).unwrap() {
-            assert!(f64::abs(data - 12.0/23.0) < 1e-10);
-        } else {
-            panic!("Wrong type");
-        }
-        if let Data::Int(data) = vm.load_register(7).unwrap() {
-            assert_eq!(data, 23 / 12);
-        } else {
-            panic!("Wrong type");
-        }
-        if let Data::Int(data) = vm.load_register(8).unwrap() {
-            assert_eq!(data, 11);
-        } else {
-            panic!("Wrong type");
-        }
-        if let Data::Float(data) = vm.load_register(9).unwrap() {
-            // 1.234 ^ 12 = 12.467572902176588
-            assert!(f64::abs(data - 12.467572902176588) < 1e-10);
-        } else {
-            panic!("Wrong type");
-        }
+
+        assert!(same_data(vm.load_register(3).unwrap(), Int(12 + 23)));
+        assert!(same_data(vm.load_register(4).unwrap(), Int(12 - 23)));
+        assert!(same_data(vm.load_register(5).unwrap(), Int(12 * 23)));
+        assert!(same_data(vm.load_register(6).unwrap(), Float(12.0 / 23.0)));
+        assert!(same_data(vm.load_register(7).unwrap(), Int(23 / 12)));
+        assert!(same_data(vm.load_register(8).unwrap(), Int(11)));
+        assert!(same_data(vm.load_register(9).unwrap(), Float(12.467572902176588)));
     }
 
     #[test]
