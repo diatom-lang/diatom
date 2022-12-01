@@ -98,6 +98,7 @@ impl VM {
         }
     }
 
+    /// Contract: this function must returns a Err(...)
     fn on_error(&mut self, error: String) -> Result<(), String> {
         if self.call_stack.len() > 1 {
             // pop all frames except main (frame 0)
@@ -109,7 +110,131 @@ impl VM {
         Err(error)
     }
 
+    fn exec_arithmetic_int_float(&mut self, name: &str, rs1: u32, rs2: u32, rd:u32,
+        int_calc: fn(i64, i64) -> Option<i64>, float_calc: fn(f64, f64) -> f64) -> Result<(), String>
+    {
+        use Data::*;
+        let rs1_data = self.load_register(rs1)?;
+        let rs2_data = self.load_register(rs2)?;
+        let rd_data = match (rs1_data, rs2_data) {
+            (Int(i1), Int(i2)) => Int(int_calc(i1, i2).ok_or_else(|| {
+                self.on_error(format!("{name} overflow.")).unwrap_err()
+            })?),
+            (Float(i1), Int(i2)) => Float(float_calc(i1, i2 as f64)),
+            (Int(i1), Float(i2)) => Float(float_calc(i1 as f64, i2)),
+            (Float(i1), Float(i2)) => Float(float_calc(i1, i2)),
+            (type1, type2) => {
+                return Err(self
+                    .on_error(format!(
+                        "{name} can not be performed between {} and {}",
+                        get_type_name(&type1),
+                        get_type_name(&type2)
+                    ))
+                    .unwrap_err())
+            }
+        };
+        self.save_register(rd, rd_data)?;
+        Ok(())
+    }
+
+    fn exec_arithmetic_float(&mut self, name: &str, rs1: u32, rs2: u32, rd: u32, 
+        float_calc: fn(f64, f64) -> f64, gen_data: fn(f64) -> Data) -> Result<(), String>
+    {
+        use Data::*;
+        let rs1_data = self.load_register(rs1)?;
+        let rs2_data = self.load_register(rs2)?;
+        let calc_res = match (rs1_data, rs2_data) {
+            (Int(i1), Int(i2)) => float_calc(i1 as f64, i2 as f64),
+            (Float(i1), Int(i2)) => float_calc(i1, i2 as f64),
+            (Int(i1), Float(i2)) => float_calc(i1 as f64, i2),
+            (Float(i1), Float(i2)) => float_calc(i1, i2),
+            (type1, type2) => {
+                return Err(self
+                    .on_error(format!(
+                        "{name} can not be performed between {} and {}",
+                        get_type_name(&type1),
+                        get_type_name(&type2)
+                    ))
+                    .unwrap_err());
+            }
+        };
+        let rd_data = gen_data(calc_res); 
+        self.save_register(rd, rd_data)?;
+        Ok(())
+    }
+
+    fn exec_arithmetic_two_bool(&mut self, name: &str, rs1: u32, rs2: u32, rd: u32, 
+        bool_calc: fn(bool, bool) -> bool) -> Result<(), String>
+    {
+        use Data::*;
+        let rs1_data = self.load_register(rs1)?;
+        let rs2_data = self.load_register(rs2)?;
+        let calc_res = match (rs1_data, rs2_data) {
+            (Bool(b1), Bool(b2)) => bool_calc(b1, b2),
+            (type1, type2) => {
+                return Err(self
+                    .on_error(format!(
+                        "{name} can not be performed between {} and {}",
+                        get_type_name(&type1),
+                        get_type_name(&type2)
+                    ))
+                    .unwrap_err());
+            }
+        };
+        let rd_data = Bool(calc_res);
+        self.save_register(rd, rd_data)?;
+        Ok(())
+    }
+
+    fn exec_arithmetic_one_bool(&mut self, name: &str, rs1: u32, rd: u32, 
+        bool_calc: fn(bool) -> bool) -> Result<(), String>
+    {
+        use Data::*;
+        let rs1_data = self.load_register(rs1)?;
+        let calc_res = match rs1_data {
+            Bool(b) => bool_calc(b),
+            typ => {
+                return Err(self
+                    .on_error(format!(
+                        "{name} can not be performed on {}",
+                        get_type_name(&typ)
+                    ))
+                    .unwrap_err());
+            }
+        };
+        let rd_data = Bool(calc_res);
+        self.save_register(rd, rd_data)?;
+        Ok(())
+    }
+
+    fn exec_arithmetic_compare(&mut self, name: &str, rs1: u32, rs2: u32, rd: u32,
+        int_cmp: fn(&i64, &i64) -> bool, float_cmp: fn(&f64, &f64) -> bool) -> Result<(), String>
+    {
+        use Data::*;
+        let rs1_data = self.load_register(rs1)?;
+        let rs2_data = self.load_register(rs2)?;
+        let cmp_res = match (rs1_data, rs2_data) {
+            (Int(i1), Int(i2)) => int_cmp(&i1, &i2),
+            (Float(i1), Int(i2)) => float_cmp(&i1, &(i2 as f64)),
+            (Int(i1), Float(i2)) => float_cmp(&(i1 as f64), &i2),
+            (Float(i1), Float(i2)) => float_cmp(&i1, &i2),
+            (type1, type2) => {
+                return Err(self
+                    .on_error(format!(
+                        "{name} can not be performed between {} and {}",
+                        get_type_name(&type1),
+                        get_type_name(&type2)
+                    ))
+                    .unwrap_err())
+            }
+        };
+        let rd_data = Bool(cmp_res);
+        self.save_register(rd, rd_data)?;
+        Ok(())
+    }
+
     pub fn exec(&mut self) -> Result<(), String> {
+        use std::ops::{Add, Sub, Mul, Div};
         use Data::*;
         use OpCode::*;
         while (self.ip as usize) < self.instructions.len() {
@@ -131,7 +256,7 @@ impl VM {
                     Some(frame) => {
                         self.call_stack
                             .push((self.ip + 1, self.data_stack.len() as u32 - frame));
-                        if rd as usize > self.instructions.len() {
+                        if rd as usize >= self.instructions.len() {
                             self.on_error(format!(
                                 "Call address {rd} while maximum instruction offset is {}",
                                 self.instructions.len()
@@ -147,124 +272,58 @@ impl VM {
                     self.save_register(rd, data)?;
                 }
                 add => {
-                    let rs1_data = self.load_register(rs1)?;
-                    let rs2_data = self.load_register(rs2)?;
-                    let rd_data = match (rs1_data, rs2_data) {
-                        (Int(i1), Int(i2)) => Int(i1.checked_add(i2).ok_or_else(|| {
-                            self.on_error(format!("Addition overflow.")).unwrap_err()
-                        })?),
-                        (Float(i1), Int(i2)) => Float(i1 + i2 as f64),
-                        (Int(i1), Float(i2)) => Float(i1 as f64 + i2),
-                        (Float(i1), Float(i2)) => Float(i1 + i2),
-                        (type1, type2) => {
-                            return Err(self
-                                .on_error(format!(
-                                    "Addition can not be performed between {} and {}",
-                                    get_type_name(&type1),
-                                    get_type_name(&type2)
-                                ))
-                                .unwrap_err());
-                        }
-                    };
-                    self.save_register(rd, rd_data)?;
+                    self.exec_arithmetic_int_float("Addition", rs1, rs2, rd, i64::checked_add, f64::add)?;
                 }
                 sub => {
-                    let rs1_data = self.load_register(rs1)?;
-                    let rs2_data = self.load_register(rs2)?;
-                    let rd_data = match (rs1_data, rs2_data) {
-                        (Int(i1), Int(i2)) => Int(i1.checked_sub(i2).ok_or_else(|| {
-                            self.on_error(format!("Subtraction overflow.")).unwrap_err()
-                        })?),
-                        (Float(i1), Int(i2)) => Float(i1 - i2 as f64),
-                        (Int(i1), Float(i2)) => Float(i1 as f64 - i2),
-                        (Float(i1), Float(i2)) => Float(i1 - i2),
-                        (type1, type2) => {
-                            return Err(self
-                                .on_error(format!(
-                                    "Subtraction can not be performed between {} and {}",
-                                    get_type_name(&type1),
-                                    get_type_name(&type2)
-                                ))
-                                .unwrap_err());
-                        }
-                    };
-                    self.save_register(rd, rd_data)?;
+                    self.exec_arithmetic_int_float("Subtraction", rs1, rs2, rd, i64::checked_sub, f64::sub)?;
                 }
                 mul => {
-                    let rs1_data = self.load_register(rs1)?;
-                    let rs2_data = self.load_register(rs2)?;
-                    let rd_data = match (rs1_data, rs2_data) {
-                        (Int(i1), Int(i2)) => Int(i1.checked_mul(i2).ok_or_else(|| {
-                            self.on_error(format!("Multiplication overflow."))
-                                .unwrap_err()
-                        })?),
-                        (Float(i1), Int(i2)) => Float(i1 * i2 as f64),
-                        (Int(i1), Float(i2)) => Float(i1 as f64 * i2),
-                        (Float(i1), Float(i2)) => Float(i1 * i2),
-                        (type1, type2) => {
-                            return Err(self
-                                .on_error(format!(
-                                    "Multiplication can not be performed between {} and {}",
-                                    get_type_name(&type1),
-                                    get_type_name(&type2)
-                                ))
-                                .unwrap_err());
-                        }
-                    };
-                    self.save_register(rd, rd_data)?;
+                    self.exec_arithmetic_int_float("Multiplication", rs1, rs2, rd, i64::checked_mul, f64::mul)?;
                 }
                 div => {
-                    let rs1_data = self.load_register(rs1)?;
-                    let rs2_data = self.load_register(rs2)?;
-                    let rd_data = match (rs1_data, rs2_data) {
-                        (Int(i1), Int(i2)) => Float(i1 as f64 / i2 as f64),
-                        (Float(i1), Int(i2)) => Float(i1 / i2 as f64),
-                        (Int(i1), Float(i2)) => Float(i1 as f64 / i2),
-                        (Float(i1), Float(i2)) => Float(i1 / i2),
-                        (type1, type2) => {
-                            return Err(self
-                                .on_error(format!(
-                                    "Division can not be performed between {} and {}",
-                                    get_type_name(&type1),
-                                    get_type_name(&type2)
-                                ))
-                                .unwrap_err());
-                        }
-                    };
-                    self.save_register(rd, rd_data)?;
+                    self.exec_arithmetic_float("Division", rs1, rs2, rd, f64::div, Float)?;
                 }
                 idiv => {
-                    let rs1_data = self.load_register(rs1)?;
-                    let rs2_data = self.load_register(rs2)?;
-                    let rd_data = match (rs1_data, rs2_data) {
-                        (Int(i1), Int(i2)) => i1 as f64 / i2 as f64,
-                        (Float(i1), Int(i2)) => i1 / i2 as f64,
-                        (Int(i1), Float(i2)) => i1 as f64 / i2,
-                        (Float(i1), Float(i2)) => i1 / i2,
-                        (type1, type2) => {
-                            return Err(self
-                                .on_error(format!(
-                                    "Floor division can not be performed between {} and {}",
-                                    get_type_name(&type1),
-                                    get_type_name(&type2)
-                                ))
-                                .unwrap_err());
-                        }
-                    };
-                    let rd_data = Data::Int(rd_data as i64);
-                    self.save_register(rd, rd_data)?;
+                    let gen_data = |x: f64| Int(x.floor() as i64);
+                    self.exec_arithmetic_float("Floor division", rs1, rs2, rd, f64::div, gen_data)?;
                 }
-                modu => {}
-                exp => {}
-                or => {}
-                and => {}
-                not => {}
-                ge => {}
-                gt => {}
-                ne => {}
-                eq => {}
-                le => {}
-                lt => {}
+                modu => {
+                    use std::ops::Rem;
+                    self.exec_arithmetic_int_float("Modulus", rs1, rs2, rd, i64::checked_rem, f64::rem)?;
+                }
+                exp => {
+                    self.exec_arithmetic_float("Exponential", rs1, rs2, rd, f64::powf, Float)?;
+                }
+                or => {
+                    use std::ops::BitOr;
+                    self.exec_arithmetic_two_bool("Logical or", rs1, rs2, rd, bool::bitor)?;
+                }
+                and => {
+                    use std::ops::BitAnd;
+                    self.exec_arithmetic_two_bool("Logical and", rs1, rs2, rd, bool::bitand)?;
+                }
+                not => {
+                    use std::ops::Not;
+                    self.exec_arithmetic_one_bool("Logical Not", rs1, rd, bool::not)?;
+                }
+                ge => {
+                    self.exec_arithmetic_compare("`>=`", rs1, rs2, rd, i64::ge, f64::ge)?;
+                }
+                gt => {
+                    self.exec_arithmetic_compare("`>`", rs1, rs2, rd, i64::gt, f64::gt)?;
+                }
+                ne => {
+                    self.exec_arithmetic_compare("`!=`", rs1, rs2, rd, i64::ne, f64::ne)?;
+                }
+                eq => {
+                    self.exec_arithmetic_compare("`==`", rs1, rs2, rd, i64::eq, f64::eq)?;
+                }
+                le => {
+                    self.exec_arithmetic_compare("`<=`", rs1, rs2, rd, i64::le, f64::le)?;
+                }
+                lt => {
+                    self.exec_arithmetic_compare("`<`", rs1, rs2, rd, i64::lt, f64::lt)?;
+                }
             }
             self.ip += 1;
         }
@@ -275,18 +334,33 @@ impl VM {
 #[cfg(test)]
 mod tests {
     use super::OpCode::*;
+    use super::Data::*;
     use super::*;
+
+    fn tuple_to_inst(t : (OpCode, u32, u32, u32)) -> Inst {
+        Inst::new(t.0, t.1, t.2, t.3)
+    }
+
+    const EPSILON : f64 = 1e-10;
+
+    fn same_data(a: Data, b: Data) -> bool {
+        match (a, b) {
+            (Int(x), Int(y)) => x == y,
+            (Float(x), Float(y)) => f64::abs(x - y) < EPSILON,
+            (_, _) => false
+        }
+    }
 
     #[test]
     fn test_push_call() {
         let mut vm = VM::new();
-        let instructions = vec![
-            Inst::new(push, 0, 0, 5),
-            Inst::new(call, 0, 0, 2),
-            Inst::new(push, 0, 0, 10),
-            Inst::new(call, 0, 0, 4),
-            Inst::new(push, 0, 0, 1),
-        ];
+        let instructions = [
+            (push, 0, 0, 5),
+            (call, 0, 0, 2),
+            (push, 0, 0, 10),
+            (call, 0, 0, 4),
+            (push, 0, 0, 1),
+        ].map(tuple_to_inst);
         vm.push_instructions(instructions.iter());
         vm.exec().expect("Execution failed");
         assert_eq!(vm.call_stack, vec![(2, 0), (4, 5)]);
@@ -296,42 +370,129 @@ mod tests {
     }
 
     #[test]
-    fn test_add() {
+    fn test_arithmetic() {
         let mut vm = VM::new();
-        let instructions = vec![
-            Inst::new(push, 0, 0, 7),
-            Inst::new(call, 0, 0, 2),
-            Inst::new(load, 0, 0, 0),
-            Inst::new(load, 1, 0, 1),
-            Inst::new(load, 2, 0, 2),
-            Inst::new(add, 0, 1, 3),
-            Inst::new(sub, 0, 1, 4),
-            Inst::new(mul, 0, 1, 5),
-            Inst::new(div, 0, 1, 6),
+        let instructions = [
+            (push, 0, 0, 10),
+            (call, 0, 0, 2),
+            (load, 0, 0, 0),
+            (load, 1, 0, 1),
+            (load, 2, 0, 2),
+            (add, 0, 1, 3),
+            (sub, 0, 1, 4),
+            (mul, 0, 1, 5),
+            (div, 0, 1, 6),
+            (idiv, 1, 0, 7),
+            (modu, 1, 0, 8),
+            (exp, 2, 0, 9)
+        ].map(tuple_to_inst);
+        let consts = vec![
+            Int(12), 
+            Int(23), 
+            Float(1.234)
         ];
-        let consts = vec![Data::Int(12), Data::Int(23), Data::Float(1.234)];
         vm.push_instructions(instructions.iter());
         vm.push_consts(consts.iter());
         vm.exec().expect("Execution failed");
-        if let Data::Int(data) = vm.load_register(3).unwrap() {
-            assert_eq!(data, 12 + 23);
-        } else {
-            panic!("Wrong type");
+
+        assert!(same_data(vm.load_register(3).unwrap(), Int(12 + 23)));
+        assert!(same_data(vm.load_register(4).unwrap(), Int(12 - 23)));
+        assert!(same_data(vm.load_register(5).unwrap(), Int(12 * 23)));
+        assert!(same_data(vm.load_register(6).unwrap(), Float(12.0 / 23.0)));
+        assert!(same_data(vm.load_register(7).unwrap(), Int(23 / 12)));
+        assert!(same_data(vm.load_register(8).unwrap(), Int(11)));
+        assert!(same_data(vm.load_register(9).unwrap(), Float(12.467572902176588)));
+    }
+
+    #[test]
+    fn test_logical_op() {
+         let mut pre_inst = vec![
+            (push, 0, 0, 42),
+            (call, 0, 0, 2),
+            (load, 0, 0, 0),
+            (load, 1, 0, 1),
+        ];
+        let mut rd_k = 2;
+        for op in [or, and] {
+            pre_inst.push((op, 0, 0, rd_k));
+            pre_inst.push((op, 0, 1, rd_k + 1));
+            pre_inst.push((op, 1, 0, rd_k + 2));
+            pre_inst.push((op, 1, 1, rd_k + 3));
+            rd_k += 4;
         }
-        if let Data::Int(data) = vm.load_register(4).unwrap() {
-            assert_eq!(data, 12 - 23);
-        } else {
-            panic!("Wrong type");
+        pre_inst.push((not, 0, 0, rd_k));
+        pre_inst.push((not, 1, 0, rd_k + 1));
+
+        let instructions : Vec<_> = pre_inst.into_iter().map(tuple_to_inst).collect();
+        let consts = [Bool(false), Bool(true)];
+
+        let mut vm = VM::new();
+        vm.push_instructions(instructions.iter());
+        vm.push_consts(consts.iter());
+        vm.exec().expect("Execution failed");
+
+        let right_result = [
+            false, true, true, true,
+            false, false, false, true,
+            true, false
+        ];
+
+        for i in 0..10 {
+            if let Bool(b) = vm.load_register(2 + i).unwrap() {
+                assert_eq!(b, right_result[i as usize]);
+            } else {
+                panic!("Wrong type");
+            }
         }
-        if let Data::Int(data) = vm.load_register(5).unwrap() {
-            assert_eq!(data, 12 * 23);
-        } else {
-            panic!("Wrong type");
+    }
+
+    #[test]
+    fn test_compare() {
+        let mut pre_inst = vec![
+            (push, 0, 0, 42),
+            (call, 0, 0, 2),
+            (load, 0, 0, 0),
+            (load, 1, 0, 1),
+            (load, 2, 0, 2),
+            (load, 3, 0, 3),
+            (load, 4, 0, 4),
+            (load, 5, 0, 5),
+        ];
+        let mut rd_k = 6;
+        for op in [lt, le, gt, ge, eq, ne] {
+            pre_inst.push((op, 0, 1, rd_k));
+            pre_inst.push((op, 1, 1, rd_k + 1));
+            pre_inst.push((op, 2, 1, rd_k + 2));
+            pre_inst.push((op, 3, 4, rd_k + 3));
+            pre_inst.push((op, 4, 4, rd_k + 4));
+            pre_inst.push((op, 5, 4, rd_k + 5));
+            rd_k += 6;
         }
-        if let Data::Float(data) = vm.load_register(6).unwrap() {
-            assert!(f64::abs(data - 12.0 / 23.0) < 1e-10);
-        } else {
-            panic!("Wrong type");
+        let instructions : Vec<_> = pre_inst.into_iter().map(tuple_to_inst).collect();
+        let consts = [
+            Int(-5), Int(1), Int(3),
+            Float(-2.7), Float(3.6), Float(7.9)
+        ];
+
+        let mut vm = VM::new();
+        vm.push_instructions(instructions.iter());
+        vm.push_consts(consts.iter());
+        vm.exec().expect("Execution failed");
+
+        let right_result = [
+            true, false, false, true, false, false,
+            true, true, false, true, true, false,
+            false, false, true, false, false, true,
+            false, true, true, false, true, true,
+            false, true, false, false, true, false,
+            true, false, true, true, false, true
+        ];
+        for i in 0..36 {
+            if let Bool(res) = vm.load_register(6 + i).unwrap() {
+                assert_eq!(res, right_result[i as usize]);
+            } else {
+                panic!("Wrong type");
+            }
         }
     }
 }
