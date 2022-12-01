@@ -105,9 +105,7 @@ impl Debug for Expr {
             Expr_::Id(id) => write!(f, "{:?}", id),
             Expr_::Const(c) => write!(f, "{:?}", c),
             Expr_::Error => write!(f, "Error"),
-            Expr_::If(v) => {
-                f.debug_tuple("").field(&"if").field(&v).finish()
-            },
+            Expr_::If(v) => f.debug_tuple("").field(&"if").field(&v).finish(),
         }
     }
 }

@@ -1,6 +1,6 @@
 mod ast;
 mod error;
-use crate::diagnostic::{Diagnoser, Diagnostic, DisplayableOsString, Loc, SharedFile};
+use crate::diagnostic::{Diagnoser, DisplayableOsString, Loc, SharedFile};
 
 use self::error::{to_diagnostic, ErrorCode};
 
@@ -10,7 +10,7 @@ use super::{
     Lexer,
 };
 use ahash::AHashMap;
-use ast::{Ast, Const, Expr, Expr_, OpInfix, OpPostfix, OpPrefix, Stat, Stat_, Type};
+use ast::{Ast, Const, Expr, Expr_, OpInfix, OpPostfix, OpPrefix, Stat, Stat_};
 use std::{
     ffi::{OsStr, OsString},
     fs,
@@ -51,6 +51,8 @@ pub struct Parser {
     ast: Ast,
     current_file_id: usize,
     consumed: usize,
+    has_eof_error: bool,
+    has_non_eof_error: bool,
 }
 
 impl Parser {
@@ -61,6 +63,8 @@ impl Parser {
             diagnoser: Diagnoser::new(),
             current_file_id: 0,
             consumed: 0,
+            has_eof_error: false,
+            has_non_eof_error: false,
         }
     }
 
@@ -71,11 +75,29 @@ impl Parser {
         self.ast.statements.iter().skip(last)
     }
 
-    fn to_diagnostic(&self, error: ErrorCode, loc: Loc) -> Diagnostic {
-        to_diagnostic(error, loc, self.current_file_id)
+    pub fn input_can_continue(&self) -> bool {
+        if self.files.iter().all(|(_, x)| !x.has_non_eof_error())
+            && self.files.iter().any(|(_, x)| x.has_eof_error())
+        {
+            return true;
+        }
+        self.has_eof_error && !self.has_non_eof_error
+    }
+
+    fn add_diagnostic(&mut self, error: ErrorCode, loc: Loc) {
+        match error {
+            ErrorCode::UnexpectedEof | ErrorCode::UnexpectedToken(None, _, _) => {
+                self.has_eof_error = true
+            }
+            _ => self.has_non_eof_error = true,
+        }
+        let diag = to_diagnostic(error, loc, self.current_file_id);
+        self.diagnoser.push(diag);
     }
 
     pub fn clear_diagnoses(&mut self) {
+        self.has_non_eof_error = false;
+        self.has_eof_error = false;
         for (_, lexer) in &mut self.files {
             lexer.clear_diagnoses();
         }
@@ -159,12 +181,8 @@ impl Parser {
         loop {
             let start = iter.loc();
             let stat = match iter.peek() {
-                Some(Key(Class)) => {
-                    todo!()
-                }
-                Some(Key(Def)) => {
-                    todo!()
-                }
+                Some(Key(Class)) => self.consume_class(&mut iter),
+                Some(Key(Def)) => self.consume_def(&mut iter),
                 Some(_) => {
                     let expr = self.consume_expr(&mut iter, 0);
                     let end = iter.loc();
@@ -204,10 +222,10 @@ impl Parser {
         } else {
             let t = iter.next().map(|x| x.clone());
             let loc_now = iter.loc();
-            self.diagnoser.push(self.to_diagnostic(
+            self.add_diagnostic(
                 ErrorCode::UnexpectedToken(t, Some(Token::Op(expected)), previous),
                 loc_now,
-            ));
+            );
         }
         loop {
             if test_match(op_type, iter) {
@@ -217,8 +235,7 @@ impl Parser {
             match iter.next() {
                 Some(_) => (),
                 None => {
-                    self.diagnoser
-                        .push(self.to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
                     return true;
                 }
             }
@@ -250,10 +267,10 @@ impl Parser {
         } else {
             let t = iter.next().map(|x| x.clone());
             let loc_now = iter.loc();
-            self.diagnoser.push(self.to_diagnostic(
+            self.add_diagnostic(
                 ErrorCode::UnexpectedToken(t, Some(Token::Key(expected)), previous),
                 loc_now,
-            ));
+            );
         }
         loop {
             if test_match(key_type, iter) {
@@ -263,8 +280,7 @@ impl Parser {
             match iter.next() {
                 Some(_) => (),
                 None => {
-                    self.diagnoser
-                        .push(self.to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
                     return true;
                 }
             }
@@ -284,8 +300,7 @@ impl Parser {
             let end = iter.loc();
             iter.next();
             let loc = iter.loc();
-            self.diagnoser
-                .push(self.to_diagnostic(ErrorCode::MissingExpr(start.clone()), loc));
+            self.add_diagnostic(ErrorCode::MissingExpr(start.clone()), loc);
             return Some(Box::new(Expr {
                 loc: start.start..end.end,
                 val: Expr_::Error,
@@ -368,9 +383,7 @@ impl Parser {
                             }
                             None => {
                                 let end = iter.loc();
-                                self.diagnoser.push(
-                                    self.to_diagnostic(ErrorCode::UnexpectedEof, end.clone()),
-                                );
+                                self.add_diagnostic(ErrorCode::UnexpectedEof, end.clone());
                                 return Box::new(Expr {
                                     loc: 0..0,
                                     val: Expr_::Error,
@@ -385,8 +398,7 @@ impl Parser {
                 }
                 None => {
                     let end = iter.loc();
-                    self.diagnoser
-                        .push(self.to_diagnostic(ErrorCode::UnexpectedEof, end.clone()));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, end.clone());
                     return Box::new(Expr {
                         loc: 0..0,
                         val: Expr_::Error,
@@ -396,27 +408,11 @@ impl Parser {
         }
     }
 
-    fn consume_case(&mut self, _iter: &mut TokenIterator) {
+    fn consume_class(&mut self, _iter: &mut TokenIterator) -> Stat {
         todo!()
     }
 
-    fn consume_loop_if(&mut self, _iter: &mut TokenIterator) {
-        todo!()
-    }
-
-    fn consume_loop(&mut self, _iter: &mut TokenIterator) {
-        todo!()
-    }
-
-    fn consume_class(&mut self, _iter: &mut TokenIterator) {
-        todo!()
-    }
-
-    fn consume_def(&mut self, _iter: &mut TokenIterator) {
-        todo!()
-    }
-
-    fn consume_pattern(&mut self, _iter: &mut TokenIterator) {
+    fn consume_def(&mut self, _iter: &mut TokenIterator) -> Stat {
         todo!()
     }
 
@@ -440,8 +436,7 @@ impl Parser {
                 }
                 None => {
                     let end = iter.loc();
-                    self.diagnoser
-                        .push(self.to_diagnostic(ErrorCode::UnexpectedEof, end.clone()));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, end.clone());
                     return Box::new(Expr {
                         loc: start.start..end.end,
                         val: Expr_::Block(exprs),
@@ -509,9 +504,7 @@ impl Parser {
                 if matches!(iter.peek(), Some(Op(RPar))) {
                     iter.next();
                     let end = iter.loc();
-                    self.diagnoser.push(
-                        self.to_diagnostic(ErrorCode::MissingExpr(start.clone()), end.clone()),
-                    );
+                    self.add_diagnostic(ErrorCode::MissingExpr(start.clone()), end.clone());
                     Box::new(Expr {
                         loc: start.start..end.end,
                         val: Expr_::Error,
@@ -561,18 +554,17 @@ impl Parser {
             Some(token) => {
                 let token = token.clone();
                 iter.next();
-                self.diagnoser.push(self.to_diagnostic(
+                self.add_diagnostic(
                     ErrorCode::UnexpectedToken(Some(token), None, None),
                     start.clone(),
-                ));
+                );
                 return Box::new(Expr {
                     loc: start,
                     val: Expr_::Error,
                 });
             }
             None => {
-                self.diagnoser
-                    .push(self.to_diagnostic(ErrorCode::UnexpectedEof, start.clone()));
+                self.add_diagnostic(ErrorCode::UnexpectedEof, start.clone());
                 return Box::new(Expr {
                     loc: start,
                     val: Expr_::Error,
@@ -592,21 +584,20 @@ impl Parser {
                             let loc = iter.loc();
                             iter.next();
                             let loc_token = iter.loc();
-                            self.diagnoser.push(self.to_diagnostic(
+                            self.add_diagnostic(
                                 ErrorCode::UnexpectedToken(
                                     Some(token),
                                     None,
                                     Some((Op(Colon), loc)),
                                 ),
                                 loc_token,
-                            ));
+                            );
                             return lhs;
                         }
                         None => {
                             iter.next();
                             let loc = iter.loc();
-                            self.diagnoser
-                                .push(self.to_diagnostic(ErrorCode::UnexpectedEof, loc));
+                            self.add_diagnostic(ErrorCode::UnexpectedEof, loc);
                             return lhs;
                         }
                     };
@@ -648,10 +639,10 @@ impl Parser {
                                 if matches!(iter.peek(), Some(Op(RBrk))) {
                                     iter.next();
                                     let end = iter.loc();
-                                    self.diagnoser.push(self.to_diagnostic(
+                                    self.add_diagnostic(
                                         ErrorCode::MissingExpr(match_loc),
                                         end.clone(),
-                                    ));
+                                    );
                                     lhs = Box::new(Expr {
                                         loc: loc.start..end.end,
                                         val: Expr_::Error,

@@ -4,7 +4,7 @@ use std::ffi::OsString;
 
 pub use token::{Keyword, Operator, Token};
 
-use crate::diagnostic::{Diagnoser, Diagnostic, Loc, SharedFile};
+use crate::diagnostic::{Diagnoser, Loc, SharedFile};
 
 use self::error::{to_diagnostic, ErrorCode};
 
@@ -20,6 +20,8 @@ pub struct Lexer {
     file_id: usize,
     diagnoser: Diagnoser,
     tokens: Vec<(Token, Loc)>,
+    has_eof_error: bool,
+    has_non_eof_error: bool,
 }
 
 impl Lexer {
@@ -27,17 +29,30 @@ impl Lexer {
         let mut diagnoser = Diagnoser::new();
         let file_id = diagnoser.new_file(file_name, file_content.clone());
         let mut lexer = Self {
-            file_content,
+            file_content: SharedFile::from_str(""),
             diagnoser,
             file_id,
             tokens: vec![],
+            has_eof_error: false,
+            has_non_eof_error: false,
         };
-        lexer.consume();
+        lexer.consume(&file_content);
+        lexer.file_content = file_content;
         lexer
     }
 
     pub fn clear_diagnoses(&mut self) {
+        self.has_non_eof_error = false;
+        self.has_eof_error = false;
         self.diagnoser.clear();
+    }
+
+    pub fn has_eof_error(&self) -> bool {
+        self.has_eof_error
+    }
+
+    pub fn has_non_eof_error(&self) -> bool {
+        self.has_non_eof_error
     }
 
     pub fn print_diagnoses(&self) {
@@ -61,8 +76,13 @@ impl Lexer {
         TokenIterator::new(&self.tokens)
     }
 
-    fn to_diagnostic(&self, error: ErrorCode, loc: Loc) -> Diagnostic {
-        to_diagnostic(error, loc, self.file_id)
+    fn add_diagnostic(&mut self, error: ErrorCode, loc: Loc) {
+        match error {
+            ErrorCode::OpenQuote => self.has_eof_error = true,
+            _ => self.has_non_eof_error = true,
+        }
+        let diag = to_diagnostic(error, loc, self.file_id);
+        self.diagnoser.push(diag);
     }
 
     /// Consume numeric types, aka int & float.
@@ -223,7 +243,7 @@ impl Lexer {
                     match c {
                         '+' | '-' if e_flag => num.push(c),
                         '_' => (),
-                        '.' => num.push(c),
+                        '.' if !float_flag => num.push(c),
                         '!'..='/' | ':'..='@' | '['..='`' | '{'..='~' => break,
                         ' ' | '\t' | '\r' | '\n' => break,
                         c => num.push(c),
@@ -441,8 +461,8 @@ impl Lexer {
     }
 
     /// Consume all tokens
-    fn consume(&mut self) {
-        let mut iter = FileIterator::new(self.file_content.as_ref());
+    fn consume(&mut self, file_content: &SharedFile) {
+        let mut iter = FileIterator::new(file_content.as_ref());
         // Ignore shebang (#!...) at the beginning of the file
         if let (Some('#'), Some('!')) = iter.peek2() {
             loop {
@@ -488,7 +508,7 @@ impl Lexer {
                         Some(result) => match result {
                             Ok(x) => self.tokens.push(x),
                             Err((error, loc)) => {
-                                self.diagnoser.push(self.to_diagnostic(error, loc))
+                                self.add_diagnostic(error, loc);
                             }
                         },
                         None => (),
@@ -584,6 +604,7 @@ mod tests {
         }
 
         test_helper("123e14", 123e14, false);
+        test_helper("123.0.", 123.0, false);
         test_helper("1_23e_14", 123e14, false);
         test_helper("123E-14", 123e-14, false);
         test_helper("123.", 123., false);

@@ -13,18 +13,11 @@
 //!
 //!
 mod backend;
+mod console;
 mod diagnostic;
 mod frontend;
+pub use console::Console;
 pub use frontend::Parser;
-
-extern crate codespan_reporting;
 
 #[cfg(feature = "vm")]
 pub use backend::vm::runtime::VM;
-
-#[cfg(feature = "vm")]
-extern crate ahash;
-#[cfg(feature = "vm")]
-extern crate ciborium;
-#[cfg(feature = "vm")]
-extern crate serde;
