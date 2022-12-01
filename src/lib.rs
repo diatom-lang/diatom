@@ -13,15 +13,11 @@
 //!
 //!
 mod backend;
+mod console;
+mod diagnostic;
 mod frontend;
-pub use frontend::{Lexer, Parser};
+pub use console::Console;
+pub use frontend::Parser;
 
 #[cfg(feature = "vm")]
 pub use backend::vm::runtime::VM;
-
-#[cfg(feature = "vm")]
-extern crate ahash;
-#[cfg(feature = "vm")]
-extern crate serde;
-#[cfg(feature = "vm")]
-extern crate ciborium;

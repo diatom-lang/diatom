@@ -54,7 +54,7 @@ pub enum OpCode {
     /// 
     /// A push must be used before call.
     call,
-    /// Load a const 
+    /// Load a const
     ///
     /// `load (rs1, rs2 = ?, rd)`
     /// 

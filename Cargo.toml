@@ -1,19 +1,26 @@
 [package]
 name = "diatom"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-authors = [ "Terence Ng" ]
+authors = [ "Terence Ng", "Aoyang Yu" ]
 description = "The diatom programming language"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/TerenceNg03/diatom.git"
+repository = "https://github.com/diatom-lang/diatom.git"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+codespan-reporting = "0.11.1"
 serde = { version = "1.0", features = ["derive"], optional = true }
 ahash = { version = "0.8.2", optional = true }
 ciborium = { version ="0.2.0", optional = true }
+reedline = { version = "0.14.0", optional = true }
+regex = { version = "1.7.0", optional = true }
+lazy_static = { version = "1.4.0", optional = true }
+nu-ansi-term = { version = "0.46.0", optional = true }
+crossterm = { version = "0.24.0", optional = true }
 
 [features]
-default = ["vm"]
+default = ["vm", "console_readline"]
 vm = ["serde", "ahash", "ciborium"]
+console_readline = ["reedline", "regex", "lazy_static", "nu-ansi-term", "crossterm"]
