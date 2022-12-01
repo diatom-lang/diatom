@@ -7,7 +7,7 @@
 
 ![issue](https://img.shields.io/github/issues/diatom-lang/diatom)
 ![pr](https://img.shields.io/github/issues-pr/diatom-lang/diatom)
-![commit](https://img.shields.io/github/last-commit/diatom-lang/diatom)
+![coverage](https://img.shields.io/codecov/c/github/diatom-lang/diatom)
 
 [crates-badge]: https://img.shields.io/crates/v/diatom.svg
 [crates-url]: https://crates.io/crates/diatom
@@ -15,7 +15,7 @@
 
 A dynamic typed scripting language for embedded use in applications.
 
-## Warning: Project is underdevlopment is not useable now.
+## Warning: Project is underdevelopment is not useable now.
 
 ## Features
  - **Gradual Typing**: Support for optional type hint.
