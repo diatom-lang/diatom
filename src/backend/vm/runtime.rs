@@ -307,22 +307,22 @@ impl VM {
                     self.exec_arithmetic_one_bool("Logical Not", rs1, rd, bool::not)?;
                 }
                 ge => {
-                    self.exec_arithmetic_compare("GE", rs1, rs2, rd, i64::ge, f64::ge)?;
+                    self.exec_arithmetic_compare("`>=`", rs1, rs2, rd, i64::ge, f64::ge)?;
                 }
                 gt => {
-                    self.exec_arithmetic_compare("GT", rs1, rs2, rd, i64::gt, f64::gt)?;
+                    self.exec_arithmetic_compare("`>`", rs1, rs2, rd, i64::gt, f64::gt)?;
                 }
                 ne => {
-                    self.exec_arithmetic_compare("NE", rs1, rs2, rd, i64::ne, f64::ne)?;
+                    self.exec_arithmetic_compare("`!=`", rs1, rs2, rd, i64::ne, f64::ne)?;
                 }
                 eq => {
-                    self.exec_arithmetic_compare("EQ", rs1, rs2, rd, i64::eq, f64::eq)?;
+                    self.exec_arithmetic_compare("`==`", rs1, rs2, rd, i64::eq, f64::eq)?;
                 }
                 le => {
-                    self.exec_arithmetic_compare("LE", rs1, rs2, rd, i64::le, f64::le)?;
+                    self.exec_arithmetic_compare("`<=`", rs1, rs2, rd, i64::le, f64::le)?;
                 }
                 lt => {
-                    self.exec_arithmetic_compare("LT", rs1, rs2, rd, i64::lt, f64::lt)?;
+                    self.exec_arithmetic_compare("`<`", rs1, rs2, rd, i64::lt, f64::lt)?;
                 }
             }
             self.ip += 1;
