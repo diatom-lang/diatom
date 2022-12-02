@@ -1,16 +1,16 @@
-name: CI - Build & Test
+name: Clippy Check
 
 on:
   push:
     branches: [ "master" ]
   pull_request:
+    branches: [ "master" ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build_and_test:
-    name: Build and Test
+  clippy_check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -22,13 +22,10 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-          
-      - name: Run cargo build
+          components: clippy
+
+      - name: Run cargo clippy
         uses: actions-rs/cargo@v1
         with:
-          command: build
-          
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+          command: clippy
+          args: -- -D warnings

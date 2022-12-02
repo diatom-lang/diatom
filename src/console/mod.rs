@@ -11,6 +11,7 @@ mod validator;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// An interactive console for Diatom
 pub struct Console {
     parser: Parser,
 }
@@ -23,6 +24,7 @@ impl Console {
     }
 
     #[cfg(not(feature = "console_readline"))]
+    /// Run this console
     pub fn run(&mut self) {
         use std::io::{self, Stdin, Write};
 
@@ -44,7 +46,7 @@ impl Console {
             let result = stdin.read_line(&mut line);
             match result {
                 Ok(0) => {
-                    println!("");
+                    println!();
                     return;
                 }
                 Ok(_) => {
@@ -74,6 +76,7 @@ impl Console {
     }
 
     #[cfg(feature = "console_readline")]
+    /// Run this console
     pub fn run(&mut self) {
         use std::io::stdout;
 
@@ -140,5 +143,11 @@ impl Console {
                 }
             }
         }
+    }
+}
+
+impl Default for Console {
+    fn default() -> Self {
+        Self::new()
     }
 }

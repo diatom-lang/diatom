@@ -45,6 +45,31 @@ const fn precedence_postfix() -> u32 {
 /// # Errors
 /// Error code `E1000` to `E1999` is reserved for `Parser`
 ///
+/// # Example
+///
+/// ```rust, no_run
+/// use diatom::Parser;
+/// use std::ffi::OsStr;
+///
+/// // Create a new parser
+/// let mut parser = Parser::default();
+/// // To parse a single file
+/// parser.parse(OsStr::new("/path/to/code.dm"));
+/// // Check if something went wrong
+/// if parser.diagnostic_count() > 0 {
+///     parser.print_diagnoses();
+///     parser.print_diagnoses_summary();
+/// }
+///
+/// // Retrieve AST tree
+/// let _ast = parser.get_incremental();
+///
+/// // Or parse a &str
+/// parser.parse_str(OsStr::new("/path/to/code.dm"), "<code here>");
+/// let _ast = parser.get_incremental();
+///
+/// ```
+///
 pub struct Parser {
     diagnoser: Diagnoser,
     files: AHashMap<OsString, Lexer>,
@@ -87,7 +112,11 @@ impl Parser {
     fn add_diagnostic(&mut self, error: ErrorCode, loc: Loc) {
         match error {
             ErrorCode::UnexpectedEof | ErrorCode::UnexpectedToken(None, _, _) => {
-                self.has_eof_error = true
+                if self.has_eof_error {
+                    return;
+                } else {
+                    self.has_eof_error = true
+                }
             }
             _ => self.has_non_eof_error = true,
         }
@@ -134,8 +163,8 @@ impl Parser {
 
     /// Parse a file.
     ///
-    /// Return Err(()) if file can not be read.
-    pub fn parse(&mut self, filepath: &OsStr) -> Result<(), ()> {
+    /// Return true if errors are encountered.
+    pub fn parse(&mut self, filepath: &OsStr) -> bool {
         let path = fs::canonicalize(filepath);
         let path = match path {
             Ok(path) => path,
@@ -145,7 +174,7 @@ impl Parser {
                     0..0,
                     0,
                 ));
-                return Err(());
+                return true;
             }
         };
         let path_str = path.as_os_str();
@@ -158,11 +187,11 @@ impl Parser {
                     0..0,
                     0,
                 ));
-                return Err(());
+                return true;
             }
         };
         self.parse_file(path_str, content);
-        Ok(())
+        self.diagnostic_count() != 0
     }
 
     /// Parse a string and append to current parse tree
@@ -184,9 +213,9 @@ impl Parser {
                 Some(Key(Class)) => self.consume_class(&mut iter),
                 Some(Key(Def)) => self.consume_def(&mut iter),
                 Some(_) => {
-                    let expr = self.consume_expr(&mut iter, 0);
+                    let expr = self.consume_expr(&mut iter, 0, None);
                     let end = iter.loc();
-                    Stat::new(Stat_::Expr(expr), start.start..end.end)
+                    Stat::new(Stat_::Expr(Box::new(expr)), start.start..end.end)
                 }
                 None => {
                     break;
@@ -220,7 +249,7 @@ impl Parser {
             iter.next();
             return false;
         } else {
-            let t = iter.next().map(|x| x.clone());
+            let t = iter.next().cloned();
             let loc_now = iter.loc();
             self.add_diagnostic(
                 ErrorCode::UnexpectedToken(t, Some(Token::Op(expected)), previous),
@@ -265,7 +294,7 @@ impl Parser {
             iter.next();
             return false;
         } else {
-            let t = iter.next().map(|x| x.clone());
+            let t = iter.next().cloned();
             let loc_now = iter.loc();
             self.add_diagnostic(
                 ErrorCode::UnexpectedToken(t, Some(Token::Key(expected)), previous),
@@ -287,59 +316,46 @@ impl Parser {
         }
     }
 
-    fn consume_cond_then(&mut self, iter: &mut TokenIterator) -> Option<Box<Expr>> {
+    fn consume_cond_then(&mut self, iter: &mut TokenIterator) -> Option<Expr> {
         use Keyword::*;
         use Token::*;
         let start = iter.loc();
-        let condition;
         // match `condition`
-        if !matches!(iter.peek(), Some(Key(Then))) {
-            condition = Some(self.consume_expr(iter, 0));
-        } else {
-            // empty condition, return an error expression to prevent multiple error reports
-            let end = iter.loc();
-            iter.next();
-            let loc = iter.loc();
-            self.add_diagnostic(ErrorCode::MissingExpr(start.clone()), loc);
-            return Some(Box::new(Expr {
-                loc: start.start..end.end,
-                val: Expr_::Error,
-            }));
-        }
+        let condition = self.consume_expr(iter, 0, Some(Key(Then)));
         // match `then`
-        if !self.consume_to_key(iter, Then, Some((Key(If), start.clone()))) {
-            return condition;
+        if !self.consume_to_key(iter, Then, Some((Key(If), start))) {
+            Some(condition)
         } else {
-            return None;
+            None
         }
     }
 
-    fn consume_if(&mut self, iter: &mut TokenIterator) -> Box<Expr> {
+    fn consume_if(&mut self, iter: &mut TokenIterator) -> Expr {
         use Keyword::*;
         use Token::*;
         iter.next();
         let start = iter.loc();
-        let mut exprs: Vec<Box<Expr>> = vec![];
+        let mut exprs: Vec<Expr> = vec![];
         match self.consume_cond_then(iter) {
             Some(expr) => exprs.push(expr),
             None => {
                 let end = iter.loc();
-                return Box::new(Expr {
+                return Expr {
                     loc: start.start..end.end,
                     val: Expr_::Error,
-                });
+                };
             }
         }
         // match block
-        let mut block: Vec<Box<Expr>> = vec![];
+        let mut block: Vec<Expr> = vec![];
         let mut block_start = iter.next_loc();
         loop {
             match iter.peek() {
                 Some(Key(Elsif)) => {
-                    exprs.push(Box::new(Expr {
+                    exprs.push(Expr {
                         loc: block_start.start..iter.loc().end,
                         val: Expr_::Block(block),
-                    }));
+                    });
                     block = vec![];
                     iter.next();
                     match self.consume_cond_then(iter) {
@@ -348,61 +364,64 @@ impl Parser {
                         }
                         None => {
                             let end = iter.loc();
-                            return Box::new(Expr {
+                            return Expr {
                                 loc: start.start..end.end,
                                 val: Expr_::Error,
-                            });
+                            };
                         }
                     }
                     block_start = iter.next_loc();
                 }
                 Some(Key(Else)) => {
-                    exprs.push(Box::new(Expr {
+                    exprs.push(Expr {
                         loc: block_start.start..iter.loc().end,
                         val: Expr_::Block(block),
-                    }));
+                    });
                     block = vec![];
                     iter.next();
                     loop {
                         match iter.peek() {
                             Some(Key(End)) => {
-                                exprs.push(Box::new(Expr {
+                                exprs.push(Expr {
                                     loc: block_start.start..iter.loc().end,
                                     val: Expr_::Block(block),
-                                }));
+                                });
                                 iter.next();
                                 let end = iter.loc();
-                                return Box::new(Expr {
+                                return Expr {
                                     loc: start.start..end.end,
                                     val: Expr_::If(exprs),
-                                });
+                                };
                             }
                             Some(_) => {
-                                let expr = self.consume_expr(iter, 0);
+                                let expr = self.consume_expr(iter, 0, Some(Key(End)));
                                 block.push(expr);
                             }
                             None => {
                                 let end = iter.loc();
-                                self.add_diagnostic(ErrorCode::UnexpectedEof, end.clone());
-                                return Box::new(Expr {
+                                self.add_diagnostic(ErrorCode::UnexpectedEof, end);
+                                return Expr {
                                     loc: 0..0,
                                     val: Expr_::Error,
-                                });
+                                };
                             }
                         }
                     }
                 }
                 Some(_) => {
-                    let expr = self.consume_expr(iter, 0);
+                    let expr = self.consume_expr(iter, 0, Some(Key(Else)));
                     block.push(expr);
                 }
                 None => {
                     let end = iter.loc();
-                    self.add_diagnostic(ErrorCode::UnexpectedEof, end.clone());
-                    return Box::new(Expr {
+                    self.add_diagnostic(
+                        ErrorCode::UnexpectedToken(None, Some(Key(Else)), Some((Key(If), start))),
+                        end,
+                    );
+                    return Expr {
                         loc: 0..0,
                         val: Expr_::Error,
-                    });
+                    };
                 }
             }
         }
@@ -416,37 +435,47 @@ impl Parser {
         todo!()
     }
 
-    fn consume_block(&mut self, iter: &mut TokenIterator) -> Box<Expr> {
+    fn consume_block(&mut self, iter: &mut TokenIterator) -> Expr {
         iter.next();
         let start = iter.loc();
-        let mut exprs: Vec<Box<Expr>> = vec![];
+        let mut exprs: Vec<Expr> = vec![];
         loop {
             match iter.peek() {
                 Some(Token::Key(Keyword::End)) => {
                     iter.next();
                     let end = iter.loc();
-                    return Box::new(Expr {
+                    return Expr {
                         loc: start.start..end.end,
                         val: Expr_::Block(exprs),
-                    });
+                    };
                 }
                 Some(_) => {
-                    let expr = self.consume_expr(iter, 0);
+                    let expr = self.consume_expr(iter, 0, Some(Token::Key(Keyword::End)));
                     exprs.push(expr);
                 }
                 None => {
                     let end = iter.loc();
                     self.add_diagnostic(ErrorCode::UnexpectedEof, end.clone());
-                    return Box::new(Expr {
+                    return Expr {
                         loc: start.start..end.end,
                         val: Expr_::Block(exprs),
-                    });
+                    };
                 }
             }
         }
     }
 
-    fn consume_expr(&mut self, iter: &mut TokenIterator, min_precedence: u32) -> Box<Expr> {
+    /// Consume an expression
+    ///
+    /// not_take_on_error: do not consume a specific token type if an UnexpectedToken is
+    /// encountered. This is used to prevent multiple diagnostics when an expression is missing or
+    /// invalid between `if .. then` or `[ .. ]` and so on.
+    fn consume_expr(
+        &mut self,
+        iter: &mut TokenIterator,
+        min_precedence: u32,
+        not_take_on_error: Option<Token>,
+    ) -> Expr {
         use Keyword::*;
         use Operator::*;
         use Token::*;
@@ -455,65 +484,55 @@ impl Parser {
             Some(Id(s)) => {
                 let s = s.clone();
                 iter.next();
-                Box::new(Expr {
+                Expr {
                     loc: start.clone(),
                     val: Expr_::Id(s),
-                })
+                }
             }
             Some(Key(Nil)) => {
                 iter.next();
-                Box::new(Expr {
+                Expr {
                     loc: start.clone(),
                     val: Expr_::Const(Const::Nil),
-                })
+                }
             }
             Some(Str(s)) => {
                 let s = s.clone();
                 iter.next();
-                Box::new(Expr {
+                Expr {
                     loc: start.clone(),
                     val: Expr_::Const(Const::Str(s)),
-                })
+                }
             }
             Some(Float(f)) => {
                 let f = *f;
                 iter.next();
-                Box::new(Expr {
+                Expr {
                     loc: start.clone(),
                     val: Expr_::Const(Const::Float(f)),
-                })
+                }
             }
             Some(Integer(i)) => {
                 let i = *i;
                 iter.next();
-                Box::new(Expr {
+                Expr {
                     loc: start.clone(),
                     val: Expr_::Const(Const::Int(i)),
-                })
+                }
             }
             Some(Key(val @ (Keyword::True | Keyword::False))) => {
                 let val = matches!(val, Keyword::True);
                 iter.next();
-                Box::new(Expr {
+                Expr {
                     loc: start.clone(),
                     val: Expr_::Const(Const::Bool(val)),
-                })
+                }
             }
             Some(Op(LPar)) => {
                 iter.next();
-                if matches!(iter.peek(), Some(Op(RPar))) {
-                    iter.next();
-                    let end = iter.loc();
-                    self.add_diagnostic(ErrorCode::MissingExpr(start.clone()), end.clone());
-                    Box::new(Expr {
-                        loc: start.start..end.end,
-                        val: Expr_::Error,
-                    })
-                } else {
-                    let lhs = self.consume_expr(iter, 0);
-                    self.consume_to_op(iter, RPar, Some((Op(LPar), start.clone())));
-                    lhs
-                }
+                let lhs = self.consume_expr(iter, 0, Some(Op(RPar)));
+                self.consume_to_op(iter, RPar, Some((Op(LPar), start.clone())));
+                lhs
             }
             Some(Op(op @ (Not | Minus))) => {
                 let op = match op {
@@ -522,53 +541,62 @@ impl Parser {
                     _ => unreachable!(),
                 };
                 iter.next();
-                let rhs = self.consume_expr(iter, precedence_prefix());
+                let rhs = self.consume_expr(iter, precedence_prefix(), not_take_on_error.clone());
                 let end = iter.loc();
-                Box::new(Expr {
+                Expr {
                     loc: start.start..end.end,
-                    val: Expr_::Prefix(op, rhs),
-                })
+                    val: Expr_::Prefix(op, Box::new(rhs)),
+                }
             }
             Some(Key(If)) => self.consume_if(iter),
             Some(Key(Begin)) => self.consume_block(iter),
             Some(Op(LBrk)) => {
                 iter.next();
                 // Test for empty list
-                if matches!(iter.peek(), Some(Op(RBrk))) {
-                    iter.next();
-                    let end = iter.loc();
-                    Box::new(Expr {
-                        loc: start.start..end.end,
-                        val: Expr_::Const(Const::List(None)),
-                    })
-                } else {
-                    let expr = self.consume_expr(iter, 0);
-                    self.consume_to_op(iter, RBrk, Some((Op(LBrk), start.clone())));
-                    let end = iter.loc();
-                    Box::new(Expr {
-                        loc: start.start..end.end,
-                        val: Expr_::Const(Const::List(Some(expr))),
-                    })
+                let expr = self.consume_expr(iter, 0, Some(Op(RBrk)));
+                self.consume_to_op(iter, RBrk, Some((Op(LBrk), start.clone())));
+                let end = iter.loc();
+                Expr {
+                    loc: start.start..end.end,
+                    val: Expr_::Const(Const::List(Some(Box::new(expr)))),
                 }
             }
             Some(token) => {
-                let token = token.clone();
-                iter.next();
-                self.add_diagnostic(
-                    ErrorCode::UnexpectedToken(Some(token), None, None),
-                    start.clone(),
-                );
-                return Box::new(Expr {
+                let should_not_consume = if let Some(t_avoid) = not_take_on_error {
+                    match (token, t_avoid) {
+                        (Op(op), Op(op_avoid)) => {
+                            std::mem::discriminant(op) == std::mem::discriminant(&op_avoid)
+                        }
+                        (Key(k), Key(k_avoid)) => {
+                            std::mem::discriminant(k) == std::mem::discriminant(&k_avoid)
+                        }
+                        _ => false, // Other check is useless
+                    }
+                } else {
+                    false
+                };
+                if should_not_consume {
+                    // Note that `start` is actually the location of this token
+                    self.add_diagnostic(ErrorCode::MissingExpr(iter.loc()), start.clone())
+                } else {
+                    let token = token.clone();
+                    iter.next();
+                    self.add_diagnostic(
+                        ErrorCode::UnexpectedToken(Some(token), None, None),
+                        start.clone(),
+                    );
+                }
+                return Expr {
                     loc: start,
                     val: Expr_::Error,
-                });
+                };
             }
             None => {
                 self.add_diagnostic(ErrorCode::UnexpectedEof, start.clone());
-                return Box::new(Expr {
+                return Expr {
                     loc: start,
                     val: Expr_::Error,
-                });
+                };
             }
         };
 
@@ -613,20 +641,24 @@ impl Parser {
                                 if matches!(iter.peek(), Some(Op(RPar))) {
                                     iter.next();
                                     let end = iter.loc();
-                                    lhs = Box::new(Expr {
+                                    lhs = Expr {
                                         loc: loc.start..end.end,
-                                        val: Expr_::Postfix(OpPostfix::Call, lhs, None),
-                                    });
+                                        val: Expr_::Postfix(OpPostfix::Call, Box::new(lhs), None),
+                                    };
                                     start = end;
                                 } else {
-                                    let expr = self.consume_expr(iter, 0);
+                                    let expr = self.consume_expr(iter, 0, Some(Op(RPar)));
                                     self.consume_to_op(iter, RPar, Some((Op(LPar), match_loc)));
                                     let end = iter.loc();
 
-                                    lhs = Box::new(Expr {
+                                    lhs = Expr {
                                         loc: loc.start..end.end,
-                                        val: Expr_::Postfix(OpPostfix::Call, lhs, Some(expr)),
-                                    });
+                                        val: Expr_::Postfix(
+                                            OpPostfix::Call,
+                                            Box::new(lhs),
+                                            Some(Box::new(expr)),
+                                        ),
+                                    };
                                     start = iter.next_loc();
                                 }
                                 continue;
@@ -636,29 +668,19 @@ impl Parser {
                                 let loc = iter.loc();
                                 iter.next();
                                 let match_loc = iter.loc();
-                                if matches!(iter.peek(), Some(Op(RBrk))) {
-                                    iter.next();
-                                    let end = iter.loc();
-                                    self.add_diagnostic(
-                                        ErrorCode::MissingExpr(match_loc),
-                                        end.clone(),
-                                    );
-                                    lhs = Box::new(Expr {
-                                        loc: loc.start..end.end,
-                                        val: Expr_::Error,
-                                    });
-                                    start = iter.next_loc();
-                                } else {
-                                    let expr = self.consume_expr(iter, 0);
-                                    self.consume_to_op(iter, RBrk, Some((Op(LBrk), match_loc)));
-                                    let end = iter.loc();
+                                let expr = self.consume_expr(iter, 0, Some(Op(RBrk)));
+                                self.consume_to_op(iter, RBrk, Some((Op(LBrk), match_loc)));
+                                let end = iter.loc();
 
-                                    lhs = Box::new(Expr {
-                                        loc: loc.start..end.end,
-                                        val: Expr_::Postfix(OpPostfix::Index, lhs, Some(expr)),
-                                    });
-                                    start = end;
-                                }
+                                lhs = Expr {
+                                    loc: loc.start..end.end,
+                                    val: Expr_::Postfix(
+                                        OpPostfix::Index,
+                                        Box::new(lhs),
+                                        Some(Box::new(expr)),
+                                    ),
+                                };
+                                start = end;
                                 continue;
                             }
                         };
@@ -697,17 +719,23 @@ impl Parser {
 
             iter.next();
 
-            let rhs = self.consume_expr(iter, precedence.1);
+            let rhs = self.consume_expr(iter, precedence.1, not_take_on_error.clone());
             let end = iter.loc();
 
-            lhs = Box::new(Expr {
+            lhs = Expr {
                 loc: start.start..end.end,
-                val: Expr_::Infix(op, lhs, rhs),
-            });
+                val: Expr_::Infix(op, Box::new(lhs), Box::new(rhs)),
+            };
             start = end;
         }
 
         lhs
+    }
+}
+
+impl Default for Parser {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -717,13 +745,27 @@ mod tests {
 
     use super::*;
 
+    fn test_str(code: &str, should_fail: bool) {
+        let mut parser = Parser::new();
+        parser.parse_str(OsStr::new("test.dm"), code);
+        println!("{:#?}", parser.ast.statements);
+        if !should_fail && parser.diagnostic_count() > 0 {
+            parser.diagnoser.print();
+        }
+        if should_fail {
+            assert!(parser.diagnostic_count() > 0);
+        } else {
+            assert!(parser.diagnostic_count() == 0);
+        }
+    }
+
     #[test]
     fn test_expr() {
         let code = "a,b, nil = not 32 * 15:()+8.9e13//(12+\"asdf\") or false and -23";
         let code = SharedFile::from_str(code);
         let lexer = Lexer::new(OsString::from_str("test.dm").unwrap(), code);
         let mut parser = Parser::new();
-        let expr = parser.consume_expr(&mut lexer.iter(), 0);
+        let expr = parser.consume_expr(&mut lexer.iter(), 0, None);
         println!("{expr:?}");
         parser.diagnoser.print();
         // This is manually verified to be correct =)
@@ -744,35 +786,26 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_op() {
-        let code = ">> <<";
-        let mut parser = Parser::new();
-        parser.parse_str(OsStr::new("test.dm"), code);
-        println!("{:#?}", parser.ast.statements);
-        assert!(parser.diagnostic_count() > 0);
+    fn test_valid() {
+        test_str("a:()", false);
     }
 
     #[test]
-    fn test_if_1() {
-        let code = "if a then b elsif c then 0.92 a = 0 b:[0,1,2] else end";
-        let mut parser = Parser::new();
-        parser.parse_str(OsStr::new("test.dm"), code);
-        println!("{:#?}", parser.ast.statements);
-        if parser.diagnostic_count() > 0 {
-            parser.diagnoser.print();
-        }
-        assert!(parser.diagnostic_count() == 0);
+    fn test_invalid() {
+        test_str(">> <<", true);
+        test_str("a:[]", true);
+        test_str("[1,2,]", true);
     }
 
     #[test]
-    fn test_if_2() {
-        let code = "if a then else nil end";
-        let mut parser = Parser::new();
-        parser.parse_str(OsStr::new("test.dm"), code);
-        println!("{:#?}", parser.ast.statements);
-        if parser.diagnostic_count() > 0 {
-            parser.diagnoser.print();
-        }
-        assert!(parser.diagnostic_count() == 0);
+    fn test_if() {
+        test_str(
+            "if a then b elsif c then 0.92 a = 0 b:[0,1,2] else end",
+            false,
+        );
+        test_str("if a then else nil end", false);
+        test_str("if a then else end", false);
+        test_str("if a:[] else end", true);
+        test_str("if a:[] elsif b else end", true);
     }
 }

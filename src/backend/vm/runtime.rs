@@ -24,6 +24,7 @@ impl Default for Data {
     }
 }
 
+/// A virtual machine to run diatom bytecode
 pub struct VM {
     instructions: Vec<Inst>,
     consts: Vec<Data>,
@@ -68,8 +69,8 @@ impl VM {
     }
 
     fn load_register(&mut self, index: u32) -> Result<Data, String> {
-        if self.call_stack.len() == 0 {
-            self.on_error(format!("Load register without stack frame."))?
+        if self.call_stack.is_empty() {
+            self.on_error("Load register without stack frame.".to_string())?
         }
         let fp = self.call_stack[self.call_stack.len() - 1].1;
         let data = self.data_stack.get((fp + index) as usize);
@@ -82,8 +83,8 @@ impl VM {
     }
 
     fn save_register(&mut self, index: u32, data: Data) -> Result<(), String> {
-        if self.call_stack.len() == 0 {
-            self.on_error(format!("Load register without stack frame."))?
+        if self.call_stack.is_empty() {
+            self.on_error("Load register without stack frame.".to_string())?
         }
         let fp = self.call_stack[self.call_stack.len() - 1].1;
         let rd = self.data_stack.get_mut((fp + index) as usize);
@@ -110,16 +111,21 @@ impl VM {
         Err(error)
     }
 
-    fn exec_arithmetic_int_float(&mut self, name: &str, rs1: u32, rs2: u32, rd:u32,
-        int_calc: fn(i64, i64) -> Option<i64>, float_calc: fn(f64, f64) -> f64) -> Result<(), String>
-    {
+    fn exec_arithmetic_int_float(
+        &mut self,
+        name: &str,
+        rs1: u32,
+        rs2: u32,
+        rd: u32,
+        int_calc: fn(i64, i64) -> Option<i64>,
+        float_calc: fn(f64, f64) -> f64,
+    ) -> Result<(), String> {
         use Data::*;
         let rs1_data = self.load_register(rs1)?;
         let rs2_data = self.load_register(rs2)?;
         let rd_data = match (rs1_data, rs2_data) {
-            (Int(i1), Int(i2)) => Int(int_calc(i1, i2).ok_or_else(|| {
-                self.on_error(format!("{name} overflow.")).unwrap_err()
-            })?),
+            (Int(i1), Int(i2)) => Int(int_calc(i1, i2)
+                .ok_or_else(|| self.on_error(format!("{name} overflow.")).unwrap_err())?),
             (Float(i1), Int(i2)) => Float(float_calc(i1, i2 as f64)),
             (Int(i1), Float(i2)) => Float(float_calc(i1 as f64, i2)),
             (Float(i1), Float(i2)) => Float(float_calc(i1, i2)),
@@ -137,9 +143,15 @@ impl VM {
         Ok(())
     }
 
-    fn exec_arithmetic_float(&mut self, name: &str, rs1: u32, rs2: u32, rd: u32, 
-        float_calc: fn(f64, f64) -> f64, gen_data: fn(f64) -> Data) -> Result<(), String>
-    {
+    fn exec_arithmetic_float(
+        &mut self,
+        name: &str,
+        rs1: u32,
+        rs2: u32,
+        rd: u32,
+        float_calc: fn(f64, f64) -> f64,
+        gen_data: fn(f64) -> Data,
+    ) -> Result<(), String> {
         use Data::*;
         let rs1_data = self.load_register(rs1)?;
         let rs2_data = self.load_register(rs2)?;
@@ -158,14 +170,19 @@ impl VM {
                     .unwrap_err());
             }
         };
-        let rd_data = gen_data(calc_res); 
+        let rd_data = gen_data(calc_res);
         self.save_register(rd, rd_data)?;
         Ok(())
     }
 
-    fn exec_arithmetic_two_bool(&mut self, name: &str, rs1: u32, rs2: u32, rd: u32, 
-        bool_calc: fn(bool, bool) -> bool) -> Result<(), String>
-    {
+    fn exec_arithmetic_two_bool(
+        &mut self,
+        name: &str,
+        rs1: u32,
+        rs2: u32,
+        rd: u32,
+        bool_calc: fn(bool, bool) -> bool,
+    ) -> Result<(), String> {
         use Data::*;
         let rs1_data = self.load_register(rs1)?;
         let rs2_data = self.load_register(rs2)?;
@@ -186,9 +203,13 @@ impl VM {
         Ok(())
     }
 
-    fn exec_arithmetic_one_bool(&mut self, name: &str, rs1: u32, rd: u32, 
-        bool_calc: fn(bool) -> bool) -> Result<(), String>
-    {
+    fn exec_arithmetic_one_bool(
+        &mut self,
+        name: &str,
+        rs1: u32,
+        rd: u32,
+        bool_calc: fn(bool) -> bool,
+    ) -> Result<(), String> {
         use Data::*;
         let rs1_data = self.load_register(rs1)?;
         let calc_res = match rs1_data {
@@ -207,9 +228,15 @@ impl VM {
         Ok(())
     }
 
-    fn exec_arithmetic_compare(&mut self, name: &str, rs1: u32, rs2: u32, rd: u32,
-        int_cmp: fn(&i64, &i64) -> bool, float_cmp: fn(&f64, &f64) -> bool) -> Result<(), String>
-    {
+    fn exec_arithmetic_compare(
+        &mut self,
+        name: &str,
+        rs1: u32,
+        rs2: u32,
+        rd: u32,
+        int_cmp: fn(&i64, &i64) -> bool,
+        float_cmp: fn(&f64, &f64) -> bool,
+    ) -> Result<(), String> {
         use Data::*;
         let rs1_data = self.load_register(rs1)?;
         let rs2_data = self.load_register(rs2)?;
@@ -234,7 +261,7 @@ impl VM {
     }
 
     pub fn exec(&mut self) -> Result<(), String> {
-        use std::ops::{Add, Sub, Mul, Div};
+        use std::ops::{Add, Div, Mul, Sub};
         use Data::*;
         use OpCode::*;
         while (self.ip as usize) < self.instructions.len() {
@@ -243,7 +270,7 @@ impl VM {
                 push => {
                     let size = rd;
                     if self.next_frame.is_some() {
-                        self.on_error(format!("Double push detected."))?
+                        self.on_error("Double push detected.".to_string())?
                     } else {
                         self.next_frame = Some(size);
                         (0..size).for_each(|_| self.data_stack.push(Data::Nil));
@@ -251,7 +278,7 @@ impl VM {
                 }
                 call => match self.next_frame {
                     None => {
-                        self.on_error(format!("Call function without creating a stack frame."))?
+                        self.on_error("Call function without creating a stack frame.".to_string())?
                     }
                     Some(frame) => {
                         self.call_stack
@@ -272,13 +299,34 @@ impl VM {
                     self.save_register(rd, data)?;
                 }
                 add => {
-                    self.exec_arithmetic_int_float("Addition", rs1, rs2, rd, i64::checked_add, f64::add)?;
+                    self.exec_arithmetic_int_float(
+                        "Addition",
+                        rs1,
+                        rs2,
+                        rd,
+                        i64::checked_add,
+                        f64::add,
+                    )?;
                 }
                 sub => {
-                    self.exec_arithmetic_int_float("Subtraction", rs1, rs2, rd, i64::checked_sub, f64::sub)?;
+                    self.exec_arithmetic_int_float(
+                        "Subtraction",
+                        rs1,
+                        rs2,
+                        rd,
+                        i64::checked_sub,
+                        f64::sub,
+                    )?;
                 }
                 mul => {
-                    self.exec_arithmetic_int_float("Multiplication", rs1, rs2, rd, i64::checked_mul, f64::mul)?;
+                    self.exec_arithmetic_int_float(
+                        "Multiplication",
+                        rs1,
+                        rs2,
+                        rd,
+                        i64::checked_mul,
+                        f64::mul,
+                    )?;
                 }
                 div => {
                     self.exec_arithmetic_float("Division", rs1, rs2, rd, f64::div, Float)?;
@@ -289,7 +337,14 @@ impl VM {
                 }
                 modu => {
                     use std::ops::Rem;
-                    self.exec_arithmetic_int_float("Modulus", rs1, rs2, rd, i64::checked_rem, f64::rem)?;
+                    self.exec_arithmetic_int_float(
+                        "Modulus",
+                        rs1,
+                        rs2,
+                        rd,
+                        i64::checked_rem,
+                        f64::rem,
+                    )?;
                 }
                 exp => {
                     self.exec_arithmetic_float("Exponential", rs1, rs2, rd, f64::powf, Float)?;
@@ -331,23 +386,29 @@ impl VM {
     }
 }
 
+impl Default for VM {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::OpCode::*;
     use super::Data::*;
+    use super::OpCode::*;
     use super::*;
 
-    fn tuple_to_inst(t : (OpCode, u32, u32, u32)) -> Inst {
+    fn tuple_to_inst(t: (OpCode, u32, u32, u32)) -> Inst {
         Inst::new(t.0, t.1, t.2, t.3)
     }
 
-    const EPSILON : f64 = 1e-10;
+    const EPSILON: f64 = 1e-10;
 
     fn same_data(a: Data, b: Data) -> bool {
         match (a, b) {
             (Int(x), Int(y)) => x == y,
             (Float(x), Float(y)) => f64::abs(x - y) < EPSILON,
-            (_, _) => false
+            (_, _) => false,
         }
     }
 
@@ -360,7 +421,8 @@ mod tests {
             (push, 0, 0, 10),
             (call, 0, 0, 4),
             (push, 0, 0, 1),
-        ].map(tuple_to_inst);
+        ]
+        .map(tuple_to_inst);
         vm.push_instructions(instructions.iter());
         vm.exec().expect("Execution failed");
         assert_eq!(vm.call_stack, vec![(2, 0), (4, 5)]);
@@ -384,13 +446,10 @@ mod tests {
             (div, 0, 1, 6),
             (idiv, 1, 0, 7),
             (modu, 1, 0, 8),
-            (exp, 2, 0, 9)
-        ].map(tuple_to_inst);
-        let consts = vec![
-            Int(12), 
-            Int(23), 
-            Float(1.234)
-        ];
+            (exp, 2, 0, 9),
+        ]
+        .map(tuple_to_inst);
+        let consts = vec![Int(12), Int(23), Float(1.234)];
         vm.push_instructions(instructions.iter());
         vm.push_consts(consts.iter());
         vm.exec().expect("Execution failed");
@@ -401,12 +460,15 @@ mod tests {
         assert!(same_data(vm.load_register(6).unwrap(), Float(12.0 / 23.0)));
         assert!(same_data(vm.load_register(7).unwrap(), Int(23 / 12)));
         assert!(same_data(vm.load_register(8).unwrap(), Int(11)));
-        assert!(same_data(vm.load_register(9).unwrap(), Float(12.467572902176588)));
+        assert!(same_data(
+            vm.load_register(9).unwrap(),
+            Float(12.467572902176588)
+        ));
     }
 
     #[test]
     fn test_logical_op() {
-         let mut pre_inst = vec![
+        let mut pre_inst = vec![
             (push, 0, 0, 42),
             (call, 0, 0, 2),
             (load, 0, 0, 0),
@@ -423,7 +485,7 @@ mod tests {
         pre_inst.push((not, 0, 0, rd_k));
         pre_inst.push((not, 1, 0, rd_k + 1));
 
-        let instructions : Vec<_> = pre_inst.into_iter().map(tuple_to_inst).collect();
+        let instructions: Vec<_> = pre_inst.into_iter().map(tuple_to_inst).collect();
         let consts = [Bool(false), Bool(true)];
 
         let mut vm = VM::new();
@@ -432,9 +494,7 @@ mod tests {
         vm.exec().expect("Execution failed");
 
         let right_result = [
-            false, true, true, true,
-            false, false, false, true,
-            true, false
+            false, true, true, true, false, false, false, true, true, false,
         ];
 
         for i in 0..10 {
@@ -468,11 +528,8 @@ mod tests {
             pre_inst.push((op, 5, 4, rd_k + 5));
             rd_k += 6;
         }
-        let instructions : Vec<_> = pre_inst.into_iter().map(tuple_to_inst).collect();
-        let consts = [
-            Int(-5), Int(1), Int(3),
-            Float(-2.7), Float(3.6), Float(7.9)
-        ];
+        let instructions: Vec<_> = pre_inst.into_iter().map(tuple_to_inst).collect();
+        let consts = [Int(-5), Int(1), Int(3), Float(-2.7), Float(3.6), Float(7.9)];
 
         let mut vm = VM::new();
         vm.push_instructions(instructions.iter());
@@ -480,12 +537,9 @@ mod tests {
         vm.exec().expect("Execution failed");
 
         let right_result = [
-            true, false, false, true, false, false,
-            true, true, false, true, true, false,
-            false, false, true, false, false, true,
-            false, true, true, false, true, true,
-            false, true, false, false, true, false,
-            true, false, true, true, false, true
+            true, false, false, true, false, false, true, true, false, true, true, false, false,
+            false, true, false, false, true, false, true, true, false, true, true, false, true,
+            false, false, true, false, true, false, true, true, false, true,
         ];
         for i in 0..36 {
             if let Bool(res) = vm.load_register(6 + i).unwrap() {

@@ -499,19 +499,18 @@ impl Lexer {
                             iter.next();
                             None
                         } // Ignore whitespace
-                        '!'..='/' | ':'..='@' | '['..='`' | '{'..='~' => {
+                        c @ ('!'..='/' | ':'..='@' | '['..='`' | '{'..='~') if c != '_' => {
                             Some(Self::consume_op(&mut iter))
                         }
                         _ => Some(Self::consume_id_or_key(&mut iter)),
                     };
-                    match result {
-                        Some(result) => match result {
+                    if let Some(result) = result {
+                        match result {
                             Ok(x) => self.tokens.push(x),
                             Err((error, loc)) => {
                                 self.add_diagnostic(error, loc);
                             }
-                        },
-                        None => (),
+                        }
                     }
                 }
                 (None, _) => {
@@ -542,8 +541,7 @@ mod tests {
             } else if let Ok((Token::Integer(j), _)) = result {
                 assert_eq!(i, j);
             } else {
-                assert!(
-                    false,
+                panic!(
                     "Expected parse failure! source = {s} , result = {:?}",
                     result
                 );
@@ -595,8 +593,7 @@ mod tests {
             } else if let Ok((Token::Float(j), _)) = result {
                 assert_eq!(i, j);
             } else {
-                assert!(
-                    false,
+                panic!(
                     "Expected parse failure! source = {s} , result = {:?}",
                     result
                 );
@@ -626,8 +623,7 @@ mod tests {
             } else if let Ok((Token::Str(j), _)) = result {
                 assert_eq!(i, j);
             } else {
-                assert!(
-                    false,
+                panic!(
                     "Expected parse failure! source = {s} , result = {:?}",
                     result
                 );
@@ -653,9 +649,26 @@ mod tests {
         test_helper("'", "", true);
     }
 
+    fn test_str(code: &str, should_fail: bool) {
+        let file = SharedFile::from_str(code);
+        let lexer = Lexer::new(OsString::from_str("").unwrap(), file);
+        for token in lexer.tokens.iter() {
+            println!("{:?}", token.0);
+        }
+
+        if !should_fail && lexer.diagnostic_count() > 0 {
+            lexer.print_diagnoses();
+        }
+        if should_fail {
+            assert!(lexer.diagnostic_count() > 0);
+        } else {
+            assert!(lexer.diagnostic_count() == 0);
+        }
+    }
+
     #[test]
     fn test_dispatch() {
-        let file = r#"#!/bin/diatom -c 
+        let code = r#"#!/bin/diatom -c 
             fn fac(a) do 
                 b = 1 c =2 -- @@@@
                 if a> 0 then return a *fac(a - 1) elsif 
@@ -665,30 +678,12 @@ mod tests {
             set = {'s', 'ma\u00E9', 65e52, 0b00110} dict = {:}.insert(('key', 98)) 
             🐶🐱 <> "Doa\x09 and cat'?'" 
             "#;
-        let file = SharedFile::from_str(file);
-        let lexer = Lexer::new(OsString::from_str("unit_test.dm").unwrap(), file);
-        for token in lexer.tokens.iter() {
-            println!("{:?}", token.0);
-        }
-
-        if lexer.diagnostic_count() > 0 {
-            lexer.print_diagnoses();
-        }
-        assert!(lexer.diagnostic_count() == 0);
+        test_str(code, false);
     }
 
     #[test]
-    fn test_invalid_op() {
-        let file = "<< >>";
-        let file = SharedFile::from_str(file);
-        let lexer = Lexer::new(OsString::from_str("unit_test.dm").unwrap(), file);
-        for token in lexer.tokens.iter() {
-            println!("{:?}", token.0);
-        }
-
-        if lexer.diagnostic_count() > 0 {
-            lexer.print_diagnoses();
-        }
-        assert!(lexer.diagnostic_count() == 0);
+    fn test_valid() {
+        let code = "____";
+        test_str(code, false);
     }
 }

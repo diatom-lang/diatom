@@ -127,8 +127,10 @@ impl Diagnoser {
     /// Print to stdout
     pub fn print(&self) {
         let writer = StandardStream::stdout(ColorChoice::Auto);
-        let mut config = codespan_reporting::term::Config::default();
-        config.chars = Chars::ascii();
+        let config = codespan_reporting::term::Config {
+            chars: Chars::ascii(),
+            ..Default::default()
+        };
         for diagnostic in &self.diagnoses {
             let r = term::emit(&mut writer.lock(), &config, &self.files, diagnostic);
             if let Err(r) = r {

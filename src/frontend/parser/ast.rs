@@ -6,7 +6,7 @@ use crate::diagnostic::Loc;
 ///
 /// `Set`, `List` and `Dict` are three special classes that should be implemented by code generator
 /// backend. Specially, `Any` means any type except `Nil` is possible.
-pub enum Type {
+pub enum _Type {
     Any,
     Float,
     Int,
@@ -74,10 +74,10 @@ pub enum OpPostfix {
 
 #[derive(Debug)]
 pub enum Expr_ {
-    Block(Vec<Box<Expr>>),
+    Block(Vec<Expr>),
     /// An `if..then..elsif..then..else..end`
     /// Expression is in order
-    If(Vec<Box<Expr>>),
+    If(Vec<Expr>),
     Prefix(OpPrefix, Box<Expr>),
     /// `call func arg` or `index array num`
     /// If func call does not have any arguments, the third parameter is None.

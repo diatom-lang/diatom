@@ -12,6 +12,7 @@ env:
 
 jobs:
   rustdoc:
+    if: github.repository == 'diatom-lang/diatom'
     runs-on: ubuntu-latest
 
     steps:

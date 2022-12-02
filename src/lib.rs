@@ -9,7 +9,7 @@
 //!
 //! ## How to use this interpreter
 //!
-//! Work in progress...
+//! See examples in [Parser].
 //!
 //!
 mod backend;
@@ -20,4 +20,4 @@ pub use console::Console;
 pub use frontend::Parser;
 
 #[cfg(feature = "vm")]
-pub use backend::vm::runtime::VM;
+pub use backend::{AsmFile, VM, VM_VERSION};
