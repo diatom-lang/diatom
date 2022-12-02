@@ -24,6 +24,7 @@ impl Default for Data {
     }
 }
 
+/// A virtual machine to run diatom bytecode
 pub struct VM {
     instructions: Vec<Inst>,
     consts: Vec<Data>,
@@ -68,8 +69,8 @@ impl VM {
     }
 
     fn load_register(&mut self, index: u32) -> Result<Data, String> {
-        if self.call_stack.len() == 0 {
-            self.on_error(format!("Load register without stack frame."))?
+        if self.call_stack.is_empty() {
+            self.on_error("Load register without stack frame.".to_string())?
         }
         let fp = self.call_stack[self.call_stack.len() - 1].1;
         let data = self.data_stack.get((fp + index) as usize);
@@ -82,8 +83,8 @@ impl VM {
     }
 
     fn save_register(&mut self, index: u32, data: Data) -> Result<(), String> {
-        if self.call_stack.len() == 0 {
-            self.on_error(format!("Load register without stack frame."))?
+        if self.call_stack.is_empty() {
+            self.on_error("Load register without stack frame.".to_string())?
         }
         let fp = self.call_stack[self.call_stack.len() - 1].1;
         let rd = self.data_stack.get_mut((fp + index) as usize);
@@ -269,7 +270,7 @@ impl VM {
                 push => {
                     let size = rd;
                     if self.next_frame.is_some() {
-                        self.on_error(format!("Double push detected."))?
+                        self.on_error("Double push detected.".to_string())?
                     } else {
                         self.next_frame = Some(size);
                         (0..size).for_each(|_| self.data_stack.push(Data::Nil));
@@ -277,7 +278,7 @@ impl VM {
                 }
                 call => match self.next_frame {
                     None => {
-                        self.on_error(format!("Call function without creating a stack frame."))?
+                        self.on_error("Call function without creating a stack frame.".to_string())?
                     }
                     Some(frame) => {
                         self.call_stack
@@ -382,6 +383,12 @@ impl VM {
             self.ip += 1;
         }
         Ok(())
+    }
+}
+
+impl Default for VM {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -45,6 +45,31 @@ const fn precedence_postfix() -> u32 {
 /// # Errors
 /// Error code `E1000` to `E1999` is reserved for `Parser`
 ///
+/// # Example
+///
+/// ```rust, no_run
+/// use diatom::Parser;
+/// use std::ffi::OsStr;
+///
+/// // Create a new parser
+/// let mut parser = Parser::default();
+/// // To parse a single file
+/// parser.parse(OsStr::new("/path/to/code.dm"));
+/// // Check if something went wrong
+/// if parser.diagnostic_count() > 0 {
+///     parser.print_diagnoses();
+///     parser.print_diagnoses_summary();
+/// }
+///
+/// // Retrieve AST tree
+/// let _ast = parser.get_incremental();
+///
+/// // Or parse a &str
+/// parser.parse_str(OsStr::new("/path/to/code.dm"), "<code here>");
+/// let _ast = parser.get_incremental();
+///
+/// ```
+///
 pub struct Parser {
     diagnoser: Diagnoser,
     files: AHashMap<OsString, Lexer>,

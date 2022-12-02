@@ -1,2 +1,3 @@
-#[cfg(feature = "vm")]
-pub mod vm;
+mod vm;
+
+pub use vm::{runtime::VM, AsmFile, VM_VERSION};

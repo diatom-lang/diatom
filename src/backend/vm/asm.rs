@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+/// Version of this virtual machine
 pub const VM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -17,6 +18,7 @@ impl Inst {
 }
 
 #[derive(Serialize, Deserialize)]
+/// Load and store bytecode to file
 pub struct AsmFile {
     md5: String,
     vm_version: &'static str,
