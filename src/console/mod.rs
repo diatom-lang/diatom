@@ -134,7 +134,10 @@ impl Console {
                         println!("{:?}", self.parser.get_incremental().collect::<Vec<_>>());
                     }
                 }
-                Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => {
+                Ok(Signal::CtrlC) => {
+                    line_editor.run_edit_commands(&[EditCommand::Clear]);
+                }
+                Ok(Signal::CtrlD) => {
                     break;
                 }
                 Err(err) => {
