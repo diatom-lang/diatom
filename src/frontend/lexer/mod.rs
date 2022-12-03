@@ -453,6 +453,7 @@ impl Lexer {
                     '{' => Ok((Token::Op(Operator::LBrc), loc)),
                     '}' => Ok((Token::Op(Operator::RBrc), loc)),
                     ':' => Ok((Token::Op(Operator::Colon), loc)),
+                    '$' => Ok((Token::Op(Operator::Call), loc)),
                     c => Err((ErrorCode::InvalidOp(c), loc)),
                 }
             }

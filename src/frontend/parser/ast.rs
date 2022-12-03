@@ -83,6 +83,11 @@ pub enum Expr_ {
     /// If func call does not have any arguments, the third parameter is None.
     Postfix(OpPostfix, Box<Expr>, Option<Box<Expr>>),
     Infix(OpInfix, Box<Expr>, Box<Expr>),
+    /// Define a function
+    ///
+    /// First expression is declaration(None for no parameters), second is function body
+    /// If its name is None, then this is a lambda expression
+    Def(Option<String>, Option<Box<Expr>>, Box<Expr>),
     Id(String),
     Const(Const),
     Error,
@@ -106,6 +111,14 @@ impl Debug for Expr {
             Expr_::Const(c) => write!(f, "{:?}", c),
             Expr_::Error => write!(f, "Error"),
             Expr_::If(v) => f.debug_tuple("").field(&"if").field(&v).finish(),
+            Expr_::Def(name, decl, body) => {
+                let mut f = f.debug_tuple("def");
+                if name.is_some() {
+                    f.field(name).field(decl).field(body).finish()
+                } else {
+                    f.field(decl).field(body).finish()
+                }
+            }
         }
     }
 }

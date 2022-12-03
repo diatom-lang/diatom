@@ -211,7 +211,6 @@ impl Parser {
             let start = iter.loc();
             let stat = match iter.peek() {
                 Some(Key(Class)) => self.consume_class(&mut iter),
-                Some(Key(Def)) => self.consume_def(&mut iter),
                 Some(_) => {
                     let expr = self.consume_expr(&mut iter, 0, None);
                     let end = iter.loc();
@@ -431,8 +430,51 @@ impl Parser {
         todo!()
     }
 
-    fn consume_def(&mut self, _iter: &mut TokenIterator) -> Stat {
-        todo!()
+    fn consume_def(&mut self, iter: &mut TokenIterator) -> Expr {
+        iter.next();
+        let start = iter.loc();
+        let name = if let Some(Token::Id(name)) = iter.peek() {
+            let name = name.clone();
+            iter.next();
+            Some(name)
+        } else {
+            None
+        };
+        let eof = self.consume_to_op(
+            iter,
+            Operator::LPar,
+            Some((Token::Key(Keyword::Def), start.clone())),
+        );
+        if eof {
+            return Expr {
+                loc: start.start..iter.loc().end,
+                val: Expr_::Error,
+            };
+        }
+        let decl_start = iter.loc();
+        let decl = if let Some(Token::Op(Operator::RPar)) = iter.peek() {
+            iter.next();
+            None
+        } else {
+            let decl = self.consume_expr(iter, 0, Some(Token::Op(Operator::RPar)));
+            let eof = self.consume_to_op(
+                iter,
+                Operator::RPar,
+                Some((Token::Op(Operator::LPar), decl_start)),
+            );
+            if eof {
+                return Expr {
+                    loc: start.start..iter.loc().end,
+                    val: Expr_::Error,
+                };
+            }
+            Some(Box::new(decl))
+        };
+        let body = self.consume_expr(iter, 0, None);
+        Expr {
+            loc: start.start..iter.loc().end,
+            val: Expr_::Def(name, decl, Box::new(body)),
+        }
     }
 
     fn consume_block(&mut self, iter: &mut TokenIterator) -> Expr {
@@ -496,6 +538,7 @@ impl Parser {
                     val: Expr_::Const(Const::Nil),
                 }
             }
+            Some(Key(Def)) => self.consume_def(iter),
             Some(Str(s)) => {
                 let s = s.clone();
                 iter.next();
@@ -553,12 +596,21 @@ impl Parser {
             Some(Op(LBrk)) => {
                 iter.next();
                 // Test for empty list
-                let expr = self.consume_expr(iter, 0, Some(Op(RBrk)));
-                self.consume_to_op(iter, RBrk, Some((Op(LBrk), start.clone())));
-                let end = iter.loc();
-                Expr {
-                    loc: start.start..end.end,
-                    val: Expr_::Const(Const::List(Some(Box::new(expr)))),
+                if let Some(Op(Operator::RBrk)) = iter.peek() {
+                    iter.next();
+                    let end = iter.loc();
+                    Expr {
+                        loc: start.start..end.end,
+                        val: Expr_::Const(Const::List(None)),
+                    }
+                } else {
+                    let expr = self.consume_expr(iter, 0, Some(Op(RBrk)));
+                    self.consume_to_op(iter, RBrk, Some((Op(LBrk), start.clone())));
+                    let end = iter.loc();
+                    Expr {
+                        loc: start.start..end.end,
+                        val: Expr_::Const(Const::List(Some(Box::new(expr)))),
+                    }
                 }
             }
             Some(token) => {
@@ -602,7 +654,7 @@ impl Parser {
 
         loop {
             let op = match iter.peek2() {
-                (Some(Op(Colon)), op) => {
+                (Some(Op(Call)), op) => {
                     let op = match op {
                         Some(Op(LPar)) => OpPostfix::Call,
                         Some(Op(LBrk)) => OpPostfix::Index,
@@ -761,7 +813,7 @@ mod tests {
 
     #[test]
     fn test_expr() {
-        let code = "a,b, nil = not 32 * 15:()+8.9e13//(12+\"asdf\") or false and -23";
+        let code = "a,b, nil = not 32 * 15$()+8.9e13//(12+\"asdf\") or false and -23";
         let code = SharedFile::from_str(code);
         let lexer = Lexer::new(OsString::from_str("test.dm").unwrap(), code);
         let mut parser = Parser::new();
@@ -775,7 +827,7 @@ mod tests {
 
     #[test]
     fn test_expr_postfix_ambiguous() {
-        let code = "0,a : (1,2,3) (3,4):[2-1]+0.333//[0,1,2]:[1][a,v,b]";
+        let code = "0,a $ (1,2,3) (3,4)$[2-1]+0.333//[0,1,2]$[1][a,v,b]";
         let mut parser = Parser::new();
         parser.parse_str(OsStr::new("test.dm"), code);
         println!("{:#?}", parser.ast.statements);
@@ -787,25 +839,36 @@ mod tests {
 
     #[test]
     fn test_valid() {
-        test_str("a:()", false);
+        test_str("a$()", false);
+        test_str("[]", false);
+        test_str("", false);
     }
 
     #[test]
     fn test_invalid() {
         test_str(">> <<", true);
-        test_str("a:[]", true);
+        test_str("a$[]", true);
         test_str("[1,2,]", true);
     }
 
     #[test]
     fn test_if() {
         test_str(
-            "if a then b elsif c then 0.92 a = 0 b:[0,1,2] else end",
+            "if a then b elsif c then 0.92 a = 0 b$[0,1,2] else end",
             false,
         );
         test_str("if a then else nil end", false);
         test_str("if a then else end", false);
-        test_str("if a:[] else end", true);
-        test_str("if a:[] elsif b else end", true);
+        test_str("if a else end", true);
+        test_str("if a elsif b else end", true);
+    }
+
+    #[test]
+    fn test_def() {
+        test_str("def a a+1", true);
+        test_str("def a() a+1", false);
+        test_str("def a(a) a+1", false);
+        test_str("def () 1", false);
+        test_str("def (a, b, c) a+b+1", false);
     }
 }

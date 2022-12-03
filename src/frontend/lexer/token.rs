@@ -113,6 +113,8 @@ pub enum Operator {
     RBrc,
     /// ":"
     Colon,
+    /// $
+    Call,
 }
 
 impl Display for Token {
@@ -199,6 +201,7 @@ impl Display for Operator {
             Operator::LBrc => "{",
             Operator::RBrc => "}",
             Operator::Colon => ":",
+            Operator::Call => "$",
         };
         write!(f, "{}", name)
     }
