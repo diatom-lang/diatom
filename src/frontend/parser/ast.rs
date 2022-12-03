@@ -16,9 +16,12 @@ pub enum _Type {
     Nil,
 }
 
-#[derive(Debug)]
 pub enum Stat_ {
-    Expr(Box<Expr>),
+    Expr(Expr),
+    Continue,
+    Break,
+    Return(Option<Expr>),
+    Error,
 }
 
 pub struct Stat {
@@ -28,7 +31,20 @@ pub struct Stat {
 
 impl Debug for Stat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("").field(&self.val).finish()
+        use Stat_::*;
+        match &self.val {
+            Expr(expr) => f.debug_tuple("").field(&expr).finish(),
+            Continue => f.debug_tuple("continue").finish(),
+            Break => f.debug_tuple("break").finish(),
+            Return(expr) => {
+                if let Some(expr) = expr {
+                    f.debug_tuple("return").field(&expr).finish()
+                } else {
+                    f.debug_tuple("return").finish()
+                }
+            }
+            Error => f.debug_tuple("error").finish(),
+        }
     }
 }
 
@@ -74,7 +90,7 @@ pub enum OpPostfix {
 
 #[derive(Debug)]
 pub enum Expr_ {
-    Block(Vec<Expr>),
+    Block(Vec<Stat>),
     /// An `if..then..elsif..then..else..end`
     /// Expression is in order
     If(Vec<Expr>),
@@ -87,7 +103,7 @@ pub enum Expr_ {
     ///
     /// First expression is declaration(None for no parameters), second is function body
     /// If its name is None, then this is a lambda expression
-    Def(Option<String>, Option<Box<Expr>>, Box<Expr>),
+    Def(Option<String>, Option<Box<Expr>>, Box<Stat>),
     Id(String),
     Const(Const),
     Error,

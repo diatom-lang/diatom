@@ -670,7 +670,7 @@ mod tests {
     #[test]
     fn test_dispatch() {
         let code = r#"#!/bin/diatom -c 
-            fn fac(a) do 
+            def fac(a)
                 b = 1 c =2 -- @@@@
                 if a> 0 then return a *fac(a - 1) elsif 
                 a == 0 then return 1 else return 0

@@ -28,8 +28,7 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
     match error {
         ErrorCode::NoSuchFile(f, err) => Diagnostic::error()
             .with_code("E1000")
-            .with_message(format!("Can not read file `{}`: `{}`", f, err))
-            .with_labels(vec![Label::primary(file_id, loc)]),
+            .with_message(format!("Can not read file `{}`: `{}`", f, err)),
         ErrorCode::UnexpectedToken(met, expected, to_match) => {
             let mut diagnostic = Diagnostic::error().with_code("E1001");
             if let Some(t) = met {

@@ -40,6 +40,18 @@ const fn precedence_postfix() -> u32 {
     101
 }
 
+/// A pattern match all possible start of an expression
+macro_rules! expr_start_pattern {
+    () => {
+        Token::Key(Keyword::Def | Keyword::If | Keyword::Begin | Keyword::Nil)
+            | Token::Op(_)
+            | Token::Id(_)
+            | Token::Integer(_)
+            | Token::Float(_)
+            | Token::Str(_)
+    };
+}
+
 /// The parser for Diatom.
 ///
 /// # Errors
@@ -200,29 +212,82 @@ impl Parser {
     }
 
     fn parse_file(&mut self, path: &OsStr, content: SharedFile) {
-        use Keyword::*;
-        use Token::*;
-
         let lexer = Lexer::new(path.to_os_string(), content.clone());
         self.current_file_id = self.diagnoser.new_file(path.to_os_string(), content);
         let mut iter = lexer.iter();
 
-        loop {
-            let start = iter.loc();
-            let stat = match iter.peek() {
-                Some(Key(Class)) => self.consume_class(&mut iter),
-                Some(_) => {
-                    let expr = self.consume_expr(&mut iter, 0, None);
-                    let end = iter.loc();
-                    Stat::new(Stat_::Expr(Box::new(expr)), start.start..end.end)
-                }
-                None => {
-                    break;
-                }
-            };
+        while iter.peek().is_some() {
+            let stat = self.consume_stat(&mut iter, None);
             self.ast.statements.push(stat);
         }
         self.files.insert(path.to_os_string(), lexer);
+    }
+
+    fn consume_stat(&mut self, iter: &mut TokenIterator, not_take_on_error: Option<Token>) -> Stat {
+        use Keyword::*;
+        use Token::*;
+        let start = iter.next_loc();
+        match iter.peek() {
+            Some(Key(Break)) => {
+                iter.next();
+                Stat {
+                    loc: start,
+                    val: Stat_::Break,
+                }
+            }
+            Some(Key(Continue)) => {
+                iter.next();
+                Stat {
+                    loc: start,
+                    val: Stat_::Break,
+                }
+            }
+            Some(Key(Return)) => {
+                iter.next();
+                match iter.peek() {
+                    Some(expr_start_pattern!()) => {
+                        let expr = self.consume_expr(iter, 0, not_take_on_error);
+                        let end = iter.loc();
+                        Stat {
+                            loc: start.start..end.end,
+                            val: Stat_::Return(Some(expr)),
+                        }
+                    }
+                    _ => Stat {
+                        loc: start,
+                        val: Stat_::Return(None),
+                    },
+                }
+            }
+            Some(expr_start_pattern!()) => {
+                let expr = self.consume_expr(iter, 0, not_take_on_error);
+                let end = iter.loc();
+                Stat {
+                    loc: start.start..end.end,
+                    val: Stat_::Expr(expr),
+                }
+            }
+            Some(Key(Class)) => self.consume_class(iter),
+            Some(token) => {
+                let token = token.clone();
+                iter.next();
+                self.add_diagnostic(
+                    ErrorCode::UnexpectedToken(Some(token), None, None),
+                    start.clone(),
+                );
+                Stat {
+                    loc: start,
+                    val: Stat_::Error,
+                }
+            }
+            None => {
+                self.add_diagnostic(ErrorCode::UnexpectedEof, start.clone());
+                Stat {
+                    loc: start,
+                    val: Stat_::Error,
+                }
+            }
+        }
     }
 
     /// Consume an iterator to an expected operator or EOF
@@ -346,7 +411,7 @@ impl Parser {
             }
         }
         // match block
-        let mut block: Vec<Expr> = vec![];
+        let mut block: Vec<Stat> = vec![];
         let mut block_start = iter.next_loc();
         loop {
             match iter.peek() {
@@ -393,8 +458,8 @@ impl Parser {
                                 };
                             }
                             Some(_) => {
-                                let expr = self.consume_expr(iter, 0, Some(Key(End)));
-                                block.push(expr);
+                                let stat = self.consume_stat(iter, Some(Key(End)));
+                                block.push(stat);
                             }
                             None => {
                                 let end = iter.loc();
@@ -408,8 +473,8 @@ impl Parser {
                     }
                 }
                 Some(_) => {
-                    let expr = self.consume_expr(iter, 0, Some(Key(Else)));
-                    block.push(expr);
+                    let stat = self.consume_stat(iter, Some(Key(Else)));
+                    block.push(stat);
                 }
                 None => {
                     let end = iter.loc();
@@ -470,7 +535,7 @@ impl Parser {
             }
             Some(Box::new(decl))
         };
-        let body = self.consume_expr(iter, 0, None);
+        let body = self.consume_stat(iter, None);
         Expr {
             loc: start.start..iter.loc().end,
             val: Expr_::Def(name, decl, Box::new(body)),
@@ -480,7 +545,7 @@ impl Parser {
     fn consume_block(&mut self, iter: &mut TokenIterator) -> Expr {
         iter.next();
         let start = iter.loc();
-        let mut exprs: Vec<Expr> = vec![];
+        let mut stats: Vec<Stat> = vec![];
         loop {
             match iter.peek() {
                 Some(Token::Key(Keyword::End)) => {
@@ -488,19 +553,19 @@ impl Parser {
                     let end = iter.loc();
                     return Expr {
                         loc: start.start..end.end,
-                        val: Expr_::Block(exprs),
+                        val: Expr_::Block(stats),
                     };
                 }
                 Some(_) => {
-                    let expr = self.consume_expr(iter, 0, Some(Token::Key(Keyword::End)));
-                    exprs.push(expr);
+                    let stat = self.consume_stat(iter, Some(Token::Key(Keyword::End)));
+                    stats.push(stat);
                 }
                 None => {
                     let end = iter.loc();
                     self.add_diagnostic(ErrorCode::UnexpectedEof, end.clone());
                     return Expr {
                         loc: start.start..end.end,
-                        val: Expr_::Block(exprs),
+                        val: Expr_::Block(stats),
                     };
                 }
             }
@@ -563,7 +628,7 @@ impl Parser {
                     val: Expr_::Const(Const::Int(i)),
                 }
             }
-            Some(Key(val @ (Keyword::True | Keyword::False))) => {
+            Some(Key(val @ (True | False))) => {
                 let val = matches!(val, Keyword::True);
                 iter.next();
                 Expr {
@@ -870,5 +935,21 @@ mod tests {
         test_str("def a(a) a+1", false);
         test_str("def () 1", false);
         test_str("def (a, b, c) a+b+1", false);
+    }
+
+    #[test]
+    fn test_statement() {
+        test_str("begin return end", false);
+        test_str("begin return [1,2,3] return def ()[] end", false);
+        test_str("begin break continue end", false);
+        test_str("if false then return else end", false);
+        test_str(
+            "if false then return [1,2,3] return def ()[] else end",
+            false,
+        );
+        test_str("if false then break continue else end", false);
+        test_str("return", false);
+        test_str("def () return 1", false);
+        test_str("def () return ", false);
     }
 }
