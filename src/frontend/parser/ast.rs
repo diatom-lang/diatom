@@ -21,6 +21,7 @@ pub enum Stat_ {
     Continue,
     Break,
     Return(Option<Expr>),
+    Class(String, Vec<(String, Loc)>, Vec<Expr>),
     Error,
 }
 
@@ -44,6 +45,12 @@ impl Debug for Stat {
                 }
             }
             Error => f.debug_tuple("error").finish(),
+            Class(name, fields, methods) => f
+                .debug_tuple("class")
+                .field(name)
+                .field(&fields.iter().map(|x| &x.0).collect::<Vec<&String>>())
+                .field(methods)
+                .finish(),
         }
     }
 }
@@ -74,6 +81,7 @@ pub enum OpInfix {
     Mod,
     Exp,
     Comma,
+    Member,
 }
 
 #[derive(Clone, Copy, Debug)]

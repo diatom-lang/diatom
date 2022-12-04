@@ -22,6 +22,8 @@ pub enum ErrorCode {
     UnexpectedEof,
     /// E1003 Missing expression in parentheses
     MissingExpr(Loc),
+    /// E1004 Missing statement
+    MissingStat(Loc),
 }
 
 pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
@@ -44,9 +46,10 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
                 diagnostic = diagnostic.with_notes(vec![format!("Consider add a `{}` here", t)]);
             }
             if let Some((t, loc)) = to_match {
-                diagnostic = diagnostic
-                    .with_labels(vec![Label::secondary(file_id, loc)
-                        .with_message(format!("to match `{}` here", t))]);
+                diagnostic =
+                    diagnostic
+                        .with_labels(vec![Label::secondary(file_id, loc)
+                            .with_message(format!("Due to `{}` here", t))]);
             }
             diagnostic
         }
@@ -57,6 +60,13 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
         ErrorCode::MissingExpr(loc_pre) => Diagnostic::error()
             .with_code("E1003")
             .with_message("Missing expression here")
+            .with_labels(vec![
+                Label::primary(file_id, loc),
+                Label::secondary(file_id, loc_pre).with_message("Previous token here"),
+            ]),
+        ErrorCode::MissingStat(loc_pre) => Diagnostic::error()
+            .with_code("E1003")
+            .with_message("Missing statement here")
             .with_labels(vec![
                 Label::primary(file_id, loc),
                 Label::secondary(file_id, loc_pre).with_message("Previous token here"),
