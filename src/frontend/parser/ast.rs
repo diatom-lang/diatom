@@ -113,6 +113,7 @@ pub enum Expr_ {
     /// If its name is None, then this is a lambda expression
     Def(Option<String>, Option<Box<Expr>>, Box<Stat>),
     Id(String),
+    Parentheses(Box<Expr>),
     Const(Const),
     Error,
 }
@@ -143,6 +144,12 @@ impl Debug for Expr {
                     f.field(decl).field(body).finish()
                 }
             }
+            Expr_::Parentheses(expr) => f
+                .debug_tuple("")
+                .field(&"(")
+                .field(expr)
+                .field(&")")
+                .finish(),
         }
     }
 }

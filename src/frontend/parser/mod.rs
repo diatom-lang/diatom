@@ -728,7 +728,10 @@ impl Parser {
                 iter.next();
                 let lhs = self.consume_expr(iter, 0, Some(Op(RPar)));
                 self.consume_to_op(iter, RPar, Some((Op(LPar), start.clone())));
-                lhs
+                Expr {
+                    loc: start.start..iter.loc().end,
+                    val: Expr_::Parentheses(Box::new(lhs)),
+                }
             }
             Some(Op(op @ (Not | Minus))) => {
                 let op = match op {
