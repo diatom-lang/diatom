@@ -18,6 +18,10 @@ pub enum Keyword {
     False,
     /// do
     Do,
+    /// where
+    Where,
+    /// until
+    Until,
     /// end
     End,
     /// if
@@ -142,6 +146,8 @@ impl Display for Keyword {
             Keyword::True => "true",
             Keyword::False => "false",
             Keyword::Do => "do",
+            Keyword::Where => "where",
+            Keyword::Until => "until",
             Keyword::End => "end",
             Keyword::If => "if",
             Keyword::Then => "then",

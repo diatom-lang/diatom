@@ -1,10 +1,10 @@
 # The Diatom Programming Language
 ![Unit Tests](https://github.com/diatom-lang/diatom/actions/workflows/rust.yml/badge.svg)
 ![doc](https://github.com/diatom-lang/diatom/actions/workflows/rustdoc.yml/badge.svg)
-
 [![Crates.io][crates-badge]][crates-url]
 [![license][license-badge]][crates-url]
 
+[![dependency status](https://deps.rs/repo/github/diatom-lang/diatom/status.svg)](https://deps.rs/repo/github/diatom-lang/diatom)
 ![issue](https://img.shields.io/github/issues/diatom-lang/diatom)
 ![pr](https://img.shields.io/github/issues-pr/diatom-lang/diatom)
 ![coverage](https://img.shields.io/codecov/c/github/diatom-lang/diatom)
@@ -15,7 +15,7 @@
 
 A dynamic typed scripting language for embedded use in applications.
 
-## Warning: Project is underdevelopment is not useable now.
+## Warning: Project is underdevelopment and not useable now.
 
 ## Features
  - **Gradual Typing**: Support for optional type hint.

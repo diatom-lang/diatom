@@ -16,9 +16,17 @@ pub enum _Type {
     Nil,
 }
 
-#[derive(Debug)]
 pub enum Stat_ {
-    Expr(Box<Expr>),
+    Expr(Expr),
+    Continue,
+    Break,
+    Return(Option<Expr>),
+    Class(String, Vec<(String, Loc)>, Vec<Expr>),
+    /// An optional break condition & a body
+    Loop(Option<Expr>, Vec<Stat>),
+    /// variables, iterator, statements
+    For(Box<Expr>, Box<Expr>, Vec<Stat>),
+    Error,
 }
 
 pub struct Stat {
@@ -28,7 +36,35 @@ pub struct Stat {
 
 impl Debug for Stat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("").field(&self.val).finish()
+        use Stat_::*;
+        match &self.val {
+            Expr(expr) => f.debug_tuple("").field(&expr).finish(),
+            Continue => f.debug_tuple("continue").finish(),
+            Break => f.debug_tuple("break").finish(),
+            Return(expr) => {
+                if let Some(expr) = expr {
+                    f.debug_tuple("return").field(&expr).finish()
+                } else {
+                    f.debug_tuple("return").finish()
+                }
+            }
+            Error => f.debug_tuple("error").finish(),
+            Class(name, fields, methods) => f
+                .debug_tuple("class")
+                .field(name)
+                .field(&fields.iter().map(|x| &x.0).collect::<Vec<&String>>())
+                .field(methods)
+                .finish(),
+            Loop(cond, body) => f.debug_tuple("loop").field(cond).field(body).finish(),
+            For(vars, iter, expr) => f
+                .debug_tuple("for")
+                .field(vars)
+                .field(&"in")
+                .field(iter)
+                .field(&"do")
+                .field(expr)
+                .finish(),
+        }
     }
 }
 
@@ -58,6 +94,7 @@ pub enum OpInfix {
     Mod,
     Exp,
     Comma,
+    Member,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -74,7 +111,7 @@ pub enum OpPostfix {
 
 #[derive(Debug)]
 pub enum Expr_ {
-    Block(Vec<Expr>),
+    Block(Vec<Stat>),
     /// An `if..then..elsif..then..else..end`
     /// Expression is in order
     If(Vec<Expr>),
@@ -87,8 +124,9 @@ pub enum Expr_ {
     ///
     /// First expression is declaration(None for no parameters), second is function body
     /// If its name is None, then this is a lambda expression
-    Def(Option<String>, Option<Box<Expr>>, Box<Expr>),
+    Def(Option<String>, Option<Box<Expr>>, Box<Stat>),
     Id(String),
+    Parentheses(Box<Expr>),
     Const(Const),
     Error,
 }
@@ -119,6 +157,12 @@ impl Debug for Expr {
                     f.field(decl).field(body).finish()
                 }
             }
+            Expr_::Parentheses(expr) => f
+                .debug_tuple("")
+                .field(&"(")
+                .field(expr)
+                .field(&")")
+                .finish(),
         }
     }
 }

@@ -17,7 +17,7 @@ use std::{
     mem::Discriminant,
 };
 
-const fn precedence_infix(op: OpInfix) -> (u32, u32) {
+const fn precedence_infix(op: OpInfix) -> (u16, u16) {
     use OpInfix::*;
     match op {
         Assign => (1, 2),
@@ -29,15 +29,34 @@ const fn precedence_infix(op: OpInfix) -> (u32, u32) {
         Plus | Minus => (13, 14),
         Mul | Div | DivFloor | Mod => (15, 16),
         Exp => (17, 18),
+        Member => (19, 20),
     }
 }
 
-const fn precedence_prefix() -> u32 {
+const fn precedence_prefix() -> u16 {
     100
 }
 
-const fn precedence_postfix() -> u32 {
+const fn precedence_postfix() -> u16 {
     101
+}
+
+/// A pattern match all possible start of an expression
+macro_rules! expr_start_pattern {
+    () => {
+        Token::Key(
+            Keyword::Def
+                | Keyword::If
+                | Keyword::Begin
+                | Keyword::Nil
+                | Keyword::True
+                | Keyword::False,
+        ) | Token::Op(_)
+            | Token::Id(_)
+            | Token::Integer(_)
+            | Token::Float(_)
+            | Token::Str(_)
+    };
 }
 
 /// The parser for Diatom.
@@ -200,29 +219,84 @@ impl Parser {
     }
 
     fn parse_file(&mut self, path: &OsStr, content: SharedFile) {
-        use Keyword::*;
-        use Token::*;
-
         let lexer = Lexer::new(path.to_os_string(), content.clone());
         self.current_file_id = self.diagnoser.new_file(path.to_os_string(), content);
         let mut iter = lexer.iter();
 
-        loop {
-            let start = iter.loc();
-            let stat = match iter.peek() {
-                Some(Key(Class)) => self.consume_class(&mut iter),
-                Some(_) => {
-                    let expr = self.consume_expr(&mut iter, 0, None);
-                    let end = iter.loc();
-                    Stat::new(Stat_::Expr(Box::new(expr)), start.start..end.end)
-                }
-                None => {
-                    break;
-                }
-            };
+        while iter.peek().is_some() {
+            let stat = self.consume_stat(&mut iter, None);
             self.ast.statements.push(stat);
         }
         self.files.insert(path.to_os_string(), lexer);
+    }
+
+    fn consume_stat(&mut self, iter: &mut TokenIterator, not_take_on_error: Option<Token>) -> Stat {
+        use Keyword::*;
+        use Token::*;
+        let start = iter.next_loc();
+        match iter.peek() {
+            Some(Key(Break)) => {
+                iter.next();
+                Stat {
+                    loc: start,
+                    val: Stat_::Break,
+                }
+            }
+            Some(Key(Continue)) => {
+                iter.next();
+                Stat {
+                    loc: start,
+                    val: Stat_::Break,
+                }
+            }
+            Some(Key(Return)) => {
+                iter.next();
+                match iter.peek() {
+                    Some(expr_start_pattern!()) => {
+                        let expr = self.consume_expr(iter, 0, not_take_on_error);
+                        let end = iter.loc();
+                        Stat {
+                            loc: start.start..end.end,
+                            val: Stat_::Return(Some(expr)),
+                        }
+                    }
+                    _ => Stat {
+                        loc: start,
+                        val: Stat_::Return(None),
+                    },
+                }
+            }
+            Some(expr_start_pattern!()) => {
+                let expr = self.consume_expr(iter, 0, not_take_on_error);
+                let end = iter.loc();
+                Stat {
+                    loc: start.start..end.end,
+                    val: Stat_::Expr(expr),
+                }
+            }
+            Some(Key(Class)) => self.consume_class(iter),
+            Some(Key(Loop | Until)) => self.consume_loop(iter),
+            Some(Key(For)) => self.consume_for(iter),
+            Some(token) => {
+                let token = token.clone();
+                iter.next();
+                self.add_diagnostic(
+                    ErrorCode::UnexpectedToken(Some(token), None, None),
+                    start.clone(),
+                );
+                Stat {
+                    loc: start,
+                    val: Stat_::Error,
+                }
+            }
+            None => {
+                self.add_diagnostic(ErrorCode::UnexpectedEof, start.clone());
+                Stat {
+                    loc: start,
+                    val: Stat_::Error,
+                }
+            }
+        }
     }
 
     /// Consume an iterator to an expected operator or EOF
@@ -346,7 +420,7 @@ impl Parser {
             }
         }
         // match block
-        let mut block: Vec<Expr> = vec![];
+        let mut block: Vec<Stat> = vec![];
         let mut block_start = iter.next_loc();
         loop {
             match iter.peek() {
@@ -393,8 +467,8 @@ impl Parser {
                                 };
                             }
                             Some(_) => {
-                                let expr = self.consume_expr(iter, 0, Some(Key(End)));
-                                block.push(expr);
+                                let stat = self.consume_stat(iter, Some(Key(End)));
+                                block.push(stat);
                             }
                             None => {
                                 let end = iter.loc();
@@ -407,9 +481,21 @@ impl Parser {
                         }
                     }
                 }
+                Some(Key(End)) => {
+                    exprs.push(Expr {
+                        loc: block_start.start..iter.loc().end,
+                        val: Expr_::Block(block),
+                    });
+                    iter.next();
+                    let end = iter.loc();
+                    return Expr {
+                        loc: start.start..end.end,
+                        val: Expr_::If(exprs),
+                    };
+                }
                 Some(_) => {
-                    let expr = self.consume_expr(iter, 0, Some(Key(Else)));
-                    block.push(expr);
+                    let stat = self.consume_stat(iter, Some(Key(Else)));
+                    block.push(stat);
                 }
                 None => {
                     let end = iter.loc();
@@ -426,8 +512,182 @@ impl Parser {
         }
     }
 
-    fn consume_class(&mut self, _iter: &mut TokenIterator) -> Stat {
-        todo!()
+    fn consume_for(&mut self, iter: &mut TokenIterator) -> Stat {
+        use Keyword::*;
+        use Token::*;
+        iter.next();
+        let start = iter.loc();
+        let vars = self.consume_expr(iter, 0, Some(Key(In)));
+        // Consume "in"
+        if self.has_eof_error || self.consume_to_key(iter, In, Some((Key(For), start.clone()))) {
+            return Stat {
+                loc: start.start..iter.loc().end,
+                val: Stat_::Error,
+            };
+        };
+        let iterator = self.consume_expr(iter, 0, Some(Key(Do)));
+        if self.has_eof_error || self.consume_to_key(iter, Do, Some((Key(For), start.clone()))) {
+            return Stat {
+                loc: start.start..iter.loc().end,
+                val: Stat_::Error,
+            };
+        };
+        let mut stats = vec![];
+        loop {
+            match iter.peek() {
+                Some(Key(End)) => {
+                    iter.next();
+                    return Stat {
+                        loc: start.start..iter.loc().end,
+                        val: Stat_::For(Box::new(vars), Box::new(iterator), stats),
+                    };
+                }
+                Some(_) => stats.push(self.consume_stat(iter, Some(Key(End)))),
+                None => {
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                    return Stat {
+                        loc: start.start..iter.loc().end,
+                        val: Stat_::Error,
+                    };
+                }
+            }
+        }
+    }
+
+    fn consume_loop(&mut self, iter: &mut TokenIterator) -> Stat {
+        use Keyword::*;
+        use Token::*;
+        let key = iter.next().cloned();
+        let start = iter.loc();
+        let cond = match key {
+            Some(Key(Loop)) => None,
+            Some(Key(Until)) => {
+                let stat = self.consume_expr(iter, 0, None);
+                // Consume "do" if there are no EOF error
+                // This is to prevent multiple EOF error spamming
+                if self.has_eof_error
+                    || self.consume_to_key(iter, Do, Some((Key(Until), start.clone())))
+                {
+                    return Stat {
+                        loc: start.start..iter.loc().end,
+                        val: Stat_::Error,
+                    };
+                };
+                Some(stat)
+            }
+            _ => unreachable!(),
+        };
+        let mut stats = vec![];
+        loop {
+            match iter.peek() {
+                Some(Key(End)) => {
+                    iter.next();
+                    return Stat {
+                        loc: start.start..iter.loc().end,
+                        val: Stat_::Loop(cond, stats),
+                    };
+                }
+                Some(_) => stats.push(self.consume_stat(iter, Some(Key(End)))),
+                None => {
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                    return Stat {
+                        loc: start.start..iter.loc().end,
+                        val: Stat_::Error,
+                    };
+                }
+            }
+        }
+    }
+
+    fn consume_class(&mut self, iter: &mut TokenIterator) -> Stat {
+        use Token::*;
+
+        iter.next();
+        let start = iter.loc();
+        let name = match iter.peek() {
+            Some(Id(name)) => {
+                let name = name.clone();
+                iter.next();
+                name
+            }
+            Some(Key(Keyword::End)) => {
+                iter.next();
+                let end = iter.loc();
+                self.add_diagnostic(ErrorCode::MissingStat(start.clone()), end.clone());
+                return Stat {
+                    loc: start.start..end.end,
+                    val: Stat_::Class("Error".to_string(), vec![], vec![]),
+                };
+            }
+            Some(token) => {
+                let token = token.clone();
+                iter.next();
+                let loc = iter.loc();
+                self.add_diagnostic(
+                    ErrorCode::UnexpectedToken(
+                        Some(token),
+                        Some(Id("name of this class".to_string())),
+                        Some((Key(Keyword::Class), start.clone())),
+                    ),
+                    loc,
+                );
+                "Error".to_string()
+            }
+            None => {
+                self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                let end = iter.loc();
+                return Stat {
+                    loc: start.start..end.end,
+                    val: Stat_::Class("Error".to_string(), vec![], vec![]),
+                };
+            }
+        };
+
+        let mut members: Vec<(String, Loc)> = vec![];
+        let mut methods: Vec<Expr> = vec![];
+        loop {
+            match iter.peek() {
+                Some(Key(Keyword::End)) => {
+                    iter.next();
+                    let end = iter.loc();
+                    return Stat {
+                        loc: start.start..end.end,
+                        val: Stat_::Class(name, members, methods),
+                    };
+                }
+                Some(Id(name)) => {
+                    let loc = iter.next_loc();
+                    members.push((name.clone(), loc));
+                    iter.next();
+                }
+                Some(Key(Keyword::Def)) => {
+                    let expr = self.consume_expr(iter, 0, Some(Key(Keyword::End)));
+                    methods.push(expr);
+                }
+                Some(token) => {
+                    let token = token.clone();
+                    iter.next();
+                    let loc = iter.loc();
+                    self.add_diagnostic(
+                        ErrorCode::UnexpectedToken(
+                            Some(token),
+                            None,
+                            Some((Key(Keyword::Class), start.clone())),
+                        ),
+                        loc,
+                    );
+                    iter.next();
+                }
+                None => {
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                    let end = iter.loc();
+                    return Stat {
+                        loc: start.start..end.end,
+                        val: Stat_::Class(name, members, methods),
+                    };
+                }
+            }
+        }
     }
 
     fn consume_def(&mut self, iter: &mut TokenIterator) -> Expr {
@@ -470,7 +730,7 @@ impl Parser {
             }
             Some(Box::new(decl))
         };
-        let body = self.consume_expr(iter, 0, None);
+        let body = self.consume_stat(iter, None);
         Expr {
             loc: start.start..iter.loc().end,
             val: Expr_::Def(name, decl, Box::new(body)),
@@ -480,7 +740,7 @@ impl Parser {
     fn consume_block(&mut self, iter: &mut TokenIterator) -> Expr {
         iter.next();
         let start = iter.loc();
-        let mut exprs: Vec<Expr> = vec![];
+        let mut stats: Vec<Stat> = vec![];
         loop {
             match iter.peek() {
                 Some(Token::Key(Keyword::End)) => {
@@ -488,19 +748,19 @@ impl Parser {
                     let end = iter.loc();
                     return Expr {
                         loc: start.start..end.end,
-                        val: Expr_::Block(exprs),
+                        val: Expr_::Block(stats),
                     };
                 }
                 Some(_) => {
-                    let expr = self.consume_expr(iter, 0, Some(Token::Key(Keyword::End)));
-                    exprs.push(expr);
+                    let stat = self.consume_stat(iter, Some(Token::Key(Keyword::End)));
+                    stats.push(stat);
                 }
                 None => {
                     let end = iter.loc();
                     self.add_diagnostic(ErrorCode::UnexpectedEof, end.clone());
                     return Expr {
                         loc: start.start..end.end,
-                        val: Expr_::Block(exprs),
+                        val: Expr_::Block(stats),
                     };
                 }
             }
@@ -515,7 +775,7 @@ impl Parser {
     fn consume_expr(
         &mut self,
         iter: &mut TokenIterator,
-        min_precedence: u32,
+        min_precedence: u16,
         not_take_on_error: Option<Token>,
     ) -> Expr {
         use Keyword::*;
@@ -563,7 +823,7 @@ impl Parser {
                     val: Expr_::Const(Const::Int(i)),
                 }
             }
-            Some(Key(val @ (Keyword::True | Keyword::False))) => {
+            Some(Key(val @ (True | False))) => {
                 let val = matches!(val, Keyword::True);
                 iter.next();
                 Expr {
@@ -575,7 +835,10 @@ impl Parser {
                 iter.next();
                 let lhs = self.consume_expr(iter, 0, Some(Op(RPar)));
                 self.consume_to_op(iter, RPar, Some((Op(LPar), start.clone())));
-                lhs
+                Expr {
+                    loc: start.start..iter.loc().end,
+                    val: Expr_::Parentheses(Box::new(lhs)),
+                }
             }
             Some(Op(op @ (Not | Minus))) => {
                 let op = match op {
@@ -759,6 +1022,7 @@ impl Parser {
                     Op(Mod) => OpInfix::Mod,
                     Op(Exp) => OpInfix::Exp,
                     Op(Comma) => OpInfix::Comma,
+                    Op(Member) => OpInfix::Member,
                     _ => return lhs,
                 },
                 _ => return lhs,
@@ -820,9 +1084,7 @@ mod tests {
         let expr = parser.consume_expr(&mut lexer.iter(), 0, None);
         println!("{expr:?}");
         parser.diagnoser.print();
-        // This is manually verified to be correct =)
-        let result = "(((\"a\", Comma, \"b\"), Comma, nil), Assign, ((((Not, 32), Mul, (15, Call, None)), Plus, (89000000000000, DivFloor, (12, Plus, asdf))), Or, (false, And, (Neg, 23))))";
-        assert_eq!(format!("{:?}", expr), result);
+        assert_eq!(parser.diagnostic_count(), 0);
     }
 
     #[test]
@@ -859,6 +1121,9 @@ mod tests {
         );
         test_str("if a then else nil end", false);
         test_str("if a then else end", false);
+        test_str("if a then c end", false);
+        test_str("if a then end", false);
+        test_str("if a then elsif c then end", false);
         test_str("if a else end", true);
         test_str("if a elsif b else end", true);
     }
@@ -870,5 +1135,42 @@ mod tests {
         test_str("def a(a) a+1", false);
         test_str("def () 1", false);
         test_str("def (a, b, c) a+b+1", false);
+    }
+
+    #[test]
+    fn test_statement() {
+        test_str("begin return end", false);
+        test_str("begin return [1,2,3] return def ()[] end", false);
+        test_str("begin break continue end", false);
+        test_str("if false then return else end", false);
+        test_str(
+            "if false then return [1,2,3] return def ()[] else end",
+            false,
+        );
+        test_str("if false then break continue else end", false);
+        test_str("return", false);
+        test_str("def () return 1", false);
+        test_str("def () return ", false);
+    }
+
+    #[test]
+    fn test_class() {
+        test_str("class end", true);
+        test_str("class a end", false);
+        test_str("class c def ()[] end", false);
+        test_str("class c a b c def ()begin return 1 end s end", false);
+        test_str("class a a end", false);
+        test_str("class ∂ def ()a a end", false);
+    }
+
+    #[test]
+    fn test_loop() {
+        test_str("loop end", false);
+        test_str("loop continue false true return end", false);
+        test_str("until end", true);
+        test_str("until iii end", true);
+        test_str("until true do end", false);
+        test_str("until true do nil end", false);
+        test_str("until [1,2,3] do xxx yyy break end", false);
     }
 }

@@ -6,7 +6,7 @@ use crate::diagnostic::{Diagnostic, Loc};
 #[cfg_attr(test, derive(Debug))]
 pub enum ErrorCode {
     /// E0001 Invalid digit in number literal
-    InvalidDigit(char),
+    InvalidNum(String),
     /// E0002 Integer literal overflow 64-bits integer
     IntegerOverflow,
     /// E0003 Parse float error
@@ -21,9 +21,9 @@ pub enum ErrorCode {
 
 pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
     match error {
-        ErrorCode::InvalidDigit(c) => Diagnostic::error()
+        ErrorCode::InvalidNum(s) => Diagnostic::error()
             .with_code("E0001")
-            .with_message(format!("Invalid digit `{c}` in number literal"))
+            .with_message(format!("Invalid number literal `{s}`"))
             .with_labels(vec![Label::primary(file_id, loc)]),
         ErrorCode::IntegerOverflow => Diagnostic::error()
             .with_code("E0002")

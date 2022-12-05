@@ -3,10 +3,12 @@ use nu_ansi_term::{Color, Style};
 use reedline::{Highlighter, StyledText};
 use regex::{self, Regex};
 
-const KEYWORDS: [&str; 20] = [
-    "true", "false", "do", "end", "if", "then", "else", "elsif", "case", "in", "for", "nil",
-    "assert", "return", "break", "continue", "loop", "class", "def", "begin",
+const KEYWORDS: [&str; 19] = [
+    "where", "until", "end", "if", "then", "else", "elsif", "case", "in", "for", "do", "assert",
+    "return", "break", "continue", "loop", "class", "def", "begin",
 ];
+
+const KEY_VALUES: [&str; 4] = ["true", "false", "nil", "self"];
 
 #[derive(Default)]
 pub struct DiatomHighlighter;
@@ -15,10 +17,15 @@ fn is_key(s: &str) -> bool {
     KEYWORDS.iter().any(|k| *k == s)
 }
 
+fn is_key_value(s: &str) -> bool {
+    KEY_VALUES.iter().any(|k| *k == s)
+}
+
 lazy_static! {
-    static ref KEY_STYLE: Style = Style::new().fg(Color::Red);
-    static ref NUM_STYLE: Style = Style::new().fg(Color::Cyan);
-    static ref STR_STYLE: Style = Style::new().fg(Color::Magenta);
+    static ref KEY_STYLE: Style = Style::new().fg(Color::LightRed);
+    static ref KEY_VALUE_STYLE: Style = Style::new().fg(Color::Yellow);
+    static ref NUM_STYLE: Style = Style::new().fg(Color::Green);
+    static ref STR_STYLE: Style = Style::new().fg(Color::LightMagenta);
     static ref DEFAULT_STYLE: Style = Style::default();
     // Match valid integer or float point bumber
     static ref RE_NUM: Regex =
@@ -41,6 +48,8 @@ impl Highlighter for DiatomHighlighter {
                 let id = &line[index..end];
                 if is_key(id) {
                     styled_text.push((*KEY_STYLE, id.to_string()));
+                } else if is_key_value(id) {
+                    styled_text.push((*KEY_VALUE_STYLE, id.to_string()));
                 } else {
                     styled_text.push((*DEFAULT_STYLE, id.to_string()));
                 }
