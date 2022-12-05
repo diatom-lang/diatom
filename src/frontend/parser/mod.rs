@@ -276,6 +276,7 @@ impl Parser {
             }
             Some(Key(Class)) => self.consume_class(iter),
             Some(Key(Loop | Until)) => self.consume_loop(iter),
+            Some(Key(For)) => self.consume_for(iter),
             Some(token) => {
                 let token = token.clone();
                 iter.next();
@@ -511,6 +512,48 @@ impl Parser {
         }
     }
 
+    fn consume_for(&mut self, iter: &mut TokenIterator) -> Stat {
+        use Keyword::*;
+        use Token::*;
+        iter.next();
+        let start = iter.loc();
+        let vars = self.consume_expr(iter, 0, Some(Key(In)));
+        // Consume "in"
+        if self.has_eof_error || self.consume_to_key(iter, In, Some((Key(For), start.clone()))) {
+            return Stat {
+                loc: start.start..iter.loc().end,
+                val: Stat_::Error,
+            };
+        };
+        let iterator = self.consume_expr(iter, 0, Some(Key(Do)));
+        if self.has_eof_error || self.consume_to_key(iter, Do, Some((Key(For), start.clone()))) {
+            return Stat {
+                loc: start.start..iter.loc().end,
+                val: Stat_::Error,
+            };
+        };
+        let mut stats = vec![];
+        loop {
+            match iter.peek() {
+                Some(Key(End)) => {
+                    iter.next();
+                    return Stat {
+                        loc: start.start..iter.loc().end,
+                        val: Stat_::For(Box::new(vars), Box::new(iterator), stats),
+                    };
+                }
+                Some(_) => stats.push(self.consume_stat(iter, Some(Key(End)))),
+                None => {
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                    return Stat {
+                        loc: start.start..iter.loc().end,
+                        val: Stat_::Error,
+                    };
+                }
+            }
+        }
+    }
+
     fn consume_loop(&mut self, iter: &mut TokenIterator) -> Stat {
         use Keyword::*;
         use Token::*;
@@ -538,7 +581,11 @@ impl Parser {
         loop {
             match iter.peek() {
                 Some(Key(End)) => {
-                    break;
+                    iter.next();
+                    return Stat {
+                        loc: start.start..iter.loc().end,
+                        val: Stat_::Loop(cond, stats),
+                    };
                 }
                 Some(_) => stats.push(self.consume_stat(iter, Some(Key(End)))),
                 None => {
@@ -549,11 +596,6 @@ impl Parser {
                     };
                 }
             }
-        }
-        self.consume_to_key(iter, End, Some((key.unwrap(), start.clone())));
-        Stat {
-            loc: start.start..iter.loc().end,
-            val: Stat_::Loop(cond, stats),
         }
     }
 

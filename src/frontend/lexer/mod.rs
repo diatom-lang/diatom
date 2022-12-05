@@ -2,6 +2,8 @@ mod error;
 mod token;
 use std::ffi::OsString;
 
+use lazy_static::lazy_static;
+use regex::Regex;
 pub use token::{Keyword, Operator, Token};
 
 use crate::diagnostic::{Diagnoser, Loc, SharedFile};
@@ -99,9 +101,7 @@ impl Lexer {
                                 '0'..='9' => c as i64 - '0' as i64,
                                 'a'..='f' => c as i64 - 'a' as i64 + 10,
                                 'A'..='F' => c as i64 - 'A' as i64 + 10,
-                                _ => {
-                                    return Err(ErrorCode::InvalidDigit(c));
-                                }
+                                _ => unreachable!(),
                             };
                             match i.checked_mul(16) {
                                 Some(result) => {
@@ -151,9 +151,7 @@ impl Lexer {
                                     }
                                 }
                             }
-                            c => {
-                                return Err(ErrorCode::InvalidDigit(c));
-                            }
+                            _ => unreachable!(),
                         },
                         None => break,
                     }
@@ -185,9 +183,7 @@ impl Lexer {
                                     }
                                 }
                             }
-                            c => {
-                                return Err(ErrorCode::InvalidDigit(c));
-                            }
+                            _ => unreachable!(),
                         },
                         None => break,
                     }
@@ -219,55 +215,46 @@ impl Lexer {
                                 }
                             }
                         }
-                        c => {
-                            return Err(ErrorCode::InvalidDigit(c));
-                        }
+                        _ => unreachable!(),
                     },
                     None => break,
                 }
             }
             Ok(i)
         }
-        let mut num = String::new();
         let start = iter.offset();
 
-        let mut e_flag = false; // Flag for '123e+5' & '123e-4'
-        let mut float_flag = false;
-        loop {
-            let c = iter.peek2();
-            match c {
-                (Some('.'), Some('.')) => {
-                    break;
+        lazy_static!(
+            static ref RE: Regex =
+            Regex::new("^(([0][Xx][_0-9a-fA-F]+)|([0][Bb][_0-1]+)|([0][Oo][_0-7]+)|([0-9][_0-9]*(\\.[_0-9]+){0,1}([Ee][\\+\\-]{0,1}[0-9_]*){0, 1}))")
+                .unwrap();
+            static ref RE_INT: Regex = Regex::new("^(([0][Xx][_0-9a-fA-F]+)|([0][Bb][_0-1]+)|([0][Oo][_0-7]+)|([0-9][_0-9]*))$").unwrap();
+        );
+
+        let s = iter.as_str();
+        let num = if let Some(m) = RE.find(s) {
+            let s = s[..m.end()].to_string();
+            let s = s.replace('_', "");
+            (0..m.end()).for_each(|_| {
+                iter.next();
+            });
+            s
+        } else {
+            let mut error_s = String::new();
+            loop {
+                match iter.peek() {
+                    Some(c @ ('0'..='9' | 'a'..='z' | 'A'..='Z' | '.')) => error_s.push(c),
+                    Some(_) => break,
+                    None => break,
                 }
-                (Some(c), _) => {
-                    match c {
-                        '+' | '-' if e_flag => num.push(c),
-                        '_' => (),
-                        '.' if !float_flag => num.push(c),
-                        '!'..='/' | ':'..='@' | '['..='`' | '{'..='~' => break,
-                        ' ' | '\t' | '\r' | '\n' => break,
-                        c => num.push(c),
-                    }
-
-                    if c == 'e' || c == 'E' {
-                        e_flag = true;
-                        float_flag = true;
-                    } else {
-                        e_flag = false;
-                    }
-
-                    if c == '.' {
-                        float_flag = true;
-                    }
-
-                    iter.next();
-                }
-                (None, _) => break,
+                iter.next();
             }
-        }
-
+            return Err((ErrorCode::InvalidNum(error_s), start..iter.offset()));
+        };
         let end = iter.offset();
         let loc = start..end;
+
+        let float_flag = !RE_INT.is_match(&num);
 
         if float_flag {
             let float = num.parse::<f64>();
@@ -542,6 +529,9 @@ mod tests {
                     result
                 );
             } else if let Ok((Token::Integer(j), _)) = result {
+                if i != j {
+                    println!("{s}");
+                };
                 assert_eq!(i, j);
             } else {
                 panic!(
@@ -577,9 +567,13 @@ mod tests {
             9_223_372_036_854_775_807,
             false,
         ); // Overflow i64
-        test_helper("0xfft", 0, true);
-        test_helper("0O999", 0, true);
-        test_helper("123y", 0, true);
+        test_helper("0xffabcde", 0xffabcde, false);
+        test_helper("0O999", 0, false);
+        test_helper("123y", 123, false);
+        // This must not be parsed as a float as '123..int$()' is ambiguous
+        // It can be '123. ' then call 'int$()' on a float
+        // Also may be a range from '123' to 'int$()'
+        test_helper("123.", 123, false);
     }
 
     #[test]
@@ -607,9 +601,8 @@ mod tests {
         test_helper("123.0.", 123.0, false);
         test_helper("1_23e_14", 123e14, false);
         test_helper("123E-14", 123e-14, false);
-        test_helper("123.", 123., false);
         test_helper("0.01__2", 0.012, false);
-        test_helper("123e1y", 0., true);
+        test_helper("123e1y", 1230., false);
     }
 
     #[test]

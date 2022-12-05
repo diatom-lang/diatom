@@ -36,6 +36,11 @@ impl<'a> FileIterator<'a> {
     pub fn offset(&self) -> usize {
         self.offset
     }
+
+    /// Return &str since current location
+    pub fn as_str(&self) -> &str {
+        self.iterator.as_str()
+    }
 }
 
 impl<'a> Iterator for FileIterator<'a> {

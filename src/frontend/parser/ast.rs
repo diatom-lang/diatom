@@ -24,6 +24,8 @@ pub enum Stat_ {
     Class(String, Vec<(String, Loc)>, Vec<Expr>),
     /// An optional break condition & a body
     Loop(Option<Expr>, Vec<Stat>),
+    /// variables, iterator, statements
+    For(Box<Expr>, Box<Expr>, Vec<Stat>),
     Error,
 }
 
@@ -54,6 +56,14 @@ impl Debug for Stat {
                 .field(methods)
                 .finish(),
             Loop(cond, body) => f.debug_tuple("loop").field(cond).field(body).finish(),
+            For(vars, iter, expr) => f
+                .debug_tuple("for")
+                .field(vars)
+                .field(&"in")
+                .field(iter)
+                .field(&"do")
+                .field(expr)
+                .finish(),
         }
     }
 }
