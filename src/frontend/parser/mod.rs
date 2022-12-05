@@ -44,8 +44,14 @@ const fn precedence_postfix() -> u16 {
 /// A pattern match all possible start of an expression
 macro_rules! expr_start_pattern {
     () => {
-        Token::Key(Keyword::Def | Keyword::If | Keyword::Begin | Keyword::Nil)
-            | Token::Op(_)
+        Token::Key(
+            Keyword::Def
+                | Keyword::If
+                | Keyword::Begin
+                | Keyword::Nil
+                | Keyword::True
+                | Keyword::False,
+        ) | Token::Op(_)
             | Token::Id(_)
             | Token::Integer(_)
             | Token::Float(_)
@@ -269,6 +275,7 @@ impl Parser {
                 }
             }
             Some(Key(Class)) => self.consume_class(iter),
+            Some(Key(Loop | Until)) => self.consume_loop(iter),
             Some(token) => {
                 let token = token.clone();
                 iter.next();
@@ -473,6 +480,18 @@ impl Parser {
                         }
                     }
                 }
+                Some(Key(End)) => {
+                    exprs.push(Expr {
+                        loc: block_start.start..iter.loc().end,
+                        val: Expr_::Block(block),
+                    });
+                    iter.next();
+                    let end = iter.loc();
+                    return Expr {
+                        loc: start.start..end.end,
+                        val: Expr_::If(exprs),
+                    };
+                }
                 Some(_) => {
                     let stat = self.consume_stat(iter, Some(Key(Else)));
                     block.push(stat);
@@ -489,6 +508,52 @@ impl Parser {
                     };
                 }
             }
+        }
+    }
+
+    fn consume_loop(&mut self, iter: &mut TokenIterator) -> Stat {
+        use Keyword::*;
+        use Token::*;
+        let key = iter.next().cloned();
+        let start = iter.loc();
+        let cond = match key {
+            Some(Key(Loop)) => None,
+            Some(Key(Until)) => {
+                let stat = self.consume_expr(iter, 0, None);
+                // Consume "do" if there are no EOF error
+                // This is to prevent multiple EOF error spamming
+                if self.has_eof_error
+                    || self.consume_to_key(iter, Do, Some((Key(Until), start.clone())))
+                {
+                    return Stat {
+                        loc: start.start..iter.loc().end,
+                        val: Stat_::Error,
+                    };
+                };
+                Some(stat)
+            }
+            _ => unreachable!(),
+        };
+        let mut stats = vec![];
+        loop {
+            match iter.peek() {
+                Some(Key(End)) => {
+                    break;
+                }
+                Some(_) => stats.push(self.consume_stat(iter, Some(Key(End)))),
+                None => {
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                    return Stat {
+                        loc: start.start..iter.loc().end,
+                        val: Stat_::Error,
+                    };
+                }
+            }
+        }
+        self.consume_to_key(iter, End, Some((key.unwrap(), start.clone())));
+        Stat {
+            loc: start.start..iter.loc().end,
+            val: Stat_::Loop(cond, stats),
         }
     }
 
@@ -977,9 +1042,7 @@ mod tests {
         let expr = parser.consume_expr(&mut lexer.iter(), 0, None);
         println!("{expr:?}");
         parser.diagnoser.print();
-        // This is manually verified to be correct =)
-        let result = "(((\"a\", Comma, \"b\"), Comma, nil), Assign, ((((Not, 32), Mul, (15, Call, None)), Plus, (89000000000000, DivFloor, (12, Plus, asdf))), Or, (false, And, (Neg, 23))))";
-        assert_eq!(format!("{:?}", expr), result);
+        assert_eq!(parser.diagnostic_count(), 0);
     }
 
     #[test]
@@ -1016,6 +1079,9 @@ mod tests {
         );
         test_str("if a then else nil end", false);
         test_str("if a then else end", false);
+        test_str("if a then c end", false);
+        test_str("if a then end", false);
+        test_str("if a then elsif c then end", false);
         test_str("if a else end", true);
         test_str("if a elsif b else end", true);
     }
@@ -1053,5 +1119,16 @@ mod tests {
         test_str("class c a b c def ()begin return 1 end s end", false);
         test_str("class a a end", false);
         test_str("class ∂ def ()a a end", false);
+    }
+
+    #[test]
+    fn test_loop() {
+        test_str("loop end", false);
+        test_str("loop continue false true return end", false);
+        test_str("until end", true);
+        test_str("until iii end", true);
+        test_str("until true do end", false);
+        test_str("until true do nil end", false);
+        test_str("until [1,2,3] do xxx yyy break end", false);
     }
 }

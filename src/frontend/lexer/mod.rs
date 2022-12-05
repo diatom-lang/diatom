@@ -310,6 +310,8 @@ impl Lexer {
             "true" => Ok((Token::Key(Keyword::True), loc)),
             "false" => Ok((Token::Key(Keyword::False), loc)),
             "do" => Ok((Token::Key(Keyword::Do), loc)),
+            "where" => Ok((Token::Key(Keyword::Where), loc)),
+            "until" => Ok((Token::Key(Keyword::Until), loc)),
             "end" => Ok((Token::Key(Keyword::End), loc)),
             "if" => Ok((Token::Key(Keyword::If), loc)),
             "then" => Ok((Token::Key(Keyword::Then), loc)),

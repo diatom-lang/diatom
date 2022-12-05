@@ -22,6 +22,8 @@ pub enum Stat_ {
     Break,
     Return(Option<Expr>),
     Class(String, Vec<(String, Loc)>, Vec<Expr>),
+    /// An optional break condition & a body
+    Loop(Option<Expr>, Vec<Stat>),
     Error,
 }
 
@@ -51,6 +53,7 @@ impl Debug for Stat {
                 .field(&fields.iter().map(|x| &x.0).collect::<Vec<&String>>())
                 .field(methods)
                 .finish(),
+            Loop(cond, body) => f.debug_tuple("loop").field(cond).field(body).finish(),
         }
     }
 }
