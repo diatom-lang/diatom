@@ -13,11 +13,14 @@
 //!
 //!
 mod backend;
-mod console;
 mod diagnostic;
 mod frontend;
-pub use console::Console;
 pub use frontend::Parser;
+
+#[cfg(feature = "console")]
+mod console;
+#[cfg(feature = "console")]
+pub use console::Console;
 
 #[cfg(feature = "vm")]
 pub use backend::{AsmFile, VM, VM_VERSION};
