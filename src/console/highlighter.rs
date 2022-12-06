@@ -22,6 +22,7 @@ fn is_key_value(s: &str) -> bool {
 }
 
 lazy_static! {
+    static ref COMMENT_STYLE: Style = Style::new().fg(Color::DarkGray);
     static ref KEY_STYLE: Style = Style::new().fg(Color::LightRed);
     static ref KEY_VALUE_STYLE: Style = Style::new().fg(Color::Yellow);
     static ref NUM_STYLE: Style = Style::new().fg(Color::Green);
@@ -35,6 +36,7 @@ lazy_static! {
     static ref RE_STR: Regex =
         Regex::new(r#"^(("(\\.|[^\\"])*")|('(\\.|[^\\'])*')|("(\\.|[^\\"])*[\\]{0,1}$)|('(\\.|[^\\'])*[\\]{0,1}$))"#).unwrap();
     static ref RE_ID: Regex = Regex::new("^[_a-zA-Z]{1}[_0-9a-zA-Z]*").unwrap();
+    static ref RE_COMMENT: Regex = Regex::new("^\\-\\-.*").unwrap();
     static ref RE_ANY: Regex = Regex::new(r#"(.|\n)"#).unwrap();
 }
 
@@ -43,7 +45,12 @@ impl Highlighter for DiatomHighlighter {
         let mut styled_text = StyledText::new();
         let mut index = 0;
         while index < line.len() {
-            if let Some(m) = RE_ID.find(&line[index..]) {
+            if let Some(m) = RE_COMMENT.find(&line[index..]) {
+                let end = index + m.end();
+                let id = &line[index..end];
+                styled_text.push((*COMMENT_STYLE, id.to_string()));
+                index = end;
+            } else if let Some(m) = RE_ID.find(&line[index..]) {
                 let end = index + m.end();
                 let id = &line[index..end];
                 if is_key(id) {
