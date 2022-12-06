@@ -14,12 +14,14 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// An interactive console for Diatom
 pub struct Console {
     parser: Parser,
+    color: bool,
 }
 
 impl Console {
-    pub fn new() -> Self {
+    pub fn new(color: bool) -> Self {
         Self {
             parser: Parser::new(),
+            color,
         }
     }
 
@@ -127,7 +129,7 @@ impl Console {
                 Ok(Signal::Success(buffer)) => {
                     self.parser.parse_str(OsStr::new("stdin"), &buffer);
                     if self.parser.diagnostic_count() > 0 {
-                        self.parser.print_diagnoses();
+                        print!("{}", self.parser.render_diagnoses(self.color));
                         self.parser.clear_diagnoses();
                         let _ = self.parser.get_incremental();
                     } else {
@@ -146,11 +148,5 @@ impl Console {
                 }
             }
         }
-    }
-}
-
-impl Default for Console {
-    fn default() -> Self {
-        Self::new()
     }
 }

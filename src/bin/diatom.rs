@@ -17,10 +17,9 @@ fn main() {
     if let Some(path) = args.file {
         let mut parser = Parser::new();
         parser.parse(path.as_os_str());
-        parser.print_diagnoses();
-        parser.print_diagnoses_summary();
+        print!("{}", parser.render_diagnoses(true));
     } else {
-        let mut console = Console::new();
+        let mut console = Console::new(true);
         console.run();
     }
 }

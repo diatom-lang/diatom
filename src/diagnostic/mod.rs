@@ -1,17 +1,13 @@
 use codespan_reporting::{
     diagnostic::{self, Severity},
     files::SimpleFiles,
-    term::{
-        self,
-        termcolor::{ColorChoice, StandardStream},
-        Chars,
-    },
+    term::{self, termcolor::Buffer, Chars},
 };
 use std::{
     ffi::{OsStr, OsString},
     fmt::Display,
     fs,
-    io::Error,
+    io::{Error, Write},
     ops::Range,
     rc::Rc,
 };
@@ -124,20 +120,31 @@ impl Diagnoser {
         self.warning_count
     }
 
-    /// Print to stdout
-    pub fn print(&self) {
-        let writer = StandardStream::stdout(ColorChoice::Auto);
+    /// Render error to string
+    pub fn render(&self, color: bool) -> String {
+        let mut writer = if color {
+            Buffer::ansi()
+        } else {
+            Buffer::no_color()
+        };
         let config = codespan_reporting::term::Config {
             chars: Chars::ascii(),
             ..Default::default()
         };
         for diagnostic in &self.diagnoses {
-            let r = term::emit(&mut writer.lock(), &config, &self.files, diagnostic);
+            let r = term::emit(&mut writer, &config, &self.files, diagnostic);
             if let Err(r) = r {
-                println!("{:?}", r);
-                println!("{:?}", diagnostic);
+                let _ = writeln!(writer, "{:?}", r);
+                let _ = writeln!(writer, "{:?}", diagnostic);
             }
         }
+        String::from_utf8(writer.into_inner()).unwrap_or_else(|_| {
+            format!(
+                "{}:{}: Internal error(Invalid utf8 buffer)",
+                file!(),
+                line!()
+            )
+        })
     }
 
     /// Clear current diagnoses
