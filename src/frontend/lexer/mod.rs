@@ -57,8 +57,8 @@ impl Lexer {
         self.has_non_eof_error
     }
 
-    pub fn print_diagnoses(&self) {
-        self.diagnoser.print();
+    pub fn render_diagnoses(&self, color: bool) -> String {
+        self.diagnoser.render(color)
     }
 
     pub fn diagnostic_count(&self) -> usize {
@@ -653,7 +653,7 @@ mod tests {
         }
 
         if !should_fail && lexer.diagnostic_count() > 0 {
-            lexer.print_diagnoses();
+            println!("{}", lexer.render_diagnoses(true));
         }
         if should_fail {
             assert!(lexer.diagnostic_count() > 0);

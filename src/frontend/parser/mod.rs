@@ -76,8 +76,8 @@ macro_rules! expr_start_pattern {
 /// parser.parse(OsStr::new("/path/to/code.dm"));
 /// // Check if something went wrong
 /// if parser.diagnostic_count() > 0 {
-///     parser.print_diagnoses();
-///     parser.print_diagnoses_summary();
+///     print!("{}", parser.render_diagnoses(true));
+///     print!("{}", parser.render_diagnoses_summary());
 /// }
 ///
 /// // Retrieve AST tree
@@ -152,24 +152,26 @@ impl Parser {
         self.diagnoser.clear()
     }
 
-    pub fn print_diagnoses(&self) {
+    pub fn render_diagnoses(&self, color: bool) -> String {
+        let mut s = String::new();
         for (_, lexer) in &self.files {
-            lexer.print_diagnoses();
+            s += &lexer.render_diagnoses(color);
         }
-        self.diagnoser.print()
+        s += &self.diagnoser.render(color);
+        s
     }
 
-    pub fn print_diagnoses_summary(&self) {
+    pub fn render_diagnoses_summary(&self) -> String {
         let mut errors = self.diagnoser.error_count();
         let mut warnings = self.diagnoser.warning_count();
         for (_, lexer) in &self.files {
             errors += lexer.error_count();
             warnings += lexer.warning_count();
         }
-        println!(
-            "Summary: {} errors and {} warnings are generated while parsing.",
+        format!(
+            "Summary: {} errors and {} warnings are generated while parsing.\n",
             errors, warnings
-        );
+        )
     }
 
     pub fn diagnostic_count(&self) -> usize {
@@ -1066,7 +1068,7 @@ mod tests {
         parser.parse_str(OsStr::new("test.dm"), code);
         println!("{:#?}", parser.ast.statements);
         if !should_fail && parser.diagnostic_count() > 0 {
-            parser.diagnoser.print();
+            print!("{}", parser.render_diagnoses(true));
         }
         if should_fail {
             assert!(parser.diagnostic_count() > 0);
@@ -1083,7 +1085,7 @@ mod tests {
         let mut parser = Parser::new();
         let expr = parser.consume_expr(&mut lexer.iter(), 0, None);
         println!("{expr:?}");
-        parser.diagnoser.print();
+        print!("{}", parser.render_diagnoses(true));
         assert_eq!(parser.diagnostic_count(), 0);
     }
 
@@ -1094,7 +1096,7 @@ mod tests {
         parser.parse_str(OsStr::new("test.dm"), code);
         println!("{:#?}", parser.ast.statements);
         if parser.diagnostic_count() > 0 {
-            parser.diagnoser.print();
+            print!("{}", parser.render_diagnoses(true));
         }
         assert_eq!(parser.ast.statements.len(), 3);
     }
