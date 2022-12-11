@@ -123,12 +123,7 @@ pub enum Expr_ {
     ///
     /// First expression is declaration(None for no parameters), second is function body
     /// If its name is None, then this is a lambda expression
-    Def(
-        Option<String>,
-        Option<Box<Expr>>,
-        Vec<Stat>,
-        Vec<(String, Expr)>,
-    ),
+    Def(Option<String>, Vec<String>, Vec<Stat>, Vec<(String, Expr)>),
     Id(String),
     Parentheses(Box<Expr>),
     Const(Const),

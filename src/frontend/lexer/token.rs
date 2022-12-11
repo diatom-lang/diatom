@@ -93,7 +93,7 @@ pub enum Operator {
     Ne,
     /// "<"
     Lt,
-    /// "<"
+    /// "<="
     Le,
     /// "="
     Assign,

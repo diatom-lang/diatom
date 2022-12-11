@@ -20,7 +20,7 @@ use std::{
 const fn precedence_infix(op: OpInfix) -> (u16, u16) {
     use OpInfix::*;
     match op {
-        Assign => (1, 2),
+        Assign => (2, 1),
         Comma => (3, 4),
         Range => (5, 6),
         Or => (7, 8),
@@ -712,21 +712,33 @@ impl Parser {
                 val: Expr_::Error,
             };
         }
-        let decl_start = iter.loc();
-        let decl = if let Some(Token::Op(Operator::RPar)) = iter.peek() {
-            iter.next();
-            None
-        } else {
-            let decl = self.consume_expr(iter, 0, Some(Token::Op(Operator::RPar)));
-            let eof = self.consume_to_op(iter, RPar, Some((Op(LPar), decl_start)));
-            if eof {
-                return Expr {
-                    loc: start.start..iter.loc().end,
-                    val: Expr_::Error,
-                };
+        let mut decl = vec![];
+        loop {
+            match iter.peek() {
+                Some(Id(name)) => {
+                    let name = name.clone();
+                    iter.next();
+                    decl.push(name);
+                }
+                Some(Op(RPar)) => {
+                    iter.next();
+                    break;
+                }
+                Some(token) => {
+                    self.add_diagnostic(
+                        ErrorCode::UnexpectedToken(Some(token.clone()), None, None),
+                        iter.loc(),
+                    );
+                }
+                None => {
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                    return Expr {
+                        loc: start.start..iter.loc().end,
+                        val: Expr_::Error,
+                    };
+                }
             }
-            Some(Box::new(decl))
-        };
+        }
         let mut stats = vec![];
         let mut binds = vec![];
         loop {
@@ -1243,7 +1255,7 @@ mod tests {
         test_str("def a() a+1 end", false);
         test_str("def a(a) a+1 end", false);
         test_str("def () 1 end", false);
-        test_str("def (a, b, c) a+b+1 def()end end", false);
+        test_str("def (a b c) a+b+1 def()end end", false);
         test_str("def () g$() where end", false);
         test_str("def f() g$() where g: def () f$() end end", false);
     }
