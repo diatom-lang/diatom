@@ -116,15 +116,14 @@ pub enum Expr_ {
     /// Expression is in order
     If(Vec<Expr>),
     Prefix(OpPrefix, Box<Expr>),
-    /// `call func arg` or `index array num`
-    /// If func call does not have any arguments, the third parameter is None.
-    Postfix(OpPostfix, Box<Expr>, Option<Box<Expr>>),
+    Call(Box<Expr>, Vec<Expr>),
+    Index(Box<Expr>, Box<Expr>),
     Infix(OpInfix, Box<Expr>, Box<Expr>),
     /// Define a function
     ///
     /// First expression is declaration(None for no parameters), second is function body
     /// If its name is None, then this is a lambda expression
-    Def(Option<String>, Option<Box<Expr>>, Box<Stat>),
+    Def(Option<String>, Option<Box<Expr>>, Vec<Stat>),
     Id(String),
     Parentheses(Box<Expr>),
     Const(Const),
@@ -141,9 +140,6 @@ impl Debug for Expr {
         match &self.val {
             Expr_::Block(b) => f.debug_list().entries(b.iter()).finish(),
             Expr_::Prefix(op, expr) => f.debug_tuple("").field(&op).field(&expr).finish(),
-            Expr_::Postfix(op, e1, e2) => {
-                f.debug_tuple("").field(&e1).field(&op).field(&e2).finish()
-            }
             Expr_::Infix(op, e1, e2) => f.debug_tuple("").field(&e1).field(&op).field(&e2).finish(),
             Expr_::Id(id) => write!(f, "{:?}", id),
             Expr_::Const(c) => write!(f, "{:?}", c),
@@ -163,6 +159,8 @@ impl Debug for Expr {
                 .field(expr)
                 .field(&")")
                 .finish(),
+            Expr_::Call(expr, call) => f.debug_tuple("Call").field(expr).field(call).finish(),
+            Expr_::Index(expr, index) => f.debug_tuple("Call").field(expr).field(index).finish(),
         }
     }
 }
@@ -172,7 +170,10 @@ pub enum Const {
     Float(f64),
     Str(String),
     Bool(bool),
-    List(Option<Box<Expr>>),
+    List(Vec<Expr>),
+    Set(Vec<Expr>),
+    // keys-values
+    Dict(Vec<Expr>, Vec<Expr>),
     Nil,
 }
 
@@ -183,8 +184,10 @@ impl Debug for Const {
             Const::Float(fp) => write!(f, "{}", fp),
             Const::Str(s) => write!(f, "{}", s),
             Const::Bool(b) => write!(f, "{}", b),
-            Const::List(l) => f.debug_list().entry(&l).finish(),
+            Const::List(l) => f.debug_list().entries(l.iter()).finish(),
             Const::Nil => write!(f, "nil"),
+            Const::Set(val) => f.debug_set().entries(val).finish(),
+            Const::Dict(keys, vals) => f.debug_map().entries(keys.iter().zip(vals.iter())).finish(),
         }
     }
 }

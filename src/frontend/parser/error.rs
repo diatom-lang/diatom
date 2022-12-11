@@ -24,6 +24,8 @@ pub enum ErrorCode {
     MissingExpr(Loc),
     /// E1004 Missing statement
     MissingStat(Loc),
+    /// E1005 Missing map value
+    MissingMapValue,
 }
 
 pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
@@ -65,11 +67,16 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
                 Label::secondary(file_id, loc_pre).with_message("Previous token here"),
             ]),
         ErrorCode::MissingStat(loc_pre) => Diagnostic::error()
-            .with_code("E1003")
+            .with_code("E1004")
             .with_message("Missing statement here")
             .with_labels(vec![
                 Label::primary(file_id, loc),
                 Label::secondary(file_id, loc_pre).with_message("Previous token here"),
             ]),
+        ErrorCode::MissingMapValue => Diagnostic::error()
+            .with_code("E1005")
+            .with_message("Missing map value here")
+            .with_labels(vec![Label::primary(file_id, loc)])
+            .with_notes(vec!["Consider add `: <some value>` here".to_string()]),
     }
 }
