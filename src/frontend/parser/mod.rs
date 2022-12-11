@@ -693,20 +693,19 @@ impl Parser {
     }
 
     fn consume_def(&mut self, iter: &mut TokenIterator) -> Expr {
+        use Keyword::*;
+        use Operator::*;
+        use Token::*;
         iter.next();
         let start = iter.loc();
-        let name = if let Some(Token::Id(name)) = iter.peek() {
+        let name = if let Some(Id(name)) = iter.peek() {
             let name = name.clone();
             iter.next();
             Some(name)
         } else {
             None
         };
-        let eof = self.consume_to_op(
-            iter,
-            Operator::LPar,
-            Some((Token::Key(Keyword::Def), start.clone())),
-        );
+        let eof = self.consume_to_op(iter, LPar, Some((Key(Def), start.clone())));
         if eof {
             return Expr {
                 loc: start.start..iter.loc().end,
@@ -719,11 +718,7 @@ impl Parser {
             None
         } else {
             let decl = self.consume_expr(iter, 0, Some(Token::Op(Operator::RPar)));
-            let eof = self.consume_to_op(
-                iter,
-                Operator::RPar,
-                Some((Token::Op(Operator::LPar), decl_start)),
-            );
+            let eof = self.consume_to_op(iter, RPar, Some((Op(LPar), decl_start)));
             if eof {
                 return Expr {
                     loc: start.start..iter.loc().end,
@@ -733,14 +728,51 @@ impl Parser {
             Some(Box::new(decl))
         };
         let mut stats = vec![];
+        let mut binds = vec![];
         loop {
             match iter.peek() {
-                Some(Token::Key(Keyword::End)) => {
+                Some(Key(End)) => {
                     iter.next();
                     return Expr {
                         loc: start.start..iter.loc().end,
-                        val: Expr_::Def(name, decl, stats),
+                        val: Expr_::Def(name, decl, stats, binds),
                     };
+                }
+                Some(Key(Where)) => {
+                    iter.next();
+                    loop {
+                        match iter.peek2() {
+                            (Some(Id(name)), Some(Op(Colon))) => {
+                                let name = name.clone();
+                                iter.next();
+                                iter.next();
+                                let expr = self.consume_expr(iter, 0, Some(Key(End)));
+                                binds.push((name.clone(), expr));
+                            }
+                            (Some(Key(End)), _) => {
+                                iter.next();
+                                return Expr {
+                                    loc: start.start..iter.loc().end,
+                                    val: Expr_::Def(name, decl, stats, binds),
+                                };
+                            }
+                            (Some(token), _) => {
+                                let token = token.clone();
+                                iter.next();
+                                self.add_diagnostic(
+                                    ErrorCode::UnexpectedToken(Some(token), None, None),
+                                    iter.loc(),
+                                );
+                            }
+                            (None, _) => {
+                                self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                                return Expr {
+                                    loc: start.start..iter.loc().end,
+                                    val: Expr_::Error,
+                                };
+                            }
+                        }
+                    }
                 }
                 Some(_) => stats.push(self.consume_stat(iter, Some(Token::Key(Keyword::End)))),
                 None => {
@@ -1212,6 +1244,8 @@ mod tests {
         test_str("def a(a) a+1 end", false);
         test_str("def () 1 end", false);
         test_str("def (a, b, c) a+b+1 def()end end", false);
+        test_str("def () g$() where end", false);
+        test_str("def f() g$() where g: def () f$() end end", false);
     }
 
     #[test]
