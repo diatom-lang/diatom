@@ -16,27 +16,33 @@ pub enum _Type {
     Nil,
 }
 
-pub enum Stat_ {
+pub enum Stmt_ {
     Expr(Expr),
     Continue,
     Break,
     Return(Option<Expr>),
-    Class(String, Vec<(String, Loc)>, Vec<Expr>),
+    Class(String, Vec<(String, Loc)>, Vec<Stmt>),
     /// An optional break condition & a body
-    Loop(Option<Expr>, Vec<Stat>),
+    Loop(Option<Expr>, Vec<Stmt>),
     /// variables, iterator, statements
-    For(Box<Expr>, Box<Expr>, Vec<Stat>),
+    For(Box<Expr>, Box<Expr>, Vec<Stmt>),
+    /// Define a function
+    ///
+    /// First expression is declaration(None for no parameters), second is function body
+    /// Last item is where bindings
+    /// If its name is None, then this is a lambda expression
+    Def(String, Vec<String>, Vec<Stmt>, Vec<(String, Expr)>),
     Error,
 }
 
-pub struct Stat {
+pub struct Stmt {
     pub loc: Loc,
-    pub val: Stat_,
+    pub val: Stmt_,
 }
 
-impl Debug for Stat {
+impl Debug for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Stat_::*;
+        use Stmt_::*;
         match &self.val {
             Expr(expr) => f.debug_tuple("").field(&expr).finish(),
             Continue => f.debug_tuple("continue").finish(),
@@ -64,12 +70,19 @@ impl Debug for Stat {
                 .field(&"do")
                 .field(expr)
                 .finish(),
+            Def(name, decl, body, binds) => f
+                .debug_tuple("def")
+                .field(name)
+                .field(decl)
+                .field(body)
+                .field(binds)
+                .finish(),
         }
     }
 }
 
-impl Stat {
-    pub fn new(val: Stat_, loc: Loc) -> Self {
+impl Stmt {
+    pub fn new(val: Stmt_, loc: Loc) -> Self {
         Self { loc, val }
     }
 }
@@ -111,20 +124,15 @@ pub enum OpPostfix {
 
 #[derive(Debug)]
 pub enum Expr_ {
-    Block(Vec<Stat>),
+    Block(Vec<Stmt>),
     /// An `if..then..elsif..then..else..end`
     /// Expression is in order
     If(Vec<Expr>),
     Prefix(OpPrefix, Box<Expr>),
-    /// `call func arg` or `index array num`
-    /// If func call does not have any arguments, the third parameter is None.
-    Postfix(OpPostfix, Box<Expr>, Option<Box<Expr>>),
+    Call(Box<Expr>, Vec<Expr>),
+    Index(Box<Expr>, Box<Expr>),
     Infix(OpInfix, Box<Expr>, Box<Expr>),
-    /// Define a function
-    ///
-    /// First expression is declaration(None for no parameters), second is function body
-    /// If its name is None, then this is a lambda expression
-    Def(Option<String>, Option<Box<Expr>>, Box<Stat>),
+    Fn(Vec<String>, Box<Expr>),
     Id(String),
     Parentheses(Box<Expr>),
     Const(Const),
@@ -141,27 +149,24 @@ impl Debug for Expr {
         match &self.val {
             Expr_::Block(b) => f.debug_list().entries(b.iter()).finish(),
             Expr_::Prefix(op, expr) => f.debug_tuple("").field(&op).field(&expr).finish(),
-            Expr_::Postfix(op, e1, e2) => {
-                f.debug_tuple("").field(&e1).field(&op).field(&e2).finish()
-            }
             Expr_::Infix(op, e1, e2) => f.debug_tuple("").field(&e1).field(&op).field(&e2).finish(),
             Expr_::Id(id) => write!(f, "{:?}", id),
             Expr_::Const(c) => write!(f, "{:?}", c),
             Expr_::Error => write!(f, "Error"),
             Expr_::If(v) => f.debug_tuple("").field(&"if").field(&v).finish(),
-            Expr_::Def(name, decl, body) => {
-                let mut f = f.debug_tuple("def");
-                if name.is_some() {
-                    f.field(name).field(decl).field(body).finish()
-                } else {
-                    f.field(decl).field(body).finish()
-                }
-            }
             Expr_::Parentheses(expr) => f
                 .debug_tuple("")
                 .field(&"(")
                 .field(expr)
                 .field(&")")
+                .finish(),
+            Expr_::Call(expr, call) => f.debug_tuple("Call").field(expr).field(call).finish(),
+            Expr_::Index(expr, index) => f.debug_tuple("Call").field(expr).field(index).finish(),
+            Expr_::Fn(parameters, expr) => f
+                .debug_tuple("fn")
+                .field(parameters)
+                .field(&"=")
+                .field(expr)
                 .finish(),
         }
     }
@@ -172,7 +177,10 @@ pub enum Const {
     Float(f64),
     Str(String),
     Bool(bool),
-    List(Option<Box<Expr>>),
+    List(Vec<Expr>),
+    Set(Vec<Expr>),
+    // keys-values
+    Dict(Vec<Expr>, Vec<Expr>),
     Nil,
 }
 
@@ -183,13 +191,15 @@ impl Debug for Const {
             Const::Float(fp) => write!(f, "{}", fp),
             Const::Str(s) => write!(f, "{}", s),
             Const::Bool(b) => write!(f, "{}", b),
-            Const::List(l) => f.debug_list().entry(&l).finish(),
+            Const::List(l) => f.debug_list().entries(l.iter()).finish(),
             Const::Nil => write!(f, "nil"),
+            Const::Set(val) => f.debug_set().entries(val).finish(),
+            Const::Dict(keys, vals) => f.debug_map().entries(keys.iter().zip(vals.iter())).finish(),
         }
     }
 }
 
 #[derive(Default)]
 pub struct Ast {
-    pub statements: Vec<Stat>,
+    pub statements: Vec<Stmt>,
 }

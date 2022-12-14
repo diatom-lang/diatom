@@ -315,6 +315,7 @@ impl Lexer {
             "loop" => Ok((Token::Key(Keyword::Loop), loc)),
             "class" => Ok((Token::Key(Keyword::Class), loc)),
             "def" => Ok((Token::Key(Keyword::Def), loc)),
+            "fn" => Ok((Token::Key(Keyword::Fn), loc)),
             "begin" => Ok((Token::Key(Keyword::Begin), loc)),
             _ => Ok((Token::Id(name), loc)),
         }
