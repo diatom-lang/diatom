@@ -54,6 +54,8 @@ pub enum Keyword {
     Class,
     /// def
     Def,
+    /// fn
+    Fn,
     /// begin
     Begin,
 }
@@ -165,6 +167,7 @@ impl Display for Keyword {
             Keyword::Class => "class",
             Keyword::Def => "def",
             Keyword::Begin => "begin",
+            Keyword::Fn => "fn",
         };
         write!(f, "{}", name)
     }

@@ -20,10 +20,10 @@ pub enum ErrorCode {
     UnexpectedToken(Option<Token>, Option<Token>, Option<(Token, Loc)>),
     /// E1002 Unexpected end of file
     UnexpectedEof,
-    /// E1003 Missing expression in parentheses
+    /// E1003 Missing expression
     MissingExpr(Loc),
     /// E1004 Missing statement
-    MissingStat(Loc),
+    MissingStmt(Loc),
     /// E1005 Missing map value
     MissingMapValue,
 }
@@ -66,7 +66,7 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
                 Label::primary(file_id, loc),
                 Label::secondary(file_id, loc_pre).with_message("Previous token here"),
             ]),
-        ErrorCode::MissingStat(loc_pre) => Diagnostic::error()
+        ErrorCode::MissingStmt(loc_pre) => Diagnostic::error()
             .with_code("E1004")
             .with_message("Missing statement here")
             .with_labels(vec![
