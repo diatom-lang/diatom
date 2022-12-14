@@ -21,7 +21,10 @@ pub enum Stmt_ {
     Continue,
     Break,
     Return(Option<Expr>),
-    Class(String, Vec<(String, Loc)>, Vec<Stmt>),
+    /// A data
+    ///
+    ///
+    Data(String, Vec<(String, Vec<String>)>, Vec<Stmt>),
     /// An optional break condition & a body
     Loop(Option<Expr>, Vec<Stmt>),
     /// variables, iterator, statements
@@ -55,10 +58,10 @@ impl Debug for Stmt {
                 }
             }
             Error => f.debug_tuple("error").finish(),
-            Class(name, fields, methods) => f
-                .debug_tuple("class")
+            Data(name, subtypes, methods) => f
+                .debug_tuple("data")
                 .field(name)
-                .field(&fields.iter().map(|x| &x.0).collect::<Vec<&String>>())
+                .field(subtypes)
                 .field(methods)
                 .finish(),
             Loop(cond, body) => f.debug_tuple("loop").field(cond).field(body).finish(),

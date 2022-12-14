@@ -277,7 +277,7 @@ impl Parser {
                     val: Stmt_::Expr(expr),
                 }
             }
-            Some(Key(Class)) => self.consume_class(iter),
+            Some(Key(Data)) => self.consume_data(iter),
             Some(Key(Loop | Until)) => self.consume_loop(iter),
             Some(Key(For)) => self.consume_for(iter),
             Some(token) => {
@@ -602,7 +602,9 @@ impl Parser {
         }
     }
 
-    fn consume_class(&mut self, iter: &mut TokenIterator) -> Stmt {
+    fn consume_data(&mut self, iter: &mut TokenIterator) -> Stmt {
+        use Keyword::*;
+        use Operator::*;
         use Token::*;
 
         iter.next();
@@ -613,13 +615,13 @@ impl Parser {
                 iter.next();
                 name
             }
-            Some(Key(Keyword::End)) => {
+            Some(Key(End)) => {
                 iter.next();
                 let end = iter.loc();
                 self.add_diagnostic(ErrorCode::MissingStmt(start.clone()), end.clone());
                 return Stmt {
                     loc: start.start..end.end,
-                    val: Stmt_::Class("Error".to_string(), vec![], vec![]),
+                    val: Stmt_::Error,
                 };
             }
             Some(token) => {
@@ -629,8 +631,8 @@ impl Parser {
                 self.add_diagnostic(
                     ErrorCode::UnexpectedToken(
                         Some(token),
-                        Some(Id("name of this class".to_string())),
-                        Some((Key(Keyword::Class), start.clone())),
+                        Some(Id("<name of this data type>".to_string())),
+                        Some((Key(Keyword::Data), start.clone())),
                     ),
                     loc,
                 );
@@ -641,31 +643,37 @@ impl Parser {
                 let end = iter.loc();
                 return Stmt {
                     loc: start.start..end.end,
-                    val: Stmt_::Class("Error".to_string(), vec![], vec![]),
+                    val: Stmt_::Error,
                 };
             }
         };
 
-        let mut members: Vec<(String, Loc)> = vec![];
-        let mut methods: Vec<Stmt> = vec![];
+        self.consume_to_op(iter, Assign, Some((Key(Data), start.clone())));
+
+        let mut subtypes = vec![];
+        let mut current_subtype: Option<(String, Vec<_>)> = None;
+
         loop {
             match iter.peek() {
-                Some(Key(Keyword::End)) => {
-                    iter.next();
-                    let end = iter.loc();
-                    return Stmt {
-                        loc: start.start..end.end,
-                        val: Stmt_::Class(name, members, methods),
-                    };
-                }
                 Some(Id(name)) => {
-                    let loc = iter.next_loc();
-                    members.push((name.clone(), loc));
+                    if let Some(subtype) = &mut current_subtype {
+                        subtype.1.push(name.clone());
+                    } else {
+                        current_subtype = Some((name.clone(), vec![]));
+                    }
                     iter.next();
                 }
-                Some(Key(Keyword::Def)) => {
-                    let stmt = self.consume_def(iter);
-                    methods.push(stmt);
+                Some(Op(BitOr)) => {
+                    iter.next();
+                    if let Some(subtype) = current_subtype {
+                        subtypes.push(subtype);
+                        current_subtype = None;
+                    } else {
+                        self.add_diagnostic(ErrorCode::MissingConstructor, iter.loc());
+                    }
+                }
+                Some(Key(Def | End)) => {
+                    break;
                 }
                 Some(token) => {
                     let token = token.clone();
@@ -675,7 +683,7 @@ impl Parser {
                         ErrorCode::UnexpectedToken(
                             Some(token),
                             None,
-                            Some((Key(Keyword::Class), start.clone())),
+                            Some((Key(Data), start.clone())),
                         ),
                         loc,
                     );
@@ -686,7 +694,49 @@ impl Parser {
                     let end = iter.loc();
                     return Stmt {
                         loc: start.start..end.end,
-                        val: Stmt_::Class(name, members, methods),
+                        val: Stmt_::Error,
+                    };
+                }
+            }
+        }
+
+        if let Some(subtype) = current_subtype {
+            subtypes.push(subtype);
+        } else {
+            self.add_diagnostic(ErrorCode::MissingConstructor, iter.loc());
+        }
+
+        let mut associated_funcs = vec![];
+        loop {
+            match iter.peek() {
+                Some(Key(Def)) => {
+                    let stmt = self.consume_def(iter);
+                    associated_funcs.push(stmt);
+                }
+                Some(Key(End)) => {
+                    iter.next();
+                    return Stmt {
+                        loc: start.start..iter.loc().end,
+                        val: Stmt_::Data(name, subtypes, associated_funcs),
+                    };
+                }
+                Some(token) => {
+                    let token = token.clone();
+                    iter.next();
+                    self.add_diagnostic(
+                        ErrorCode::UnexpectedToken(
+                            Some(token),
+                            Some(Key(Def)),
+                            Some((Key(Data), start.clone())),
+                        ),
+                        iter.loc(),
+                    );
+                }
+                None => {
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                    return Stmt {
+                        loc: start.start..iter.loc().end,
+                        val: Stmt_::Error,
                     };
                 }
             }
@@ -1363,13 +1413,19 @@ mod tests {
     }
 
     #[test]
-    fn test_class() {
-        test_str("class end", true);
-        test_str("class a end", false);
-        test_str("class c def a() = [] end end", false);
-        test_str("class c a b c def a() = return 1 end s end", false);
-        test_str("class a a end", false);
-        test_str("class ∂ def x() = a a end end", false);
+    fn test_data() {
+        test_str("data  = X def new() end", true);
+        test_str("data Maybe = end", true);
+        test_str("data Maybe = | X end", true);
+        test_str("data Maybe = X | end", true);
+        test_str("data Maybe = Just a | Nothing end", false);
+        test_str("data Maybe = Just a end", false);
+        test_str("data Maybe = Nothing end", false);
+        test_str(
+            "data Maybe = Nothing def new() = x end def map(f) = f$(x) end end",
+            false,
+        );
+        test_str("data Shape = Circle r | Rect x y | Tri a b c end", false);
     }
 
     #[test]

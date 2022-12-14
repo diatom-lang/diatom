@@ -313,7 +313,7 @@ impl Lexer {
             "continue" => Ok((Token::Key(Keyword::Continue), loc)),
             "break" => Ok((Token::Key(Keyword::Break), loc)),
             "loop" => Ok((Token::Key(Keyword::Loop), loc)),
-            "class" => Ok((Token::Key(Keyword::Class), loc)),
+            "data" => Ok((Token::Key(Keyword::Data), loc)),
             "def" => Ok((Token::Key(Keyword::Def), loc)),
             "fn" => Ok((Token::Key(Keyword::Fn), loc)),
             "begin" => Ok((Token::Key(Keyword::Begin), loc)),
@@ -418,9 +418,6 @@ impl Lexer {
             (Some('<'), Some('=')) => Ok((Token::Op(Operator::Le), consume_next_2_char(iter))),
             (Some('='), Some('=')) => Ok((Token::Op(Operator::Eq), consume_next_2_char(iter))),
             (Some('<'), Some('>')) => Ok((Token::Op(Operator::Ne), consume_next_2_char(iter))),
-            (Some('|'), Some('>')) => {
-                Ok((Token::Op(Operator::Pipeline), consume_next_2_char(iter)))
-            }
             (Some(c), _) => {
                 let start = iter.offset();
                 iter.next();
@@ -444,6 +441,7 @@ impl Lexer {
                     '}' => Ok((Token::Op(Operator::RBrc), loc)),
                     ':' => Ok((Token::Op(Operator::Colon), loc)),
                     '$' => Ok((Token::Op(Operator::Call), loc)),
+                    '|' => Ok((Token::Op(Operator::BitOr), loc)),
                     c => Err((ErrorCode::InvalidOp(c), loc)),
                 }
             }

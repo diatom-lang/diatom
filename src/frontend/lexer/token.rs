@@ -50,8 +50,8 @@ pub enum Keyword {
     Continue,
     /// loop
     Loop,
-    /// class
-    Class,
+    /// data
+    Data,
     /// def
     Def,
     /// fn
@@ -103,8 +103,8 @@ pub enum Operator {
     Comma,
     /// "."
     Member,
-    /// "|>"
-    Pipeline,
+    /// "|"
+    BitOr,
     /// "("
     LPar,
     /// ")"
@@ -164,7 +164,7 @@ impl Display for Keyword {
             Keyword::Break => "break",
             Keyword::Continue => "continue",
             Keyword::Loop => "loop",
-            Keyword::Class => "class",
+            Keyword::Data => "data",
             Keyword::Def => "def",
             Keyword::Begin => "begin",
             Keyword::Fn => "fn",
@@ -202,7 +202,7 @@ impl Display for Operator {
             Operator::Assign => "=",
             Operator::Comma => ",",
             Operator::Member => ".",
-            Operator::Pipeline => "|>",
+            Operator::BitOr => "|",
             Operator::LPar => "(",
             Operator::RPar => ")",
             Operator::LBrk => "[",

@@ -26,6 +26,8 @@ pub enum ErrorCode {
     MissingStmt(Loc),
     /// E1005 Missing map value
     MissingMapValue,
+    /// E1006 Missing data constructor
+    MissingConstructor,
 }
 
 pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
@@ -78,5 +80,9 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc, file_id: usize) -> Diagnostic {
             .with_message("Missing map value here")
             .with_labels(vec![Label::primary(file_id, loc)])
             .with_notes(vec!["Consider add `: <some value>` here".to_string()]),
+        ErrorCode::MissingConstructor => Diagnostic::error()
+            .with_code("E1006")
+            .with_message("Missing data type constructor here")
+            .with_labels(vec![Label::primary(file_id, loc)]),
     }
 }
