@@ -29,16 +29,16 @@ const fn precedence_infix(op: OpInfix) -> (u16, u16) {
         Plus | Minus => (13, 14),
         Mul | Div | DivFloor | Mod => (15, 16),
         Exp => (17, 18),
-        Member => (19, 20),
+        Member => (21, 22),
     }
 }
 
 const fn precedence_prefix() -> u16 {
-    100
+    19
 }
 
 const fn precedence_postfix() -> u16 {
-    101
+    20
 }
 
 /// A pattern match all possible start of an expression
@@ -1176,6 +1176,7 @@ impl Parser {
                     let op = match op {
                         Some(Op(LPar)) => OpPostfix::Call,
                         Some(Op(LBrk)) => OpPostfix::Index,
+                        Some(Op(LBrc)) => OpPostfix::Construct,
                         Some(token) => {
                             let token = token.clone();
                             iter.next();
@@ -1204,7 +1205,6 @@ impl Parser {
                         match op {
                             OpPostfix::Call => {
                                 iter.next();
-                                let loc = iter.loc();
                                 iter.next();
                                 let mut exprs = vec![];
                                 loop {
@@ -1226,7 +1226,7 @@ impl Parser {
                                     }
                                 }
                                 lhs = Expr {
-                                    loc: loc.start..iter.loc().end,
+                                    loc: start.start..iter.loc().end,
                                     val: Expr_::Call(Box::new(lhs), exprs),
                                 };
                                 start = iter.next_loc();
@@ -1234,14 +1234,23 @@ impl Parser {
                             }
                             OpPostfix::Index => {
                                 iter.next();
-                                let loc = iter.loc();
                                 iter.next();
                                 let match_loc = iter.loc();
                                 let expr = self.consume_expr(iter, 0, Some(Op(RBrk)));
                                 self.consume_to_op(iter, RBrk, Some((Op(LBrk), match_loc)));
                                 lhs = Expr {
-                                    loc: loc.start..iter.loc().end,
+                                    loc: start.start..iter.loc().end,
                                     val: Expr_::Index(Box::new(lhs), Box::new(expr)),
+                                };
+                                start = iter.next_loc();
+                                continue;
+                            }
+                            OpPostfix::Construct => {
+                                iter.next();
+                                let init = self.consume_set_or_dict(iter);
+                                lhs = Expr {
+                                    loc: start.start..iter.loc().end,
+                                    val: Expr_::Construct(Box::new(lhs), Box::new(init)),
                                 };
                                 start = iter.next_loc();
                                 continue;
@@ -1426,6 +1435,7 @@ mod tests {
             false,
         );
         test_str("data Shape = Circle r | Rect x y | Tri a b c end", false);
+        test_str("Just${1} Just${x: 1}", false);
     }
 
     #[test]

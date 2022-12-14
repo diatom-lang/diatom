@@ -123,6 +123,7 @@ pub enum OpPrefix {
 pub enum OpPostfix {
     Index,
     Call,
+    Construct,
 }
 
 #[derive(Debug)]
@@ -134,6 +135,7 @@ pub enum Expr_ {
     Prefix(OpPrefix, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
+    Construct(Box<Expr>, Box<Expr>),
     Infix(OpInfix, Box<Expr>, Box<Expr>),
     Fn(Vec<String>, Box<Expr>),
     Id(String),
@@ -171,6 +173,9 @@ impl Debug for Expr {
                 .field(&"=")
                 .field(expr)
                 .finish(),
+            Expr_::Construct(id, init) => {
+                f.debug_tuple("").field(id).field(&"$").field(init).finish()
+            }
         }
     }
 }
