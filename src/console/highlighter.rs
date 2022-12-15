@@ -3,9 +3,10 @@ use nu_ansi_term::{Color, Style};
 use reedline::{Highlighter, StyledText};
 use regex::{self, Regex};
 
-const KEYWORDS: [&str; 23] = [
+const KEYWORDS: [&str; 24] = [
     "where", "until", "end", "if", "then", "else", "elsif", "case", "of", "in", "for", "do",
     "assert", "return", "break", "continue", "loop", "data", "def", "begin", "and", "or", "not",
+    "require",
 ];
 
 const KEY_VALUES: [&str; 4] = ["true", "false", "nil", "self"];

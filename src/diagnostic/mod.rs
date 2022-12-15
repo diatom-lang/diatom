@@ -1,23 +1,23 @@
 use codespan_reporting::{
     diagnostic::{self, Severity},
-    files::SimpleFiles,
+    files::SimpleFile,
     term::{self, termcolor::Buffer, Chars},
 };
 use std::{
     ffi::{OsStr, OsString},
-    fmt::Display,
+    fmt::{Debug, Display},
     fs,
     io::{Error, Write},
     ops::Range,
     rc::Rc,
 };
 
-pub type Diagnostic = diagnostic::Diagnostic<usize>;
+pub type Diagnostic = diagnostic::Diagnostic<()>;
 pub type Loc = Range<usize>;
 
 /// Manage and display diagnoses and opened files
 pub struct Diagnoser {
-    files: SimpleFiles<DisplayableOsString, SharedFile>,
+    file: SimpleFile<DisplayableOsString, SharedFile>,
     diagnoses: Vec<Diagnostic>,
     error_count: usize,
     warning_count: usize,
@@ -35,6 +35,12 @@ impl Display for DisplayableOsString {
             "{}",
             self.s.to_str().unwrap_or("[[Can not show non utf-8 path]]")
         )
+    }
+}
+
+impl Debug for DisplayableOsString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self, f)
     }
 }
 
@@ -82,17 +88,13 @@ impl SharedFile {
 }
 
 impl Diagnoser {
-    pub fn new() -> Self {
+    pub fn new(path: OsString, content: SharedFile) -> Self {
         Self {
-            files: SimpleFiles::new(),
+            file: SimpleFile::new(DisplayableOsString::new(path), content),
             diagnoses: vec![],
             error_count: 0,
             warning_count: 0,
         }
-    }
-
-    pub fn new_file(&mut self, path: OsString, content: SharedFile) -> usize {
-        self.files.add(DisplayableOsString::new(path), content)
     }
 
     pub fn push(&mut self, diag: Diagnostic) {
@@ -132,7 +134,7 @@ impl Diagnoser {
             ..Default::default()
         };
         for diagnostic in &self.diagnoses {
-            let r = term::emit(&mut writer, &config, &self.files, diagnostic);
+            let r = term::emit(&mut writer, &config, &self.file, diagnostic);
             if let Err(r) = r {
                 let _ = writeln!(writer, "{:?}", r);
                 let _ = writeln!(writer, "{:?}", diagnostic);

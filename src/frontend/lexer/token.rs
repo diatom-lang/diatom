@@ -60,6 +60,8 @@ pub enum Keyword {
     Fn,
     /// begin
     Begin,
+    /// require
+    Require,
 }
 
 /// A enum of all operators
@@ -174,6 +176,7 @@ impl Display for Keyword {
             Keyword::Def => "def",
             Keyword::Begin => "begin",
             Keyword::Fn => "fn",
+            Keyword::Require => "require",
             Keyword::Of => "of",
         };
         write!(f, "{}", name)

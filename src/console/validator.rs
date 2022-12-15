@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+use std::{env, ffi::OsStr};
 
 use reedline::{ValidationResult, Validator};
 
@@ -9,9 +9,12 @@ pub struct DiatomValidator;
 
 impl Validator for DiatomValidator {
     fn validate(&self, line: &str) -> ValidationResult {
-        let mut parser = Parser::new();
-        parser.parse_str(OsStr::new(""), line);
-        if parser.input_can_continue() {
+        let mut parser = match env::current_dir() {
+            Ok(path) => Parser::new().with_path(path),
+            Err(_) => Parser::new(),
+        };
+        let ast = parser.parse_str(OsStr::new(""), line);
+        if ast.input_can_continue() {
             ValidationResult::Incomplete
         } else {
             ValidationResult::Complete

@@ -1,6 +1,6 @@
 [package]
 name = "diatom"
-version = "0.2.4"
+version = "0.3.0"
 edition = "2021"
 authors = [ "Terence Ng", "Aoyang Yu" ]
 description = "The diatom programming language"
@@ -25,3 +25,6 @@ clap = { version = "4.0.29", features = ["derive"] }
 default = ["vm", "console"]
 vm = ["serde", "ciborium"]
 console = ["reedline", "nu-ansi-term", "crossterm"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]

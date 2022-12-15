@@ -1,90 +1,102 @@
 mod error;
 mod token;
-use std::ffi::OsString;
 
 use lazy_static::lazy_static;
 use regex::Regex;
 pub use token::{Keyword, Operator, Token};
 
-use crate::diagnostic::{Diagnoser, Loc, SharedFile};
+use crate::diagnostic::Loc;
 
 use self::error::{to_diagnostic, ErrorCode};
 
-use super::util::{FileIterator, TokenIterator};
+use super::{
+    util::{FileIterator, TokenIterator},
+    Ast,
+};
+
+#[derive(Default)]
+pub struct TokenStream {
+    tokens: Vec<(Token, Loc)>,
+}
+
+impl TokenStream {
+    pub fn push(&mut self, token: (Token, Loc)) {
+        self.tokens.push(token);
+    }
+
+    pub fn iter(&self) -> TokenIterator {
+        TokenIterator::new(&self.tokens)
+    }
+}
 
 /// The lexical analyzer for Diatom.
 ///
 /// # Errors
 /// Error code `E0001` to `E0999` is reserved for lexer.
 /// ```
-pub struct Lexer {
-    file_content: SharedFile,
-    file_id: usize,
-    diagnoser: Diagnoser,
-    tokens: Vec<(Token, Loc)>,
-    has_eof_error: bool,
-    has_non_eof_error: bool,
-}
+pub struct Lexer;
 
 impl Lexer {
-    pub fn new(file_name: OsString, file_content: SharedFile) -> Self {
-        let mut diagnoser = Diagnoser::new();
-        let file_id = diagnoser.new_file(file_name, file_content.clone());
-        let mut lexer = Self {
-            file_content: SharedFile::from_str(""),
-            diagnoser,
-            file_id,
-            tokens: vec![],
-            has_eof_error: false,
-            has_non_eof_error: false,
-        };
-        lexer.consume(&file_content);
-        lexer.file_content = file_content;
-        lexer
-    }
-
-    pub fn clear_diagnoses(&mut self) {
-        self.has_non_eof_error = false;
-        self.has_eof_error = false;
-        self.diagnoser.clear();
-    }
-
-    pub fn has_eof_error(&self) -> bool {
-        self.has_eof_error
-    }
-
-    pub fn has_non_eof_error(&self) -> bool {
-        self.has_non_eof_error
-    }
-
-    pub fn render_diagnoses(&self, color: bool) -> String {
-        self.diagnoser.render(color)
-    }
-
-    pub fn diagnostic_count(&self) -> usize {
-        self.diagnoser.count()
-    }
-
-    pub fn error_count(&self) -> usize {
-        self.diagnoser.error_count()
-    }
-
-    pub fn warning_count(&self) -> usize {
-        self.diagnoser.warning_count()
-    }
-
-    /// Return an iterator tokens.
-    pub(crate) fn iter(&self) -> TokenIterator {
-        TokenIterator::new(&self.tokens)
-    }
-
-    fn add_diagnostic(&mut self, error: ErrorCode, loc: Loc) {
-        match error {
-            ErrorCode::OpenQuote => self.has_eof_error = true,
-            _ => self.has_non_eof_error = true,
+    pub fn lex(ast: &mut Ast) -> TokenStream {
+        let mut token_stream = TokenStream::default();
+        let content = ast.file_content.clone();
+        let mut iter = FileIterator::new(content.as_ref());
+        // Ignore shebang (#!...) at the beginning of the file
+        if let (Some('#'), Some('!')) = iter.peek2() {
+            loop {
+                if let Some('\n') = iter.next() {
+                    break;
+                }
+            }
         }
-        let diag = to_diagnostic(error, loc, self.file_id);
-        self.diagnoser.push(diag);
+        // Start consuming characters
+        loop {
+            // Match some pattern requires 2 lookahead
+            match iter.peek2() {
+                (Some('-'), Some('-')) => {
+                    // Ignore comment
+                    loop {
+                        let c = iter.peek();
+                        match c {
+                            Some(c) => {
+                                if c == '\n' {
+                                    break;
+                                };
+                            }
+                            None => break,
+                        }
+                        iter.next();
+                    }
+                    continue;
+                }
+                (Some(c), _) => {
+                    let result = match c {
+                        '0'..='9' => Some(Self::consume_num(&mut iter)),
+                        '"' | '\'' => Some(Self::consume_string(&mut iter)),
+                        ' ' | '\t' | '\r' | '\n' => {
+                            iter.next();
+                            None
+                        } // Ignore whitespace
+                        c @ ('!'..='/' | ':'..='@' | '['..='`' | '{'..='~') if c != '_' => {
+                            Some(Self::consume_op(&mut iter))
+                        }
+                        _ => Some(Self::consume_id_or_key(&mut iter)),
+                    };
+                    if let Some(result) = result {
+                        match result {
+                            Ok(x) => token_stream.push(x),
+                            Err((error, loc)) => {
+                                ast.add_diagnostic(to_diagnostic(error, loc));
+                            }
+                        }
+                    }
+                }
+                (None, _) => {
+                    break;
+                }
+            }
+        }
+        token_stream
     }
 
     /// Consume numeric types, aka int & float.
@@ -318,6 +330,7 @@ impl Lexer {
             "def" => Ok((Token::Key(Keyword::Def), loc)),
             "fn" => Ok((Token::Key(Keyword::Fn), loc)),
             "begin" => Ok((Token::Key(Keyword::Begin), loc)),
+            "require" => Ok((Token::Key(Keyword::Require), loc)),
             _ => Ok((Token::Id(name), loc)),
         }
     }
@@ -338,7 +351,7 @@ impl Lexer {
                     }
                     iter.next();
                 }
-                match char::from_u32(x as u32) {
+                match char::from_u32(x) {
                     Some(c) => Ok(c),
                     None => Err(()),
                 }
@@ -451,71 +464,13 @@ impl Lexer {
             (None, _) => unreachable!(),
         }
     }
-
-    /// Consume all tokens
-    fn consume(&mut self, file_content: &SharedFile) {
-        let mut iter = FileIterator::new(file_content.as_ref());
-        // Ignore shebang (#!...) at the beginning of the file
-        if let (Some('#'), Some('!')) = iter.peek2() {
-            loop {
-                if let Some('\n') = iter.next() {
-                    break;
-                }
-            }
-        }
-        // Start consuming characters
-        loop {
-            // Match some pattern requires 2 lookahead
-            match iter.peek2() {
-                (Some('-'), Some('-')) => {
-                    // Ignore comment
-                    loop {
-                        let c = iter.peek();
-                        match c {
-                            Some(c) => {
-                                if c == '\n' {
-                                    break;
-                                };
-                            }
-                            None => break,
-                        }
-                        iter.next();
-                    }
-                    continue;
-                }
-                (Some(c), _) => {
-                    let result = match c {
-                        '0'..='9' => Some(Self::consume_num(&mut iter)),
-                        '"' | '\'' => Some(Self::consume_string(&mut iter)),
-                        ' ' | '\t' | '\r' | '\n' => {
-                            iter.next();
-                            None
-                        } // Ignore whitespace
-                        c @ ('!'..='/' | ':'..='@' | '['..='`' | '{'..='~') if c != '_' => {
-                            Some(Self::consume_op(&mut iter))
-                        }
-                        _ => Some(Self::consume_id_or_key(&mut iter)),
-                    };
-                    if let Some(result) = result {
-                        match result {
-                            Ok(x) => self.tokens.push(x),
-                            Err((error, loc)) => {
-                                self.add_diagnostic(error, loc);
-                            }
-                        }
-                    }
-                }
-                (None, _) => {
-                    break;
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
+    use std::ffi::OsString;
+
+    use crate::diagnostic::SharedFile;
 
     use super::*;
 
@@ -649,18 +604,19 @@ mod tests {
 
     fn test_str(code: &str, should_fail: bool) {
         let file = SharedFile::from_str(code);
-        let lexer = Lexer::new(OsString::from_str("").unwrap(), file);
-        for token in lexer.tokens.iter() {
-            println!("{:?}", token.0);
+        let mut ast = Ast::new(OsString::from(file!()), file);
+        let token_stream = Lexer::lex(&mut ast);
+        for token in token_stream.iter() {
+            println!("{:?}", token);
         }
 
-        if !should_fail && lexer.diagnostic_count() > 0 {
-            println!("{}", lexer.render_diagnoses(true));
+        if !should_fail && ast.diagnoser.count() > 0 {
+            println!("{}", ast.diagnoser.render(true));
         }
         if should_fail {
-            assert!(lexer.diagnostic_count() > 0);
+            assert!(ast.diagnoser.count() > 0);
         } else {
-            assert!(lexer.diagnostic_count() == 0);
+            assert!(ast.diagnoser.count() == 0);
         }
     }
 

@@ -1,43 +1,32 @@
-use std::str::FromStr;
-
 use super::*;
 
 fn test_str(code: &str, should_fail: bool) {
-    let mut parser = Parser::new();
-    parser.parse_str(OsStr::new("test.dm"), code);
-    println!("{:#?}", parser.ast.statements);
-    if !should_fail && parser.diagnostic_count() > 0 {
-        print!("{}", parser.render_diagnoses(true));
+    let mut resource_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    resource_path.push("src/frontend/parser/tests/resources");
+    let mut parser = Parser::new().with_path(resource_path);
+    let ast = parser.parse_str(OsStr::new(file!()), code);
+    println!("{:#?}", ast.statements);
+    if !should_fail && ast.diagnoser.count() > 0 {
+        print!("{}", ast.diagnoser.render(true));
     }
     if should_fail {
-        assert!(parser.diagnostic_count() > 0);
+        assert!(ast.diagnoser.count() > 0);
     } else {
-        assert!(parser.diagnostic_count() == 0);
+        assert!(ast.diagnoser.count() == 0);
     }
-}
-
-#[test]
-fn test_expr() {
-    let code = "a,b, nil = not 32 * 15$()+8.9e13//(12+\"asdf\") or false and -23";
-    let code = SharedFile::from_str(code);
-    let lexer = Lexer::new(OsString::from_str("test.dm").unwrap(), code);
-    let mut parser = Parser::new();
-    let expr = parser.consume_expr(&mut lexer.iter(), 0, None);
-    println!("{expr:?}");
-    print!("{}", parser.render_diagnoses(true));
-    assert_eq!(parser.diagnostic_count(), 0);
 }
 
 #[test]
 fn test_expr_postfix_ambiguous() {
     let code = "0,a $ (1,2,3) (3,4)$[2-1]+0.333//[0 1 2]$[1][v]";
     let mut parser = Parser::new();
-    parser.parse_str(OsStr::new("test.dm"), code);
-    println!("{:#?}", parser.ast.statements);
-    if parser.diagnostic_count() > 0 {
-        print!("{}", parser.render_diagnoses(true));
+    let ast = parser.parse_str(OsStr::new(file!()), code);
+    println!("{:#?}", ast.statements);
+    if ast.diagnoser.count() > 0 {
+        print!("{}", ast.diagnoser.render(true));
     }
-    assert_eq!(parser.ast.statements.len(), 3);
+    assert_eq!(ast.diagnoser.count(), 0);
+    assert_eq!(ast.statements.len(), 3);
 }
 
 #[test]
@@ -183,4 +172,17 @@ fn test_case() {
         end"#,
         true,
     );
+}
+
+#[test]
+fn test_require() {
+    test_str("require 'a+'", true);
+    test_str("require 'c'", true);
+    test_str("require '\\'", true);
+    test_str("require 'asdfase'", true);
+    test_str("require 'a'", false);
+    test_str("require 'a-'", false);
+    test_str("require 'b.b1'", false);
+    test_str("require 'b'", false);
+    test_str("require 'circular'", false);
 }
