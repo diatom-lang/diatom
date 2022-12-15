@@ -20,10 +20,11 @@ pub enum Stmt_ {
     Expr(Expr),
     Continue,
     Break,
+    /// Return, may not have a return value
     Return(Option<Expr>),
-    /// A data
+    /// A Data Type
     ///
-    ///
+    /// Name + Variant:(Name, members) + Functions(Always be `Def` variant)
     Data(String, Vec<(String, Vec<String>)>, Vec<Stmt>),
     /// An optional break condition & a body
     Loop(Option<Expr>, Vec<Stmt>),
@@ -31,9 +32,7 @@ pub enum Stmt_ {
     For(Box<Expr>, Box<Expr>, Vec<Stmt>),
     /// Define a function
     ///
-    /// First expression is declaration(None for no parameters), second is function body
-    /// Last item is where bindings
-    /// If its name is None, then this is a lambda expression
+    /// Name + Parameters + Body + Bindings:(Name + value)
     Def(String, Vec<String>, Vec<Stmt>, Vec<(String, Expr)>),
     Error,
 }
@@ -126,11 +125,75 @@ pub enum OpPostfix {
     Construct,
 }
 
+pub enum ConstPattern {
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Bool(bool),
+}
+
+impl Debug for ConstPattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConstPattern::Int(i) => write!(f, "{}", i),
+            ConstPattern::Float(fl) => write!(f, "{}", fl),
+            ConstPattern::Str(s) => write!(f, "\"{}\"", s),
+            ConstPattern::Bool(b) => write!(f, "{}", b),
+        }
+    }
+}
+pub enum Pattern_ {
+    /// Maybe a type or a variable
+    ///
+    /// For example `a`, `module_a.A_TYPE.B_SUBTYPE`
+    Id(Vec<String>),
+    /// a@A
+    Bind(String, Box<Pattern>),
+    /// A | B | C
+    Or(Box<Pattern>, Box<Pattern>),
+    /// A, B, C
+    And(Box<Pattern>, Box<Pattern>),
+    /// A${Pattern1 Pattern2 Pattern3 ...}
+    Inner(Vec<String>, Vec<Pattern>),
+    /// Constant value
+    Const(ConstPattern),
+    /// (Pattern)
+    Parentheses(Box<Pattern>),
+    Error,
+}
+
+pub struct Pattern {
+    pub loc: Loc,
+    pub val: Pattern_,
+}
+
+impl Pattern {
+    pub fn new(loc: Loc, val: Pattern_) -> Self {
+        Self { loc, val }
+    }
+}
+
+impl Debug for Pattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.val {
+            Pattern_::Id(id) => write!(f, "{:?}", id),
+            Pattern_::Bind(id, p) => f.debug_tuple("").field(id).field(&"@").field(p).finish(),
+            Pattern_::Or(a, b) => f.debug_tuple("").field(a).field(&"|").field(b).finish(),
+            Pattern_::And(a, b) => f.debug_tuple("").field(a).field(&",").field(b).finish(),
+            Pattern_::Inner(name, p) => f.debug_tuple("").field(name).field(&"$").field(p).finish(),
+            Pattern_::Const(c) => write!(f, "{:?}", c),
+            Pattern_::Parentheses(p) => f.debug_tuple("").field(p).finish(),
+            Pattern_::Error => write!(f, "Error"),
+        }
+    }
+}
 #[derive(Debug)]
 pub enum Expr_ {
+    /// A block of statements
     Block(Vec<Stmt>),
     /// An `if..then..elsif..then..else..end`
     /// Expression is in order
+    /// Body is wrapped by a `block`, do not give warning on this
     If(Vec<Expr>),
     Prefix(OpPrefix, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
@@ -141,6 +204,8 @@ pub enum Expr_ {
     Id(String),
     Parentheses(Box<Expr>),
     Const(Const),
+    /// Pattern + Guard + body
+    Case(Box<Expr>, Vec<(Pattern, Option<Expr>, Stmt)>),
     Error,
 }
 
@@ -176,6 +241,12 @@ impl Debug for Expr {
             Expr_::Construct(id, init) => {
                 f.debug_tuple("").field(id).field(&"$").field(init).finish()
             }
+            Expr_::Case(expr, v) => f
+                .debug_tuple("case")
+                .field(expr)
+                .field(&"of")
+                .field(v)
+                .finish(),
         }
     }
 }

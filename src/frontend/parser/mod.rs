@@ -1,5 +1,8 @@
 mod ast;
 mod error;
+#[cfg(test)]
+mod tests;
+
 use crate::diagnostic::{Diagnoser, DisplayableOsString, Loc, SharedFile};
 
 use self::error::{to_diagnostic, ErrorCode};
@@ -10,7 +13,10 @@ use super::{
     Lexer,
 };
 use ahash::AHashMap;
-use ast::{Ast, Const, Expr, Expr_, OpInfix, OpPostfix, OpPrefix, Stmt, Stmt_};
+use ast::{
+    Ast, Const, ConstPattern, Expr, Expr_, OpInfix, OpPostfix, OpPrefix, Pattern, Pattern_, Stmt,
+    Stmt_,
+};
 use std::{
     ffi::{OsStr, OsString},
     fs,
@@ -46,6 +52,7 @@ macro_rules! expr_start_pattern {
     () => {
         Token::Key(
             Keyword::Fn
+                | Keyword::Case
                 | Keyword::If
                 | Keyword::Begin
                 | Keyword::Nil
@@ -743,6 +750,47 @@ impl Parser {
         }
     }
 
+    fn consume_case(&mut self, iter: &mut TokenIterator) -> Expr {
+        use Keyword::*;
+        use Operator::*;
+        use Token::*;
+        iter.next();
+        let start = iter.loc();
+        let match_expr = self.consume_expr(iter, 0, Some(Key(Of)));
+        self.consume_to_key(iter, Of, Some((Key(Case), start.clone())));
+        let mut arms = vec![];
+        loop {
+            match iter.peek() {
+                Some(Key(End)) => {
+                    iter.next();
+                    return Expr {
+                        loc: start.start..iter.loc().end,
+                        val: Expr_::Case(Box::new(match_expr), arms),
+                    };
+                }
+                Some(_) => {
+                    let pattern = self.consume_pattern(iter, 0);
+                    let guard = if let Some(Key(If)) = iter.peek() {
+                        iter.next();
+                        Some(self.consume_expr(iter, 0, Some(Op(Arm))))
+                    } else {
+                        None
+                    };
+                    self.consume_to_op(iter, Arm, None);
+                    let stmt = self.consume_stmt(iter, None);
+                    arms.push((pattern, guard, stmt));
+                }
+                None => {
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                    return Expr {
+                        loc: start.start..iter.loc().end,
+                        val: Expr_::Error,
+                    };
+                }
+            }
+        }
+    }
+
     fn consume_fn(&mut self, iter: &mut TokenIterator) -> Expr {
         use Keyword::*;
         use Operator::*;
@@ -1032,7 +1080,7 @@ impl Parser {
         use Keyword::*;
         use Operator::*;
         use Token::*;
-        let mut start = iter.next_loc();
+        let start = iter.next_loc();
         let mut lhs = match iter.peek() {
             Some(Id(s)) => {
                 let s = s.clone();
@@ -1106,6 +1154,7 @@ impl Parser {
                 }
             }
             Some(Key(If)) => self.consume_if(iter),
+            Some(Key(Case)) => self.consume_case(iter),
             Some(Key(Begin)) => self.consume_block(iter),
             Some(Op(LBrk)) => {
                 iter.next();
@@ -1229,7 +1278,6 @@ impl Parser {
                                     loc: start.start..iter.loc().end,
                                     val: Expr_::Call(Box::new(lhs), exprs),
                                 };
-                                start = iter.next_loc();
                                 continue;
                             }
                             OpPostfix::Index => {
@@ -1242,7 +1290,6 @@ impl Parser {
                                     loc: start.start..iter.loc().end,
                                     val: Expr_::Index(Box::new(lhs), Box::new(expr)),
                                 };
-                                start = iter.next_loc();
                                 continue;
                             }
                             OpPostfix::Construct => {
@@ -1252,7 +1299,6 @@ impl Parser {
                                     loc: start.start..iter.loc().end,
                                     val: Expr_::Construct(Box::new(lhs), Box::new(init)),
                                 };
-                                start = iter.next_loc();
                                 continue;
                             }
                         };
@@ -1298,167 +1344,137 @@ impl Parser {
                 loc: start.start..iter.loc().end,
                 val: Expr_::Infix(op, Box::new(lhs), Box::new(rhs)),
             };
-            start = iter.next_loc();
         }
 
         lhs
+    }
+
+    /// Consume a pattern
+    ///
+    /// Precedence: "|" => 0 "," => 1
+    fn consume_pattern(&mut self, iter: &mut TokenIterator, min_precedence: u16) -> Pattern {
+        use Keyword::*;
+        use Operator::*;
+        use Token::*;
+        let start = iter.next_loc();
+
+        let mut lhs = match iter.peek() {
+            Some(Id(name)) => {
+                let mut id = vec![name.clone()];
+                iter.next();
+                if let Some(Op(At)) = iter.peek() {
+                    iter.next();
+                    let bind = self.consume_pattern(iter, 2);
+                    Pattern::new(
+                        start.start..iter.loc().end,
+                        Pattern_::Bind(
+                            id.into_iter().next().expect("This must have an item here"),
+                            Box::new(bind),
+                        ),
+                    )
+                } else {
+                    while let (Some(Op(Member)), Some(Id(name))) = iter.peek2() {
+                        id.push(name.clone());
+                        iter.next();
+                        iter.next();
+                    }
+                    if let (Some(Op(Call)), Some(Op(LBrc))) = iter.peek2() {
+                        iter.next();
+                        iter.next();
+                        let mut inners = vec![];
+                        loop {
+                            match iter.peek() {
+                                Some(Op(RBrc)) => {
+                                    iter.next();
+                                    break;
+                                }
+                                Some(_) => inners.push(self.consume_pattern(iter, 0)),
+                                None => {
+                                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                                    return Pattern::new(
+                                        start.start..iter.loc().end,
+                                        Pattern_::Error,
+                                    );
+                                }
+                            }
+                        }
+                        Pattern::new(start.start..iter.loc().end, Pattern_::Inner(id, inners))
+                    } else {
+                        Pattern::new(start.start..iter.loc().end, Pattern_::Id(id))
+                    }
+                }
+            }
+            Some(Integer(i)) => {
+                let i = *i;
+                iter.next();
+                Pattern::new(start.clone(), Pattern_::Const(ConstPattern::Int(i)))
+            }
+            Some(Float(f)) => {
+                let f = *f;
+                iter.next();
+                Pattern::new(start.clone(), Pattern_::Const(ConstPattern::Float(f)))
+            }
+            Some(Str(s)) => {
+                let s = s.clone();
+                iter.next();
+                Pattern::new(start.clone(), Pattern_::Const(ConstPattern::Str(s)))
+            }
+            Some(Key(key @ (True | False))) => {
+                let val = matches!(key, True);
+                iter.next();
+                Pattern::new(start.clone(), Pattern_::Const(ConstPattern::Bool(val)))
+            }
+            Some(Op(LPar)) => {
+                iter.next();
+                let prev_loc = iter.loc();
+                let pattern = self.consume_pattern(iter, 0);
+                self.consume_to_op(iter, RPar, Some((Op(LPar), prev_loc)));
+                Pattern::new(
+                    start.start..iter.loc().end,
+                    Pattern_::Parentheses(Box::new(pattern)),
+                )
+            }
+            Some(token) => {
+                let token = token.clone();
+                iter.next();
+                self.add_diagnostic(
+                    ErrorCode::UnexpectedToken(Some(token), None, None),
+                    iter.loc(),
+                );
+                return Pattern::new(start.start..iter.loc().end, Pattern_::Error);
+            }
+            None => {
+                self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                return Pattern::new(start, Pattern_::Error);
+            }
+        };
+
+        loop {
+            match iter.peek() {
+                Some(Op(Comma)) if min_precedence <= 1 => {
+                    iter.next();
+                    let rhs = self.consume_pattern(iter, 1);
+                    lhs = Pattern::new(
+                        start.start..iter.loc().end,
+                        Pattern_::And(Box::new(lhs), Box::new(rhs)),
+                    );
+                }
+                Some(Op(BitOr)) if min_precedence == 0 => {
+                    iter.next();
+                    let rhs = self.consume_pattern(iter, 0);
+                    lhs = Pattern::new(
+                        start.start..iter.loc().end,
+                        Pattern_::Or(Box::new(lhs), Box::new(rhs)),
+                    );
+                }
+                _ => return lhs,
+            }
+        }
     }
 }
 
 impl Default for Parser {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::str::FromStr;
-
-    use super::*;
-
-    fn test_str(code: &str, should_fail: bool) {
-        let mut parser = Parser::new();
-        parser.parse_str(OsStr::new("test.dm"), code);
-        println!("{:#?}", parser.ast.statements);
-        if !should_fail && parser.diagnostic_count() > 0 {
-            print!("{}", parser.render_diagnoses(true));
-        }
-        if should_fail {
-            assert!(parser.diagnostic_count() > 0);
-        } else {
-            assert!(parser.diagnostic_count() == 0);
-        }
-    }
-
-    #[test]
-    fn test_expr() {
-        let code = "a,b, nil = not 32 * 15$()+8.9e13//(12+\"asdf\") or false and -23";
-        let code = SharedFile::from_str(code);
-        let lexer = Lexer::new(OsString::from_str("test.dm").unwrap(), code);
-        let mut parser = Parser::new();
-        let expr = parser.consume_expr(&mut lexer.iter(), 0, None);
-        println!("{expr:?}");
-        print!("{}", parser.render_diagnoses(true));
-        assert_eq!(parser.diagnostic_count(), 0);
-    }
-
-    #[test]
-    fn test_expr_postfix_ambiguous() {
-        let code = "0,a $ (1,2,3) (3,4)$[2-1]+0.333//[0 1 2]$[1][v]";
-        let mut parser = Parser::new();
-        parser.parse_str(OsStr::new("test.dm"), code);
-        println!("{:#?}", parser.ast.statements);
-        if parser.diagnostic_count() > 0 {
-            print!("{}", parser.render_diagnoses(true));
-        }
-        assert_eq!(parser.ast.statements.len(), 3);
-    }
-
-    #[test]
-    fn test_valid() {
-        test_str("a$()", false);
-        test_str("a$(1 2 [2 2])", false);
-        test_str("[]", false);
-        test_str("", false);
-    }
-
-    #[test]
-    fn test_invalid() {
-        test_str(">> <<", true);
-        test_str("a$[]", true);
-        test_str("[1 2,]", true);
-    }
-
-    #[test]
-    fn test_if() {
-        test_str(
-            "if a then b elsif c then 0.92 a = 0 b$[0,1,2] else end",
-            false,
-        );
-        test_str("if a then else nil end", false);
-        test_str("if a then else end", false);
-        test_str("if a then c end", false);
-        test_str("if a then end", false);
-        test_str("if a then elsif c then end", false);
-        test_str("if a else end", true);
-        test_str("if a elsif b else end", true);
-    }
-
-    #[test]
-    fn test_def() {
-        test_str("def a a+1 end", true);
-        test_str("def a() a+1", true);
-        test_str("def () a+1 end", true);
-        test_str("def a(a) = a+1 end", false);
-        test_str("def x (a b c) = a+b+1 fn x = x end", false);
-        test_str("def x () = g$() where end", false);
-        test_str("def f() = g$(1) where g = fn x = f$() end", false);
-    }
-
-    #[test]
-    fn test_fn() {
-        test_str("fn = 1", false);
-        test_str("fn x y z= x + y + z", false);
-        test_str("fn _ = 1", false);
-        test_str("fn x = begin x = x + 1 1 end", false);
-    }
-
-    #[test]
-    fn test_statement() {
-        test_str("begin return end", false);
-        test_str("begin return [1 2 3] return fn = [] end", false);
-        test_str("begin break continue end", false);
-        test_str("if false then return else end", false);
-        test_str(
-            "if false then return [1 2 3] return fn = [] else end",
-            false,
-        );
-        test_str("if false then break continue else end", false);
-        test_str("return", false);
-        test_str("def x () = return 1 end", false);
-        test_str("def x () = return end ", false);
-        test_str("fn x = x <= 1", false);
-    }
-
-    #[test]
-    fn test_data() {
-        test_str("data  = X def new() end", true);
-        test_str("data Maybe = end", true);
-        test_str("data Maybe = | X end", true);
-        test_str("data Maybe = X | end", true);
-        test_str("data Maybe = Just a | Nothing end", false);
-        test_str("data Maybe = Just a end", false);
-        test_str("data Maybe = Nothing end", false);
-        test_str(
-            "data Maybe = Nothing def new() = x end def map(f) = f$(x) end end",
-            false,
-        );
-        test_str("data Shape = Circle r | Rect x y | Tri a b c end", false);
-        test_str("Just${1} Just${x: 1}", false);
-    }
-
-    #[test]
-    fn test_loop() {
-        test_str("loop end", false);
-        test_str("loop continue false true return end", false);
-        test_str("until end", true);
-        test_str("until iii end", true);
-        test_str("until true do end", false);
-        test_str("until true do nil end", false);
-        test_str("until [1 2 3] do xxx yyy break end", false);
-    }
-
-    #[test]
-    fn test_dict_set() {
-        test_str("{:}", false);
-        test_str("{}", false);
-        test_str("{ a }", false);
-        test_str("{123 567 nil}", false);
-        test_str("{123:1 567:2 'asdf': 7+8}", false);
-        test_str("{break}", true);
-        test_str("{c:break}", true);
-        test_str("{c:1 b:3<=2 d}", true);
-        test_str("{c:1 b:3<=2 }", false);
     }
 }

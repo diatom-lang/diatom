@@ -34,6 +34,8 @@ pub enum Keyword {
     Elsif,
     /// case
     Case,
+    /// of
+    Of,
     /// in
     In,
     /// for
@@ -121,6 +123,10 @@ pub enum Operator {
     Colon,
     /// $
     Call,
+    /// @
+    At,
+    /// =>
+    Arm,
 }
 
 impl Display for Token {
@@ -168,6 +174,7 @@ impl Display for Keyword {
             Keyword::Def => "def",
             Keyword::Begin => "begin",
             Keyword::Fn => "fn",
+            Keyword::Of => "of",
         };
         write!(f, "{}", name)
     }
@@ -211,6 +218,8 @@ impl Display for Operator {
             Operator::RBrc => "}",
             Operator::Colon => ":",
             Operator::Call => "$",
+            Operator::At => "@",
+            Operator::Arm => "=>",
         };
         write!(f, "{}", name)
     }

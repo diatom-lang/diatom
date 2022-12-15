@@ -305,6 +305,7 @@ impl Lexer {
             "else" => Ok((Token::Key(Keyword::Else), loc)),
             "elsif" => Ok((Token::Key(Keyword::Elsif), loc)),
             "case" => Ok((Token::Key(Keyword::Case), loc)),
+            "of" => Ok((Token::Key(Keyword::Of), loc)),
             "in" => Ok((Token::Key(Keyword::In), loc)),
             "for" => Ok((Token::Key(Keyword::For), loc)),
             "nil" => Ok((Token::Key(Keyword::Nil), loc)),
@@ -418,6 +419,7 @@ impl Lexer {
             (Some('<'), Some('=')) => Ok((Token::Op(Operator::Le), consume_next_2_char(iter))),
             (Some('='), Some('=')) => Ok((Token::Op(Operator::Eq), consume_next_2_char(iter))),
             (Some('<'), Some('>')) => Ok((Token::Op(Operator::Ne), consume_next_2_char(iter))),
+            (Some('='), Some('>')) => Ok((Token::Op(Operator::Arm), consume_next_2_char(iter))),
             (Some(c), _) => {
                 let start = iter.offset();
                 iter.next();
@@ -442,6 +444,7 @@ impl Lexer {
                     ':' => Ok((Token::Op(Operator::Colon), loc)),
                     '$' => Ok((Token::Op(Operator::Call), loc)),
                     '|' => Ok((Token::Op(Operator::BitOr), loc)),
+                    '@' => Ok((Token::Op(Operator::At), loc)),
                     c => Err((ErrorCode::InvalidOp(c), loc)),
                 }
             }
