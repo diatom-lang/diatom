@@ -4,7 +4,7 @@ use std::{ffi::OsString, fmt::Debug};
 /// All possible types used by parser.
 ///
 /// `Set`, `List` and `Dict` are three special classes that should be implemented by code generator
-/// backend. Specially, `Any` means any type except `Nil` is possible.
+/// backend.
 pub enum _Type {
     Any,
     Float,
@@ -12,7 +12,6 @@ pub enum _Type {
     Str,
     Class(String),
     Function,
-    Nil,
 }
 
 pub enum Stmt_ {
@@ -253,6 +252,7 @@ impl Debug for Expr {
 }
 
 pub enum Const {
+    Unit,
     Int(i64),
     Float(f64),
     Str(String),
@@ -261,18 +261,17 @@ pub enum Const {
     Set(Vec<Expr>),
     // keys-values
     Dict(Vec<Expr>, Vec<Expr>),
-    Nil,
 }
 
 impl Debug for Const {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Const::Unit => write!(f, "()"),
             Const::Int(i) => write!(f, "{}", i),
             Const::Float(fp) => write!(f, "{}", fp),
             Const::Str(s) => write!(f, "{}", s),
             Const::Bool(b) => write!(f, "{}", b),
             Const::List(l) => f.debug_list().entries(l.iter()).finish(),
-            Const::Nil => write!(f, "nil"),
             Const::Set(val) => f.debug_set().entries(val).finish(),
             Const::Dict(keys, vals) => f.debug_map().entries(keys.iter().zip(vals.iter())).finish(),
         }

@@ -15,15 +15,19 @@
 
 A dynamic typed scripting language for embedded use in applications.
 
-## Warning: Project is underdevelopment and not useable now.
+## Warning: Project is under development and not useable now.
 
 ## Features
- - **Gradual Typing**: Support for optional type hint.
- - **Nil Safety**: Nil can not be passed to variable unless specially permitted.
- - **Runtime type checking**: Type checking is enforced by runtime. This means compiler will be able to optimize your code based on type hints.
- - **Native Speed**: Given every variable is marked, diatom is able to theoretically reach C/C++ level speed.
- - **Security**: Diatom is completely isolated and is only able to interact with its host.
- - **Full Functional Programming**: Full support for HKT, functor and so on.
+ - [ ] **Gradual Typing**: Support for optional type hint.
+ - [x] **Security**: Diatom is completely isolated and is only able to interact with its host.
+ - [x] **ADT**: Diatom use algebraic data type.
+ - [x] **No Null, No Exceptions**: Diatom encourages the use of `Maybe` **functor** and **monad**. The concept of `null` and `exception` in other languages like Java is completely useless in Diatom.
+ - [x] **Impure Functional**: Diatom makes everything mutable and public like Python. We also support a little OOP in `data`(aka `class` in OOP languages) declaration.
+ - [ ] **Native Speed**: Given every variable is marked, diatom is able to theoretically reach C/C++ level speed.
+
+## Try Diatom
+
+You can try diatom at [the online playground](https://diatom-lang.github.io/diatom-playground/).
  
 ## Quick Start
 

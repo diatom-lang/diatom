@@ -59,7 +59,6 @@ macro_rules! expr_start_pattern {
                 | Keyword::Case
                 | Keyword::If
                 | Keyword::Begin
-                | Keyword::Nil
                 | Keyword::True
                 | Keyword::False,
         ) | Token::Op(_)
@@ -1158,13 +1157,6 @@ impl Parser {
                     val: Expr_::Id(s),
                 }
             }
-            Some(Key(Nil)) => {
-                iter.next();
-                Expr {
-                    loc: start.clone(),
-                    val: Expr_::Const(Const::Nil),
-                }
-            }
             Some(Key(Fn)) => self.consume_fn(iter, ast),
             Some(Str(s)) => {
                 let s = s.clone();
@@ -1200,11 +1192,19 @@ impl Parser {
             }
             Some(Op(LPar)) => {
                 iter.next();
-                let lhs = self.consume_expr(iter, ast, 0, Some(Op(RPar)));
-                self.consume_to_op(iter, ast, RPar, Some((Op(LPar), start.clone())));
-                Expr {
-                    loc: start.start..iter.loc().end,
-                    val: Expr_::Parentheses(Box::new(lhs)),
+                if matches!(iter.peek(), Some(Op(RPar))) {
+                    iter.next();
+                    Expr {
+                        loc: start.start..iter.loc().end,
+                        val: Expr_::Const(Const::Unit),
+                    }
+                } else {
+                    let lhs = self.consume_expr(iter, ast, 0, Some(Op(RPar)));
+                    self.consume_to_op(iter, ast, RPar, Some((Op(LPar), start.clone())));
+                    Expr {
+                        loc: start.start..iter.loc().end,
+                        val: Expr_::Parentheses(Box::new(lhs)),
+                    }
                 }
             }
             Some(Op(op @ (Not | Minus))) => {

@@ -40,8 +40,6 @@ pub enum Keyword {
     In,
     /// for
     For,
-    /// nil
-    Nil,
     /// assert
     Assert,
     /// return
@@ -166,7 +164,6 @@ impl Display for Keyword {
             Keyword::Case => "case",
             Keyword::In => "in",
             Keyword::For => "for",
-            Keyword::Nil => "nil",
             Keyword::Assert => "assert",
             Keyword::Return => "return",
             Keyword::Break => "break",

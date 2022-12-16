@@ -320,7 +320,6 @@ impl Lexer {
             "of" => Ok((Token::Key(Keyword::Of), loc)),
             "in" => Ok((Token::Key(Keyword::In), loc)),
             "for" => Ok((Token::Key(Keyword::For), loc)),
-            "nil" => Ok((Token::Key(Keyword::Nil), loc)),
             "return" => Ok((Token::Key(Keyword::Return), loc)),
             "assert" => Ok((Token::Key(Keyword::Assert), loc)),
             "continue" => Ok((Token::Key(Keyword::Continue), loc)),

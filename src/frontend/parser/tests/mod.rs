@@ -50,7 +50,7 @@ fn test_if() {
         "if a then b elsif c then 0.92 a = 0 b$[0,1,2] else end",
         false,
     );
-    test_str("if a then else nil end", false);
+    test_str("if a then else () end", false);
     test_str("if a then else end", false);
     test_str("if a then c end", false);
     test_str("if a then end", false);
@@ -119,7 +119,7 @@ fn test_loop() {
     test_str("until end", true);
     test_str("until iii end", true);
     test_str("until true do end", false);
-    test_str("until true do nil end", false);
+    test_str("until true do () end", false);
     test_str("until [1 2 3] do xxx yyy break end", false);
 }
 
@@ -128,7 +128,7 @@ fn test_dict_set() {
     test_str("{:}", false);
     test_str("{}", false);
     test_str("{ a }", false);
-    test_str("{123 567 nil}", false);
+    test_str("{123 567 ()}", false);
     test_str("{123:1 567:2 'asdf': 7+8}", false);
     test_str("{break}", true);
     test_str("{c:break}", true);

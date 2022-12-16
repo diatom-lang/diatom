@@ -9,7 +9,7 @@ const KEYWORDS: [&str; 24] = [
     "require",
 ];
 
-const KEY_VALUES: [&str; 4] = ["true", "false", "nil", "self"];
+const KEY_VALUES: [&str; 3] = ["true", "false", "self"];
 
 #[derive(Default)]
 pub struct DiatomHighlighter;
