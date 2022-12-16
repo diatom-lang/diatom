@@ -3,12 +3,13 @@ use nu_ansi_term::{Color, Style};
 use reedline::{Highlighter, StyledText};
 use regex::{self, Regex};
 
-const KEYWORDS: [&str; 22] = [
-    "where", "until", "end", "if", "then", "else", "elsif", "case", "in", "for", "do", "assert",
-    "return", "break", "continue", "loop", "class", "def", "begin", "and", "or", "not",
+const KEYWORDS: [&str; 24] = [
+    "where", "until", "end", "if", "then", "else", "elsif", "case", "of", "in", "for", "do",
+    "assert", "return", "break", "continue", "loop", "data", "def", "begin", "and", "or", "not",
+    "require",
 ];
 
-const KEY_VALUES: [&str; 4] = ["true", "false", "nil", "self"];
+const KEY_VALUES: [&str; 3] = ["true", "false", "self"];
 
 #[derive(Default)]
 pub struct DiatomHighlighter;

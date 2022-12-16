@@ -16,6 +16,8 @@ mod backend;
 mod diagnostic;
 mod frontend;
 pub use frontend::Parser;
+/// The version of this build
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(feature = "console")]
 mod console;

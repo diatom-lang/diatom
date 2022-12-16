@@ -34,12 +34,12 @@ pub enum Keyword {
     Elsif,
     /// case
     Case,
+    /// of
+    Of,
     /// in
     In,
     /// for
     For,
-    /// nil
-    Nil,
     /// assert
     Assert,
     /// return
@@ -50,14 +50,16 @@ pub enum Keyword {
     Continue,
     /// loop
     Loop,
-    /// class
-    Class,
+    /// data
+    Data,
     /// def
     Def,
     /// fn
     Fn,
     /// begin
     Begin,
+    /// require
+    Require,
 }
 
 /// A enum of all operators
@@ -103,8 +105,8 @@ pub enum Operator {
     Comma,
     /// "."
     Member,
-    /// "|>"
-    Pipeline,
+    /// "|"
+    BitOr,
     /// "("
     LPar,
     /// ")"
@@ -121,6 +123,10 @@ pub enum Operator {
     Colon,
     /// $
     Call,
+    /// @
+    At,
+    /// =>
+    Arm,
 }
 
 impl Display for Token {
@@ -158,16 +164,17 @@ impl Display for Keyword {
             Keyword::Case => "case",
             Keyword::In => "in",
             Keyword::For => "for",
-            Keyword::Nil => "nil",
             Keyword::Assert => "assert",
             Keyword::Return => "return",
             Keyword::Break => "break",
             Keyword::Continue => "continue",
             Keyword::Loop => "loop",
-            Keyword::Class => "class",
+            Keyword::Data => "data",
             Keyword::Def => "def",
             Keyword::Begin => "begin",
             Keyword::Fn => "fn",
+            Keyword::Require => "require",
+            Keyword::Of => "of",
         };
         write!(f, "{}", name)
     }
@@ -202,7 +209,7 @@ impl Display for Operator {
             Operator::Assign => "=",
             Operator::Comma => ",",
             Operator::Member => ".",
-            Operator::Pipeline => "|>",
+            Operator::BitOr => "|",
             Operator::LPar => "(",
             Operator::RPar => ")",
             Operator::LBrk => "[",
@@ -211,6 +218,8 @@ impl Display for Operator {
             Operator::RBrc => "}",
             Operator::Colon => ":",
             Operator::Call => "$",
+            Operator::At => "@",
+            Operator::Arm => "=>",
         };
         write!(f, "{}", name)
     }

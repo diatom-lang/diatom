@@ -1,11 +1,10 @@
-use std::fmt::Debug;
-
-use crate::diagnostic::Loc;
+use crate::diagnostic::{Diagnoser, Diagnostic, DisplayableOsString, Loc, SharedFile};
+use std::{ffi::OsString, fmt::Debug};
 
 /// All possible types used by parser.
 ///
 /// `Set`, `List` and `Dict` are three special classes that should be implemented by code generator
-/// backend. Specially, `Any` means any type except `Nil` is possible.
+/// backend.
 pub enum _Type {
     Any,
     Float,
@@ -13,24 +12,25 @@ pub enum _Type {
     Str,
     Class(String),
     Function,
-    Nil,
 }
 
 pub enum Stmt_ {
     Expr(Expr),
     Continue,
     Break,
+    /// Return, may not have a return value
     Return(Option<Expr>),
-    Class(String, Vec<(String, Loc)>, Vec<Stmt>),
+    /// A Data Type
+    ///
+    /// Name + Variant:(Name, members) + Functions(Always be `Def` variant)
+    Data(String, Vec<(String, Vec<String>)>, Vec<Stmt>),
     /// An optional break condition & a body
     Loop(Option<Expr>, Vec<Stmt>),
     /// variables, iterator, statements
     For(Box<Expr>, Box<Expr>, Vec<Stmt>),
     /// Define a function
     ///
-    /// First expression is declaration(None for no parameters), second is function body
-    /// Last item is where bindings
-    /// If its name is None, then this is a lambda expression
+    /// Name + Parameters + Body + Bindings:(Name + value)
     Def(String, Vec<String>, Vec<Stmt>, Vec<(String, Expr)>),
     Error,
 }
@@ -55,10 +55,10 @@ impl Debug for Stmt {
                 }
             }
             Error => f.debug_tuple("error").finish(),
-            Class(name, fields, methods) => f
-                .debug_tuple("class")
+            Data(name, subtypes, methods) => f
+                .debug_tuple("data")
                 .field(name)
-                .field(&fields.iter().map(|x| &x.0).collect::<Vec<&String>>())
+                .field(subtypes)
                 .field(methods)
                 .finish(),
             Loop(cond, body) => f.debug_tuple("loop").field(cond).field(body).finish(),
@@ -120,22 +120,91 @@ pub enum OpPrefix {
 pub enum OpPostfix {
     Index,
     Call,
+    Construct,
 }
 
+pub enum ConstPattern {
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Bool(bool),
+}
+
+impl Debug for ConstPattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConstPattern::Int(i) => write!(f, "{}", i),
+            ConstPattern::Float(fl) => write!(f, "{}", fl),
+            ConstPattern::Str(s) => write!(f, "\"{}\"", s),
+            ConstPattern::Bool(b) => write!(f, "{}", b),
+        }
+    }
+}
+pub enum Pattern_ {
+    /// Maybe a type or a variable
+    ///
+    /// For example `a`, `module_a.A_TYPE.B_SUBTYPE`
+    Id(Vec<String>),
+    /// a@A
+    Bind(String, Box<Pattern>),
+    /// A | B | C
+    Or(Box<Pattern>, Box<Pattern>),
+    /// A, B, C
+    And(Box<Pattern>, Box<Pattern>),
+    /// A${Pattern1 Pattern2 Pattern3 ...}
+    Inner(Vec<String>, Vec<Pattern>),
+    /// Constant value
+    Const(ConstPattern),
+    /// (Pattern)
+    Parentheses(Box<Pattern>),
+    Error,
+}
+
+pub struct Pattern {
+    pub loc: Loc,
+    pub val: Pattern_,
+}
+
+impl Pattern {
+    pub fn new(loc: Loc, val: Pattern_) -> Self {
+        Self { loc, val }
+    }
+}
+
+impl Debug for Pattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.val {
+            Pattern_::Id(id) => write!(f, "{:?}", id),
+            Pattern_::Bind(id, p) => f.debug_tuple("").field(id).field(&"@").field(p).finish(),
+            Pattern_::Or(a, b) => f.debug_tuple("").field(a).field(&"|").field(b).finish(),
+            Pattern_::And(a, b) => f.debug_tuple("").field(a).field(&",").field(b).finish(),
+            Pattern_::Inner(name, p) => f.debug_tuple("").field(name).field(&"$").field(p).finish(),
+            Pattern_::Const(c) => write!(f, "{:?}", c),
+            Pattern_::Parentheses(p) => f.debug_tuple("").field(p).finish(),
+            Pattern_::Error => write!(f, "Error"),
+        }
+    }
+}
 #[derive(Debug)]
 pub enum Expr_ {
+    /// A block of statements
     Block(Vec<Stmt>),
     /// An `if..then..elsif..then..else..end`
     /// Expression is in order
+    /// Body is wrapped by a `block`, do not give warning on this
     If(Vec<Expr>),
     Prefix(OpPrefix, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
+    Construct(Box<Expr>, Box<Expr>),
     Infix(OpInfix, Box<Expr>, Box<Expr>),
     Fn(Vec<String>, Box<Expr>),
     Id(String),
     Parentheses(Box<Expr>),
     Const(Const),
+    /// Pattern + Guard + body
+    Case(Box<Expr>, Vec<(Pattern, Option<Expr>, Stmt)>),
+    Module(DisplayableOsString),
     Error,
 }
 
@@ -168,11 +237,22 @@ impl Debug for Expr {
                 .field(&"=")
                 .field(expr)
                 .finish(),
+            Expr_::Construct(id, init) => {
+                f.debug_tuple("").field(id).field(&"$").field(init).finish()
+            }
+            Expr_::Case(expr, v) => f
+                .debug_tuple("case")
+                .field(expr)
+                .field(&"of")
+                .field(v)
+                .finish(),
+            Expr_::Module(path) => f.debug_tuple("require").field(path).finish(),
         }
     }
 }
 
 pub enum Const {
+    Unit,
     Int(i64),
     Float(f64),
     Str(String),
@@ -181,25 +261,56 @@ pub enum Const {
     Set(Vec<Expr>),
     // keys-values
     Dict(Vec<Expr>, Vec<Expr>),
-    Nil,
 }
 
 impl Debug for Const {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Const::Unit => write!(f, "()"),
             Const::Int(i) => write!(f, "{}", i),
             Const::Float(fp) => write!(f, "{}", fp),
             Const::Str(s) => write!(f, "{}", s),
             Const::Bool(b) => write!(f, "{}", b),
             Const::List(l) => f.debug_list().entries(l.iter()).finish(),
-            Const::Nil => write!(f, "nil"),
             Const::Set(val) => f.debug_set().entries(val).finish(),
             Const::Dict(keys, vals) => f.debug_map().entries(keys.iter().zip(vals.iter())).finish(),
         }
     }
 }
 
-#[derive(Default)]
+/// Abstract syntax tree on a given file
 pub struct Ast {
     pub statements: Vec<Stmt>,
+    pub file_content: SharedFile,
+    pub diagnoser: Diagnoser,
+    has_eof_error: bool,
+    has_non_eof_error: bool,
+}
+
+impl Ast {
+    pub fn new(path: OsString, content: SharedFile) -> Self {
+        Self {
+            statements: vec![],
+            file_content: content.clone(),
+            diagnoser: Diagnoser::new(path, content),
+            has_eof_error: false,
+            has_non_eof_error: false,
+        }
+    }
+
+    pub fn input_can_continue(&self) -> bool {
+        self.has_eof_error && !self.has_non_eof_error
+    }
+
+    pub fn add_diagnostic(&mut self, diag: (Diagnostic, bool)) {
+        if diag.1 {
+            self.has_eof_error = true;
+        } else if diag.0.severity >= codespan_reporting::diagnostic::Severity::Error
+            && !self.has_eof_error
+        // prevent other error triggered by eof being recorded
+        {
+            self.has_non_eof_error = true;
+        }
+        self.diagnoser.push(diag.0);
+    }
 }

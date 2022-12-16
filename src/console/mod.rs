@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+use std::{env, ffi::OsStr};
 
 use crate::Parser;
 
@@ -16,10 +16,11 @@ pub struct Console {
 
 impl Console {
     pub fn new(color: bool) -> Self {
-        Self {
-            parser: Parser::new(),
-            color,
-        }
+        let parser = match env::current_dir() {
+            Ok(path) => Parser::new().with_path(path),
+            Err(_) => Parser::new(),
+        };
+        Self { parser, color }
     }
 
     /// Run this console
@@ -42,7 +43,7 @@ impl Console {
         println!("\nDiatom Console v{}\n", VERSION);
 
         // Highlight syntax
-        let highlighter = Box::new(DiatomHighlighter::default());
+        let highlighter = Box::<DiatomHighlighter>::default();
 
         // Replace tab with 4 spaces
         let mut keybindings = default_emacs_keybindings();
@@ -59,7 +60,7 @@ impl Console {
         let edit_mode = Box::new(Emacs::new(keybindings));
 
         // Validator
-        let validator = Box::new(DiatomValidator::default());
+        let validator = Box::<DiatomValidator>::default();
 
         let mut line_editor = Reedline::create()
             .with_highlighter(highlighter)
@@ -71,14 +72,13 @@ impl Console {
             let sig = line_editor.read_line(&prompt);
             match sig {
                 Ok(Signal::Success(buffer)) => {
-                    self.parser.parse_str(OsStr::new("stdin"), &buffer);
-                    if self.parser.diagnostic_count() > 0 {
-                        print!("{}", self.parser.render_diagnoses(self.color));
-                        self.parser.clear_diagnoses();
-                        let _ = self.parser.get_incremental();
-                    } else {
-                        println!("{:?}", self.parser.get_incremental().collect::<Vec<_>>());
+                    let ast = self.parser.parse_str(OsStr::new("stdin"), &buffer);
+                    let diags = ast.diagnoser.render(self.color);
+                    println!("{}", diags);
+                    if ast.diagnoser.error_count() > 0 {
+                        continue;
                     }
+                    println!("{:?}", ast.statements);
                 }
                 Ok(Signal::CtrlC) => {
                     line_editor.run_edit_commands(&[EditCommand::Clear]);

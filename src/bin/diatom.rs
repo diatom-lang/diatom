@@ -16,8 +16,16 @@ fn main() {
 
     if let Some(path) = args.file {
         let mut parser = Parser::new();
-        parser.parse(path.as_os_str());
-        print!("{}", parser.render_diagnoses(true));
+        let ast = parser.parse(path.as_os_str());
+        print!("{}", ast.diagnoser.render(true));
+        println!("{:#?}", ast.statements);
+        for (path, ast) in parser.modules() {
+            println!(
+                "{}:\n{:#?}",
+                path.to_str().unwrap_or("Path can not be displayed"),
+                ast.statements
+            );
+        }
     } else {
         let mut console = Console::new(true);
         console.run();
