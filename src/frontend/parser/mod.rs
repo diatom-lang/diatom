@@ -94,6 +94,7 @@ macro_rules! expr_start_pattern {
 ///
 pub struct Parser {
     search_path: Vec<PathBuf>,
+    relative_search_path: Option<PathBuf>,
     modules: AHashMap<OsString, Ast>,
 }
 
@@ -101,6 +102,7 @@ impl Parser {
     pub fn new() -> Self {
         Self {
             search_path: vec![],
+            relative_search_path: None,
             modules: AHashMap::new(),
         }
     }
@@ -171,8 +173,7 @@ impl Parser {
         let mut ast = Ast::new(path.to_os_string(), content);
         let token_stream = Lexer::lex(&mut ast);
         let mut iter = token_stream.iter();
-        self.search_path.insert(
-            0,
+        let prev_relative_path = self.relative_search_path.replace(
             Path::new(path)
                 .parent()
                 .unwrap_or_else(|| {
@@ -188,7 +189,7 @@ impl Parser {
             let stmt = self.consume_stmt(&mut iter, &mut ast, None);
             ast.statements.push(stmt);
         }
-        self.search_path.remove(0);
+        self.relative_search_path = prev_relative_path;
         ast
     }
 
@@ -222,7 +223,11 @@ impl Parser {
             };
         };
         // search for file
-        for mut path in self.search_path.clone() {
+        let mut search_path = self.search_path.clone();
+        if let Some(path) = &self.relative_search_path {
+            search_path.insert(0, path.clone());
+        }
+        for mut path in search_path {
             mod_paths.iter().for_each(|s| path.push(s));
             fn check_path(path: &Path) -> Option<SharedFile> {
                 let path = match fs::canonicalize(path) {
