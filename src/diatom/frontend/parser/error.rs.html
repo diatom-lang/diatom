@@ -1,0 +1,244 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/frontend/parser/error.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>error.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><div class="width-limiter"><nav class="sub"><a class="sub-logo-container" href="../../../../diatom/index.html"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><pre class="src-line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+</pre><pre class="rust"><code><span class="kw">use </span>codespan_reporting::diagnostic::Label;
+
+<span class="kw">use crate</span>::{
+    diagnostic::{Diagnostic, DisplayableOsString, Loc},
+    frontend::Token,
+};
+
+<span class="doccomment">/// Error code for `Parser`
+///
+/// Error code `E1000` to `E1999` is reserved.
+</span><span class="kw">pub enum </span>ErrorCode {
+    <span class="doccomment">/// E1000 Can not open file
+    </span>NoSuchFile(DisplayableOsString, std::io::Error),
+    <span class="doccomment">/// E1001 Unexpected token
+    ///
+    /// Parameters:
+    /// - 1 Token met (None if eof is met)
+    /// - 2 Token expected here (None if not expected a specific one)
+    /// - 3 Previous token to match the expected token (None if there is not any)
+    </span>UnexpectedToken(<span class="prelude-ty">Option</span>&lt;Token&gt;, <span class="prelude-ty">Option</span>&lt;Token&gt;, <span class="prelude-ty">Option</span>&lt;(Token, Loc)&gt;),
+    <span class="doccomment">/// E1002 Unexpected end of file
+    </span>UnexpectedEof,
+    <span class="doccomment">/// E1003 Missing expression
+    </span>MissingExpr(Loc),
+    <span class="doccomment">/// E1004 Missing statement
+    </span>MissingStmt(Loc),
+    <span class="doccomment">/// E1005 Missing map value
+    </span>MissingMapValue,
+    <span class="doccomment">/// E1006 Missing data constructor
+    </span>MissingConstructor,
+    <span class="doccomment">/// E1007 Require Wrong Argument
+    </span>RequireWrongArgument,
+    <span class="doccomment">/// E1008 Invalid module string
+    </span>InvalidModuleString,
+    <span class="doccomment">/// E1009 Module Not Found
+    </span>ModuleNotFound(String),
+    <span class="doccomment">/// E1010 Invalid Module, Can Not Parse
+    </span>InvalidModule,
+}
+
+<span class="kw">pub fn </span>to_diagnostic(error: ErrorCode, loc: Loc) -&gt; (Diagnostic, bool) {
+    <span class="kw">let </span>eof = <span class="macro">matches!</span>(
+        error,
+        ErrorCode::UnexpectedEof | ErrorCode::UnexpectedToken(<span class="prelude-val">None</span>, <span class="kw">_</span>, <span class="kw">_</span>)
+    );
+    <span class="kw">let </span>diag = <span class="kw">match </span>error {
+        ErrorCode::NoSuchFile(f, err) =&gt; Diagnostic::error()
+            .with_code(<span class="string">&quot;E1000&quot;</span>)
+            .with_message(<span class="macro">format!</span>(<span class="string">&quot;Can not read file `{}`: `{}`&quot;</span>, f, err)),
+        ErrorCode::UnexpectedToken(met, expected, to_match) =&gt; {
+            <span class="kw">let </span><span class="kw-2">mut </span>diagnostic = Diagnostic::error().with_code(<span class="string">&quot;E1001&quot;</span>);
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(t) = met {
+                diagnostic = diagnostic
+                    .with_message(<span class="macro">format!</span>(<span class="string">&quot;Unexpected token `{}`&quot;</span>, t))
+                    .with_labels(<span class="macro">vec!</span>[Label::primary((), loc)]);
+            } <span class="kw">else </span>{
+                diagnostic = diagnostic
+                    .with_message(<span class="string">&quot;End of file while parsing&quot;</span>)
+                    .with_labels(<span class="macro">vec!</span>[Label::primary((), loc)]);
+            }
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(t) = expected {
+                diagnostic = diagnostic.with_notes(<span class="macro">vec!</span>[<span class="macro">format!</span>(<span class="string">&quot;Consider add a `{}` here&quot;</span>, t)]);
+            }
+            <span class="kw">if let </span><span class="prelude-val">Some</span>((t, loc)) = to_match {
+                diagnostic = diagnostic.with_labels(<span class="macro">vec!</span>[
+                    Label::secondary((), loc).with_message(<span class="macro">format!</span>(<span class="string">&quot;Due to `{}` here&quot;</span>, t))
+                ]);
+            }
+            diagnostic
+        }
+        ErrorCode::UnexpectedEof =&gt; Diagnostic::error()
+            .with_code(<span class="string">&quot;E1002&quot;</span>)
+            .with_message(<span class="string">&quot;Unexpected end of file here&quot;</span>)
+            .with_labels(<span class="macro">vec!</span>[Label::primary((), loc)]),
+        ErrorCode::MissingExpr(loc_pre) =&gt; Diagnostic::error()
+            .with_code(<span class="string">&quot;E1003&quot;</span>)
+            .with_message(<span class="string">&quot;Missing expression here&quot;</span>)
+            .with_labels(<span class="macro">vec!</span>[
+                Label::primary((), loc),
+                Label::secondary((), loc_pre).with_message(<span class="string">&quot;Previous token here&quot;</span>),
+            ]),
+        ErrorCode::MissingStmt(loc_pre) =&gt; Diagnostic::error()
+            .with_code(<span class="string">&quot;E1004&quot;</span>)
+            .with_message(<span class="string">&quot;Missing statement here&quot;</span>)
+            .with_labels(<span class="macro">vec!</span>[
+                Label::primary((), loc),
+                Label::secondary((), loc_pre).with_message(<span class="string">&quot;Previous token here&quot;</span>),
+            ]),
+        ErrorCode::MissingMapValue =&gt; Diagnostic::error()
+            .with_code(<span class="string">&quot;E1005&quot;</span>)
+            .with_message(<span class="string">&quot;Missing map value here&quot;</span>)
+            .with_labels(<span class="macro">vec!</span>[Label::primary((), loc)])
+            .with_notes(<span class="macro">vec!</span>[<span class="string">&quot;Consider add `: &lt;some value&gt;` here&quot;</span>.to_string()]),
+        ErrorCode::MissingConstructor =&gt; Diagnostic::error()
+            .with_code(<span class="string">&quot;E1006&quot;</span>)
+            .with_message(<span class="string">&quot;Missing data type constructor here&quot;</span>)
+            .with_labels(<span class="macro">vec!</span>[Label::primary((), loc)]),
+        ErrorCode::RequireWrongArgument =&gt; Diagnostic::error()
+            .with_code(<span class="string">&quot;E1007&quot;</span>)
+            .with_message(<span class="string">&quot;Module must be a string literal&quot;</span>)
+            .with_labels(<span class="macro">vec!</span>[Label::primary((), loc)]),
+        ErrorCode::InvalidModuleString =&gt; Diagnostic::error()
+            .with_code(<span class="string">&quot;E1008&quot;</span>)
+            .with_message(<span class="string">&quot;Invalid character in module string&quot;</span>)
+            .with_labels(<span class="macro">vec!</span>[Label::primary((), loc)])
+            .with_notes(<span class="macro">vec!</span>[
+                <span class="string">&quot;Module string can only contains &#39;.&#39;, &#39;-&#39; and [0-9a-zA-Z_].&quot;</span>.to_string(),
+                <span class="string">&quot;Module String must not be empty.&quot;</span>.to_string(),
+            ]),
+        ErrorCode::ModuleNotFound(s) =&gt; Diagnostic::error()
+            .with_code(<span class="string">&quot;E1009&quot;</span>)
+            .with_message(<span class="string">&quot;Module can not be found&quot;</span>)
+            .with_labels(<span class="macro">vec!</span>[Label::primary((), loc)])
+            .with_notes(<span class="macro">vec!</span>[<span class="macro">format!</span>(<span class="string">&quot;Looking for `{}.dm` or `{}/mod.dm`&quot;</span>, s, s)]),
+        ErrorCode::InvalidModule =&gt; Diagnostic::error()
+            .with_code(<span class="string">&quot;E1010&quot;</span>)
+            .with_message(<span class="string">&quot;Error encountered while parsing module&quot;</span>)
+            .with_labels(<span class="macro">vec!</span>[Label::primary((), loc)]),
+    };
+    (diag, eof)
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="diatom" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0 (69f9c33d7 2022-12-12)" ></div></body></html>

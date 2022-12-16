@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["VERSION","The version of this build"],["VM_VERSION","Version of this virtual machine"]],"struct":[["AsmFile","Load and store bytecode to file"],["Console","An interactive console for Diatom"],["Parser","The parser for Diatom."],["VM","A virtual machine to run diatom bytecode"]]};

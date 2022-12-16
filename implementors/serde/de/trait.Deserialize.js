@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"diatom":[["impl <a class=\"trait\" href=\"https://docs.rs/serde/1.0.149/serde/de/trait.Deserialize.html\" title=\"trait serde::de::Deserialize\">Deserialize</a>&lt;'static&gt; for <a class=\"struct\" href=\"diatom/struct.AsmFile.html\" title=\"struct diatom::AsmFile\">AsmFile</a>"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

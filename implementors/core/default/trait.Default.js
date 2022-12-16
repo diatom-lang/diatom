@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"diatom":[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.66.0/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"diatom/struct.VM.html\" title=\"struct diatom::VM\">VM</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.66.0/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"diatom/struct.Parser.html\" title=\"struct diatom::Parser\">Parser</a>"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
