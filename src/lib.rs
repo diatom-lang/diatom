@@ -14,7 +14,6 @@
 //!
 mod diagnostic;
 mod frontend;
-mod runtime;
 mod vm;
 pub use frontend::Parser;
 /// The version of this build

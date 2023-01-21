@@ -1,8 +1,16 @@
-use crate::runtime::Oceanus;
+use bimap::BiHashMap;
 
-mod ir;
+use self::{gc::Gc, types::{TypeTable, ParticularType}};
+
+mod gc;
+mod op;
+mod string_pool;
+mod types;
+mod prelude;
 
 const STACK_SIZE_LIMIT: usize = u32::MAX as usize;
+
+type TypeId = usize;
 
 #[derive(Debug, PartialEq, Eq)]
 enum VmError {
@@ -19,23 +27,13 @@ enum VmError {
     AmbiguousMethod,
     NoSuchMethod,
     NotAnInstance,
-}
-
-#[derive(Default, Clone, Copy)]
-enum VmObj {
-    #[default]
-    Unit,
-    Int(i64),
-    Float(f64),
+    InvalidFunctionId(usize),
+    InvalidRegId(usize),
 }
 
 trait Context {
-    fn read_reg(&self, offset: usize) -> VmObj;
-    fn write_reg(&mut self, offset: usize, obj: VmObj);
-    fn call_by_name(&mut self, method: &str, para: usize) -> Result<VmObj, VmError>;
-    fn call(&mut self, obj: VmObj) -> Result<usize, VmError>;
-    fn push(&mut self, obj: VmObj) -> Result<(), VmError>;
-    fn get_type(&self, obj: VmObj) -> String;
+    fn gc(&mut self) -> &mut Gc;
+    fn get_func(&self, n: usize) -> Option<&VmFunc>;
 }
 
 trait Tracing<T>
@@ -45,54 +43,35 @@ where
     fn exec(&self, ip: usize, context: &mut T) -> Result<usize, VmError>;
 }
 
+struct VmFunc {
+    ip: usize,
+    regs: usize,
+    paras: usize,
+}
+
 struct Vm {
-    stack: Vec<VmObj>,
-    call_frames: Vec<usize>,
-    runtime: Oceanus<VmObj>,
+    gc: Gc,
+    funcs: Vec<VmFunc>,
+    type_table: TypeTable,
+    type_cache: BiHashMap<ParticularType, usize>
 }
 
 impl Context for Vm {
-    fn read_reg(&self, offset: usize) -> VmObj {
-        self.stack[self.call_frames.last().unwrap() + offset]
+    fn gc(&mut self) -> &mut Gc {
+        &mut self.gc
     }
-
-    fn write_reg(&mut self, offset: usize, obj: VmObj) {
-        self.stack[self.call_frames.last().unwrap() + offset] = obj
-    }
-
-    fn call_by_name(&mut self, method: &str, para: usize) -> Result<VmObj, VmError> {
-        todo!()
-    }
-
-    fn push(&mut self, obj: VmObj) -> Result<(), VmError> {
-        self.stack.push(obj);
-        if self.stack.len() > STACK_SIZE_LIMIT {
-            Err(VmError::StackOverflow)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn call(&mut self, obj: VmObj) -> Result<usize, VmError> {
-        todo!()
-    }
-
-    fn get_type(&self, obj: VmObj) -> String {
-        match obj {
-            VmObj::Unit => "Unit",
-            VmObj::Int(_) => "Int",
-            VmObj::Float(_) => "Float",
-        }
-        .to_string()
+    fn get_func(&self, id: usize) -> Option<&VmFunc> {
+        self.funcs.get(id)
     }
 }
 
 impl Vm {
-    fn new() -> Self {
+    fn new(type_table: TypeTable) -> Self {
         Self {
-            stack: vec![],
-            call_frames: vec![0],
-            runtime: Oceanus::default(),
+            gc: Gc::default(),
+            funcs: vec![],
+            type_table,
+            type_cache: BiHashMap::default()
         }
     }
 

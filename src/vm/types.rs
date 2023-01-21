@@ -1,4 +1,5 @@
 use ahash::{AHashMap, AHashSet};
+use bimap::BiHashMap;
 
 use crate::vm::VmError;
 
@@ -25,21 +26,23 @@ pub enum Type {
     PolyFree(VarId),
 }
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Hash)]
 pub enum ParticularType {
     Any,
     Mono(DataId),
     Poly(DataId, Vec<ParticularType>),
 }
-struct FuncType {
+struct Function {
     pub type_paras: Vec<String>,
     pub paras: Vec<Type>,
     pub constraints: Vec<(ClassId, Vec<Type>)>,
+    pub id: FuncId,
 }
 
 struct DataType {
-    pub name: String,
-    pub methods: AHashMap<String, FuncType>,
+    pub parameters: Vec<String>,
+    pub variants: Vec<(String, Type)>,
+    pub methods: AHashMap<String, Function>,
     pub classes: AHashSet<ClassId>,
 }
 
@@ -50,7 +53,7 @@ struct DataType {
 /// instance Eq a => Eq (Maybe a) where
 ///     (==) x y = ...
 /// ```
-struct Instance {
+pub struct Instance {
     /// [ a ]
     pub para_type: Vec<String>,
     /// [ (Maybe a) ]
@@ -63,39 +66,115 @@ struct Instance {
 
 /// type class
 struct TypeClass {
-    pub name: String,
     pub instances: Vec<Instance>,
-    pub type_parameters: Vec<String>,
+    pub parameters: Vec<String>,
     /// Method names and types
     pub methods: AHashMap<String, Vec<Type>>,
     pub constraints: Vec<(ClassId, Vec<Type>)>,
 }
 
 /// Type table
-#[derive(Default)]
 pub struct TypeTable {
     data_types: Vec<DataType>,
+    data_type_map: BiHashMap<DataId, String>,
     classes: Vec<TypeClass>,
-    funcs: Vec<Instance>,
+    class_map: BiHashMap<ClassId, String>,
 }
 
 impl TypeTable {
+    /// Create an empty type table
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            data_types: Vec::default(),
+            data_type_map: BiHashMap::default(),
+            classes: Vec::default(),
+            class_map: BiHashMap::default(),
+        }
     }
 
-    pub fn with_data_type(mut self, data_type: DataType) -> Self {
-        self.data_types.push(data_type);
-        self
+    /// Create a new data type
+    pub fn new_data_type(
+        &mut self,
+        name: impl Into<String>,
+        parameters: Vec<String>,
+        variants: Vec<(String, Type)>,
+    ) -> Result<DataId, ()> {
+        let name = name.into();
+        if self.data_type_map.get_by_right(&name).is_some() {
+            return Err(());
+        }
+        let id = self.data_types.len() as DataId;
+        self.data_types.push(DataType {
+            parameters,
+            variants,
+            methods: AHashMap::default(),
+            classes: AHashSet::default(),
+        });
+        self.data_type_map.insert(id, name);
+        Ok(id)
     }
 
-    pub fn with_class(mut self, class: TypeClass) -> Self {
-        self.classes.push(class);
-        self
+    /// Add a member function to an existing data type
+    pub fn add_member_function(&mut self, data_type:impl AsRef<str>, name: impl Into<String>, func: Function) -> bool {
+        let name = name.into();
+        let data_type = if let Some(id) = self.data_type_map.get_by_right(data_type.as_ref()) {
+            id
+        } else {
+            return false;
+        };
+        let data_type = &mut self.data_types[*data_type as usize];
+        if data_type.methods.get(&name).is_some() {
+            return false;
+        }
+        data_type.methods.insert(name, func);
+        true
+    }
+
+    /// Create a new type class
+    pub fn new_class(&mut self, name: impl Into<String>, parameters: Vec<String>, methods: AHashMap<String, Vec<Type>>, constraints: Vec<(ClassId, Vec<Type>)>) -> Result<ClassId, ()> {
+        let name = name.into();
+        if self.data_type_map.get_by_right(&name).is_some() {
+            return Err(());
+        }
+        let id = self.data_types.len() as DataId;
+        self.classes.push(TypeClass {
+            instances: vec![],
+            parameters,
+            methods,
+            constraints,
+        });
+        self.class_map.insert(id, name);
+        Ok(id)
+    }
+
+    /// Create a new instance for a class on an existing data type
+    pub fn new_instance(&mut self, class: &str, data_type: &str, instance: Instance) -> bool {
+        let class_id = if let Some(id) = self.class_map.get_by_right(class) {
+            id
+        } else {
+            return false;
+        };
+        let class = &mut self.classes[*class_id as usize];
+        let data_type = if let Some(id) = self.data_type_map.get_by_right(data_type) {
+            id
+        } else {
+            return false;
+        };
+        let data_type = &mut self.data_types[*data_type as usize];
+        data_type.classes.insert(*class_id);
+        class.instances.push(instance);
+        true
+    }
+
+    pub fn data_types(&self) -> &BiHashMap<u32, String> {
+        &self.data_type_map
     }
 
     fn show_data_type(&self, id: DataId) -> String {
-        self.data_types[id as usize].name.clone()
+        self.data_type_map
+            .get_by_left(&id)
+            .cloned()
+            .unwrap_or_else(|| "Unknown type".to_string())
     }
 
     pub fn show_particular_type(&self, t: &ParticularType) -> String {
@@ -103,7 +182,7 @@ impl TypeTable {
             ParticularType::Any => "*".to_string(),
             ParticularType::Mono(id) => self.show_data_type(*id),
             ParticularType::Poly(id, vec) => format!(
-                "( {} {} )",
+                "{}<{}>",
                 self.show_data_type(*id),
                 vec.iter()
                     .map(|pt| self.show_particular_type(pt))
@@ -119,7 +198,7 @@ impl TypeTable {
             Type::Mono(id) => self.show_data_type(*id),
             Type::Poly(id, vec) => {
                 format!(
-                    "( {} {} )",
+                    "{}<{}>",
                     self.show_data_type(*id),
                     vec.iter()
                         .map(|t| self.show_type(t))
@@ -154,6 +233,7 @@ impl TypeTable {
         &self,
         parameters: &[ParticularType],
         name: &str,
+        class: Option<ClassId>,
     ) -> Result<FuncId, VmError> {
         let data_id = match parameters[0] {
             ParticularType::Mono(id) => id,
@@ -163,20 +243,23 @@ impl TypeTable {
 
         // search for Self instance
         let datatype = &self.data_types[data_id as usize];
-        if let Some(f) = datatype.methods.get(name) {
-            let type_parameters =
-                self.infer_parameters(f.type_paras.len(), &f.paras, parameters)?;
-            let type_parameters = if let Some(t) = type_parameters {
-                t
-            } else {
-                return Err(VmError::ParameterWrongType);
-            };
-            for constraint in f.constraints.iter() {
-                match self.check_constraint(&type_parameters, constraint, 0) {
-                    Ok(true) => (),
-                    Ok(false) => return Err(VmError::InvalidConstraint),
-                    Err(err) => return Err(err),
+        if class.is_none() {
+            if let Some(f) = datatype.methods.get(name) {
+                let type_parameters =
+                    self.infer_parameters(f.type_paras.len(), &f.paras, parameters)?;
+                let type_parameters = if let Some(t) = type_parameters {
+                    t
+                } else {
+                    return Err(VmError::ParameterWrongType);
+                };
+                for constraint in f.constraints.iter() {
+                    match self.check_constraint(&type_parameters, constraint, 0) {
+                        Ok(true) => (),
+                        Ok(false) => return Err(VmError::InvalidConstraint),
+                        Err(err) => return Err(err),
+                    }
                 }
+                return Ok(f.id);
             }
         }
 
@@ -185,6 +268,11 @@ impl TypeTable {
             .classes
             .iter()
             .filter_map(|class_id| {
+                if let Some(class) = class {
+                    if class != *class_id {
+                        return None;
+                    }
+                }
                 let class = &self.classes[*class_id as usize];
                 class
                     .methods
@@ -198,7 +286,7 @@ impl TypeTable {
             1 => {
                 let (class_id, class, method) = *methods.first().unwrap();
                 let type_parameters =
-                    self.infer_parameters(class.type_parameters.len(), method, parameters)?;
+                    self.infer_parameters(class.parameters.len(), method, parameters)?;
                 let type_parameters = if let Some(tp) = type_parameters {
                     tp
                 } else {
@@ -220,7 +308,7 @@ impl TypeTable {
         }
     }
 
-    /// Reslove a type's parameters to a particular type according to a give particular type
+    /// Resolve a type's parameters to a particular type according to a give particular type
     fn _infer(
         result: &mut [Option<ParticularType>],
         expect: &Type,
@@ -490,29 +578,46 @@ mod tests {
             });
 
         // (+) Int Int
-        let func =
-            type_table.lookup_member_function(&[as_p_type!(Int), as_p_type!(Int), as_p_type!(Int)], "add");
+        let func = type_table.lookup_member_function(
+            &[as_p_type!(Int), as_p_type!(Int), as_p_type!(Int)],
+            "add",
+            None,
+        );
         assert_eq!(func, Ok(as_func!(add_int_int)));
+
+        // (+) Int Int, lookup Eq
+        let func = type_table.lookup_member_function(
+            &[as_p_type!(Int), as_p_type!(Int), as_p_type!(Int)],
+            "add",
+            Some(as_class!(Eq)),
+        );
+        assert_eq!(func, Err(VmError::NoSuchMethod));
 
         // (<) Int Int
         //
         // instance Ord a => Ord a
-        let func = type_table.lookup_member_function(&[as_p_type!(Int), as_p_type!(Int)], "lt");
+        let func =
+            type_table.lookup_member_function(&[as_p_type!(Int), as_p_type!(Int)], "lt", None);
         assert_eq!(func, Err(VmError::ReduceOverflow));
 
         // (<) Int Int Int
-        let func =
-            type_table.lookup_member_function(&[as_p_type!(Int), as_p_type!(Int), as_p_type!(Int)], "lt");
+        let func = type_table.lookup_member_function(
+            &[as_p_type!(Int), as_p_type!(Int), as_p_type!(Int)],
+            "lt",
+            None,
+        );
         assert_eq!(func, Err(VmError::ParameterWrongLength));
 
         // (==) Int Int
-        let func = type_table.lookup_member_function(&[as_p_type!(Int), as_p_type!(Int)], "eq");
+        let func =
+            type_table.lookup_member_function(&[as_p_type!(Int), as_p_type!(Int)], "eq", None);
         assert_eq!(func, Ok(as_func!(eq_int_int)));
 
         // (+) Int Float
         let func = type_table.lookup_member_function(
             &[as_p_type!(Int), as_p_type!(Float), as_p_type!(Float)],
             "add",
+            None,
         );
         assert_eq!(func, Ok(as_func!(add_int_float)));
 
@@ -520,6 +625,7 @@ mod tests {
         let func = type_table.lookup_member_function(
             &[as_p_type!(Float), as_p_type!(Float), as_p_type!(Float)],
             "add",
+            None,
         );
         assert_eq!(func, Err(VmError::NotAnInstance));
 
@@ -532,11 +638,13 @@ mod tests {
                 ParticularType::Poly(2, vec![as_p_type!(Int)]),
             ],
             "eq",
+            None,
         );
         assert_eq!(func, Ok(as_func!(eq_maybe_maybe)));
 
         // (==) Float -- not implemented
-        let func = type_table.lookup_member_function(&[as_p_type!(Float), as_p_type!(Float)], "eq");
+        let func =
+            type_table.lookup_member_function(&[as_p_type!(Float), as_p_type!(Float)], "eq", None);
         assert_eq!(func, Err(VmError::NoSuchMethod));
 
         // (==) (Maybe Float) (Maybe Float)
@@ -546,6 +654,7 @@ mod tests {
                 ParticularType::Poly(2, vec![as_p_type!(Float)]),
             ],
             "eq",
+            None,
         );
         assert_eq!(func, Err(VmError::NotAnInstance));
     }
