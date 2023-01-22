@@ -1,90 +1,64 @@
-use bimap::BiHashMap;
+use self::gc::{Gc, GcId, Reg};
 
-use self::{gc::Gc, types::{TypeTable, ParticularType}};
+use crate::diagnostic::Loc;
+
+use ahash::AHashMap;
+use bimap::BiHashMap;
 
 mod gc;
 mod op;
 mod string_pool;
-mod types;
-mod prelude;
 
 const STACK_SIZE_LIMIT: usize = u32::MAX as usize;
-
 type TypeId = usize;
+type FuncId = usize;
 
-#[derive(Debug, PartialEq, Eq)]
+struct Ip {
+    pub func_id: usize,
+    pub inst: usize,
+}
+
+struct Func {
+    name: String,
+    parameters: usize,
+    reg_size: usize,
+    insts: Vec<Box<dyn Instruction>>,
+}
+
+trait Instruction {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError>;
+}
+
+struct Object {
+    obj_type: TypeId,
+    attributes: AHashMap<String, Reg>,
+}
+
 enum VmError {
-    Success,
-    StackOverflow,
-    InvalidType(String, String, String),
-    ReduceOverflow,
-    OverlapInstance,
-    CanNotDeduce,
-    InvalidConstraint,
-    ParameterWrongType,
-    ParameterWrongLength,
-    AnyTypeAttribute,
-    AmbiguousMethod,
-    NoSuchMethod,
-    NotAnInstance,
-    InvalidFunctionId(usize),
-    InvalidRegId(usize),
+    InvalidRegId(Loc, usize),
+    InvalidFunc(Loc, usize),
+    NotCallable(Loc, String),
+    ParameterLengthNotMatch(Loc, usize, usize),
 }
 
-trait Context {
-    fn gc(&mut self) -> &mut Gc;
-    fn get_func(&self, n: usize) -> Option<&VmFunc>;
-}
-
-trait Tracing<T>
-where
-    T: Context,
-{
-    fn exec(&self, ip: usize, context: &mut T) -> Result<usize, VmError>;
-}
-
-struct VmFunc {
-    ip: usize,
-    regs: usize,
-    paras: usize,
-}
-
-struct Vm {
+pub struct Vm {
+    functions: Vec<Func>,
     gc: Gc,
-    funcs: Vec<VmFunc>,
-    type_table: TypeTable,
-    type_cache: BiHashMap<ParticularType, usize>
-}
-
-impl Context for Vm {
-    fn gc(&mut self) -> &mut Gc {
-        &mut self.gc
-    }
-    fn get_func(&self, id: usize) -> Option<&VmFunc> {
-        self.funcs.get(id)
-    }
+    /// map from type name to type id
+    type_table: BiHashMap<String, TypeId>,
+    types: Vec<GcId>,
 }
 
 impl Vm {
-    fn new(type_table: TypeTable) -> Self {
-        Self {
-            gc: Gc::default(),
-            funcs: vec![],
-            type_table,
-            type_cache: BiHashMap::default()
-        }
+    fn run(&mut self, func_id: usize) -> Result<String, VmError> {
+        todo!()
     }
 
-    fn exec(&mut self, ops: Vec<Box<dyn Tracing<Vm>>>) -> (VmError, usize) {
-        if ops.len() == 0 {
-            return (VmError::Success, 0);
-        }
-        let mut ip = 0;
-        loop {
-            ip = match ops[ip].exec(ip, self) {
-                Ok(ip) => ip,
-                Err(err) => return (err, ip),
-            }
-        }
+    fn repl_continue(&mut self, func_id: usize) -> Result<String, VmError> {
+        todo!()
+    }
+
+    fn functions(&self) -> &Vec<Func> {
+        &self.functions
     }
 }
