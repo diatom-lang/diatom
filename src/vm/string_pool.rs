@@ -19,6 +19,7 @@ impl StringPool {
         Self::default()
     }
 
+    #[must_use]
     pub fn add(&mut self, s: String) -> StringId {
         let new = (s, 1, false);
         if self.free.is_empty() {
@@ -33,11 +34,13 @@ impl StringPool {
         }
     }
 
+    #[must_use]
     pub fn clone_str(&mut self, StringId { id }: &StringId) -> StringId {
         self.pool[*id].1 += 1;
         StringId { id: *id }
     }
 
+    #[must_use]
     pub fn modify_str<F>(&mut self, StringId { id }: StringId, f: F) -> StringId
     where
         F: FnOnce(&mut String),

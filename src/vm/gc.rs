@@ -1,6 +1,7 @@
 use std::{
-    cell::{Cell, RefCell},
+    cell::UnsafeCell,
     ops::{Index, IndexMut},
+    rc::Rc,
 };
 
 use super::{
@@ -17,7 +18,7 @@ enum Mark {
 }
 
 pub enum GcObject {
-    Closure(FuncId, Vec<Cell<(usize, Reg)>>),
+    Closure(FuncId, Vec<Rc<UnsafeCell<Reg>>>),
     Object(Object),
 }
 
@@ -32,25 +33,40 @@ pub enum Reg {
     Ref(GcId),
 }
 
+enum StackReg {
+    Reg(Reg),
+    Shared(Rc<UnsafeCell<Reg>>),
+}
+
 struct CallStack {
-    closure: GcId,
-    regs: Vec<Reg>,
+    regs: Vec<StackReg>,
     return_addr: Ip,
     write_back: Option<usize>,
 }
 
 /// Garbage Collector
-#[derive(Default)]
 pub struct Gc {
     pool: Vec<(GcObject, Mark)>,
     free: Vec<usize>,
     call_stack: Vec<CallStack>,
-    string_pool: RefCell<StringPool>,
+    string_pool: UnsafeCell<StringPool>,
 }
 
 impl Gc {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            pool: vec![],
+            free: vec![],
+            call_stack: vec![CallStack {
+                regs: vec![],
+                return_addr: Ip {
+                    func_id: usize::MAX,
+                    inst: usize::MAX,
+                },
+                write_back: None,
+            }],
+            string_pool: UnsafeCell::new(StringPool::new()),
+        }
     }
 
     pub fn alloc(&mut self, obj: GcObject) -> GcId {
@@ -62,8 +78,16 @@ impl Gc {
         }
     }
 
-    pub fn read_reg(&self, n: usize) -> Result<&Reg, ()> {
-        self.call_stack.last().and_then(|x| x.regs.get(n)).ok_or(())
+    pub fn read_reg(&self, n: usize) -> &Reg {
+        self.call_stack
+            .last()
+            .and_then(|x| {
+                x.regs.get(n).map(|reg| match reg {
+                    StackReg::Reg(reg) => reg,
+                    StackReg::Shared(rc) => unsafe { &*rc.as_ref().get() },
+                })
+            })
+            .unwrap()
     }
 
     pub fn clone_reg(&self, reg: &Reg) -> Reg {
@@ -72,35 +96,72 @@ impl Gc {
             Reg::Bool(b) => Reg::Bool(*b),
             Reg::Int(i) => Reg::Int(*i),
             Reg::Float(f) => Reg::Float(*f),
-            Reg::Str(sid) => Reg::Str(self.string_pool.borrow_mut().clone_str(sid)),
+            Reg::Str(sid) => Reg::Str(unsafe { (*(self.string_pool.get())).clone_str(sid) }),
             Reg::Ref(r) => Reg::Ref(*r),
         }
     }
 
-    pub fn write_reg(&mut self, n: usize, mut reg: Reg) -> Result<(), ()> {
-        self.call_stack
-            .last_mut()
-            .and_then(|x| {
-                x.regs.get_mut(n).map(|prev| {
-                    std::mem::swap(prev, &mut reg);
-                    if let Reg::Str(sid) = reg {
-                        self.string_pool.get_mut().delete(sid);
-                    }
-                })
-            })
-            .ok_or(())
+    pub fn share_reg(&mut self, id: usize) -> Rc<UnsafeCell<Reg>> {
+        let last = self.call_stack.len() - 1;
+        let stack = &mut self.call_stack[last];
+        let reg = std::mem::replace(&mut stack.regs[id], StackReg::Reg(Reg::Unit));
+        match reg {
+            StackReg::Reg(reg) => {
+                let rc = Rc::new(UnsafeCell::new(reg));
+                stack.regs[id] = StackReg::Shared(rc.clone());
+                rc
+            }
+            StackReg::Shared(rc) => rc,
+        }
     }
 
-    pub fn alloc_call_stack(
-        &mut self,
-        closure: GcId,
-        regs: usize,
-        return_addr: Ip,
-        write_back: Option<usize>,
-    ) {
+    /// Write reg to id
+    ///
+    /// Automatically extend reg file size if n > regs.len()
+    pub fn write_reg(&mut self, n: usize, mut reg: Reg) {
+        let last = self.call_stack.len() - 1;
+        let stack = &mut self.call_stack[last];
+        if n >= stack.regs.len() {
+            (0..=n - stack.regs.len())
+                .into_iter()
+                .for_each(|_| stack.regs.push(StackReg::Reg(Reg::Unit)))
+        }
+
+        let prev = &mut stack.regs[n];
+        let prev = match prev {
+            StackReg::Reg(prev) => prev,
+            StackReg::Shared(rc) => unsafe { &mut *rc.as_ref().get() },
+        };
+        std::mem::swap(prev, &mut reg);
+        if let Reg::Str(sid) = reg {
+            self.string_pool.get_mut().delete(sid);
+        }
+    }
+
+    pub fn write_shared_reg(&mut self, n: usize, reg: Rc<UnsafeCell<Reg>>) {
+        let last = self.call_stack.len() - 1;
+        let stack = &mut self.call_stack[last];
+        if n > stack.regs.len() {
+            (0..=n - stack.regs.len())
+                .into_iter()
+                .for_each(|_| stack.regs.push(StackReg::Reg(Reg::Unit)))
+        }
+
+        let prev = std::mem::replace(&mut stack.regs[n], StackReg::Shared(reg));
+        let prev = match prev {
+            StackReg::Reg(prev) => prev,
+            // This operation is only used when function is initializing
+            // This can not be a shared reg
+            StackReg::Shared(_) => unreachable!(),
+        };
+        if let Reg::Str(sid) = prev {
+            self.string_pool.get_mut().delete(sid);
+        }
+    }
+
+    pub fn alloc_call_stack(&mut self, return_addr: Ip, write_back: Option<usize>) {
         self.call_stack.push(CallStack {
-            closure,
-            regs: (1..regs).into_iter().map(|_| Reg::default()).collect(),
+            regs: vec![],
             return_addr,
             write_back,
         })
@@ -114,24 +175,15 @@ impl Gc {
         } else {
             self.call_stack.pop().map(
                 |CallStack {
-                     closure,
-                     mut regs,
+                     regs,
                      return_addr,
                      write_back,
                  }| {
-                    // write captured values back to closure
-                    if let GcObject::Closure(_, capture) = &self[closure] {
-                        capture.iter().for_each(|c| {
-                            let (pos, reg) = c.take();
-                            debug_assert!(matches!(reg, Reg::Unit));
-                            c.set((pos, std::mem::replace(&mut regs[pos], reg)));
-                        })
-                    } else {
-                        panic!("Internal Error: Call stack does not contain a closure.")
-                    }
-                    // destruct regs
                     regs.into_iter().for_each(|reg| {
-                        if let Reg::Str(sid) = reg {
+                        // Delete string ref count
+                        // Shared Reg must be referenced by at least one closure
+                        // do not need to delete here
+                        if let StackReg::Reg(Reg::Str(sid)) = reg {
                             self.string_pool.get_mut().delete(sid)
                         }
                     });
@@ -139,6 +191,21 @@ impl Gc {
                 },
             )
         }
+    }
+
+    pub fn clean_call_stack(&mut self) {
+        while self.call_stack.len() > 1 {
+            self.pop_call_stack();
+        }
+    }
+
+    pub fn get_string_by_id(&self, sid: &StringId) -> &str {
+        unsafe { &(*self.string_pool.get())[sid] }
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    pub fn string_pool(&self) -> &mut StringPool {
+        unsafe { &mut *self.string_pool.get() }
     }
 }
 

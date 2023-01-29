@@ -1,64 +1,75 @@
-use self::gc::{Gc, GcId, Reg};
+use crate::interpreter::Func;
 
-use crate::diagnostic::Loc;
+use self::{error::VmError, gc::Gc};
 
 use ahash::AHashMap;
-use bimap::BiHashMap;
 
+pub mod error;
 mod gc;
-mod op;
+pub mod op;
 mod string_pool;
+pub use gc::Reg;
 
-const STACK_SIZE_LIMIT: usize = u32::MAX as usize;
-type TypeId = usize;
 type FuncId = usize;
 
-struct Ip {
+#[derive(Clone, Copy)]
+pub struct Ip {
     pub func_id: usize,
     pub inst: usize,
 }
 
-struct Func {
-    name: String,
-    parameters: usize,
-    reg_size: usize,
-    insts: Vec<Box<dyn Instruction>>,
-}
-
-trait Instruction {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError>;
+pub trait Instruction {
+    fn exec(&self, ip: Ip, context: &mut Vm, functions: &[Func]) -> Result<Ip, VmError>;
 }
 
 struct Object {
-    obj_type: TypeId,
     attributes: AHashMap<String, Reg>,
 }
 
-enum VmError {
-    InvalidRegId(Loc, usize),
-    InvalidFunc(Loc, usize),
-    NotCallable(Loc, String),
-    ParameterLengthNotMatch(Loc, usize, usize),
-}
-
 pub struct Vm {
-    functions: Vec<Func>,
     gc: Gc,
-    /// map from type name to type id
-    type_table: BiHashMap<String, TypeId>,
-    types: Vec<GcId>,
+    ip: Ip,
+    output: String,
 }
 
 impl Vm {
-    fn run(&mut self, func_id: usize) -> Result<String, VmError> {
-        todo!()
+    pub fn new() -> Self {
+        Self {
+            gc: Gc::new(),
+            ip: Ip {
+                func_id: 0,
+                inst: 0,
+            },
+            output: String::new(),
+        }
     }
 
-    fn repl_continue(&mut self, func_id: usize) -> Result<String, VmError> {
-        todo!()
+    pub fn exec(&mut self, byte_code: &[Func]) -> Result<String, VmError> {
+        self.output.clear();
+        loop {
+            let Ip { func_id, inst } = self.ip;
+            if func_id == 0 && inst >= byte_code[0].insts.len() {
+                break;
+            }
+            self.ip = byte_code[func_id].insts[inst]
+                .exec(self.ip, self, byte_code)
+                .map_err(|err| {
+                    self.gc.clean_call_stack();
+                    err
+                })?;
+        }
+        Ok(std::mem::take(&mut self.output))
     }
 
-    fn functions(&self) -> &Vec<Func> {
-        &self.functions
+    pub fn set_ip(&mut self, ip: Ip) {
+        self.ip = ip
+    }
+
+    pub fn gc(&self) -> &Gc {
+        &self.gc
+    }
+
+    pub fn gc_mut(&mut self) -> &mut Gc {
+        &mut self.gc
     }
 }
