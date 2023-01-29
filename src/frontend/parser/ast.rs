@@ -104,7 +104,7 @@ pub enum OpInfix {
     Mul,
     Div,
     DivFloor,
-    Mod,
+    Rem,
     Exp,
     Comma,
     Member,

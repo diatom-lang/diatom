@@ -36,7 +36,7 @@ const fn precedence_infix(op: OpInfix) -> (u16, u16) {
         And => (9, 10),
         Eq | Ne | Le | Lt | Gt | Ge => (11, 12),
         Plus | Minus => (13, 14),
-        Mul | Div | DivFloor | Mod => (15, 16),
+        Mul | Div | DivFloor | Rem => (15, 16),
         Exp => (17, 18),
         Member => (21, 22),
     }
@@ -1403,7 +1403,7 @@ impl Parser {
                     Op(Mul) => OpInfix::Mul,
                     Op(Div) => OpInfix::Div,
                     Op(DivFloor) => OpInfix::DivFloor,
-                    Op(Mod) => OpInfix::Mod,
+                    Op(Rem) => OpInfix::Rem,
                     Op(Exp) => OpInfix::Exp,
                     Op(Comma) => OpInfix::Comma,
                     Op(Member) => OpInfix::Member,

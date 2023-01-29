@@ -184,6 +184,57 @@ impl Instruction for OpPanic {
     }
 }
 
+pub struct OpNot {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpNot {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let reg = match lhs {
+            Reg::Bool(b) => Reg::Bool(!b),
+            _ => {
+                let t = get_type(lhs, gc);
+                return Err(VmError::OpPrefixNotApplicable(self.loc.clone(), "not", t));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpNeg {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpNeg {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let reg = match lhs {
+            Reg::Int(i) => Reg::Int(-i),
+            Reg::Float(f) => Reg::Float(-f),
+            _ => {
+                let t = get_type(lhs, gc);
+                return Err(VmError::OpPrefixNotApplicable(self.loc.clone(), "-", t));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
 pub struct OpAdd {
     pub loc: Loc,
     pub lhs: usize,
@@ -210,7 +261,332 @@ impl Instruction for OpAdd {
             _ => {
                 let t1 = get_type(lhs, gc);
                 let t2 = get_type(rhs, gc);
-                return Err(VmError::NotAddable(self.loc.clone(), t1, t2));
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "+", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpSub {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpSub {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Int(i64::wrapping_sub(*i1, *i2)),
+            (Reg::Int(i1), Reg::Float(f2)) => Reg::Float(*i1 as f64 - *f2),
+            (Reg::Float(f1), Reg::Int(i2)) => Reg::Float(*f1 - *i2 as f64),
+            (Reg::Float(f1), Reg::Float(f2)) => Reg::Float(*f1 - *f2),
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "-", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpMul {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpMul {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Int(i64::wrapping_mul(*i1, *i2)),
+            (Reg::Int(i1), Reg::Float(f2)) => Reg::Float(*i1 as f64 * *f2),
+            (Reg::Float(f1), Reg::Int(i2)) => Reg::Float(*f1 * *i2 as f64),
+            (Reg::Float(f1), Reg::Float(f2)) => Reg::Float(*f1 * *f2),
+            (Reg::Str(s), Reg::Int(i)) => {
+                let s = gc.string_pool().clone_str(s);
+                let sid_ret = gc.string_pool().modify_str(s, |s| {
+                    if *i > 0 {
+                        let original = s.clone();
+                        (2..=*i).into_iter().for_each(|_| s.push_str(&original));
+                    } else {
+                        s.clear()
+                    }
+                });
+                Reg::Str(sid_ret)
+            }
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "*", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpDiv {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpDiv {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Float(*i1 as f64 / *i2 as f64),
+            (Reg::Int(i1), Reg::Float(f2)) => Reg::Float(*i1 as f64 / *f2),
+            (Reg::Float(f1), Reg::Int(i2)) => Reg::Float(*f1 / *i2 as f64),
+            (Reg::Float(f1), Reg::Float(f2)) => Reg::Float(*f1 / *f2),
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "/", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpIDiv {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpIDiv {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let result = match (lhs, rhs) {
+            (Reg::Int(i1), Reg::Int(i2)) => *i1 as f64 / *i2 as f64,
+            (Reg::Int(i1), Reg::Float(f2)) => *i1 as f64 / *f2,
+            (Reg::Float(f1), Reg::Int(i2)) => *f1 / *i2 as f64,
+            (Reg::Float(f1), Reg::Float(f2)) => *f1 / *f2,
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "//", t1, t2));
+            }
+        };
+        let reg = Reg::Int(result.round() as i64);
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpRem {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpRem {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Int(*i1 % *i2),
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "%", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpPow {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpPow {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Int(i64::wrapping_pow(*i1, *i2 as u32)),
+            (Reg::Int(i1), Reg::Float(f2)) => Reg::Float(f64::powf(*i1 as f64, *f2)),
+            (Reg::Float(f1), Reg::Int(i2)) => Reg::Float(f64::powi(*f1, *i2 as i32)),
+            (Reg::Float(f1), Reg::Float(f2)) => Reg::Float(f64::powf(*f1, *f2)),
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "**", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpEq {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpEq {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Unit, Reg::Unit) => Reg::Bool(true),
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 == *i2),
+            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(*b1 == *b2),
+            (Reg::Str(s1), Reg::Str(s2)) => {
+                let s1 = gc.get_string_by_id(s1);
+                let s2 = gc.get_string_by_id(s2);
+                Reg::Bool(s1 == s2)
+            }
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "==", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpLt {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpLt {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Unit, Reg::Unit) => Reg::Bool(false),
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 < *i2),
+            (Reg::Int(i1), Reg::Float(f2)) => Reg::Bool((*i1 as f64) < *f2),
+            (Reg::Float(f1), Reg::Int(i2)) => Reg::Bool(*f1 < *i2 as f64),
+            (Reg::Float(f1), Reg::Float(f2)) => Reg::Bool(*f1 < *f2),
+            (Reg::Bool(_), Reg::Bool(_)) => Reg::Bool(false),
+            (Reg::Str(s1), Reg::Str(s2)) => {
+                let s1 = gc.get_string_by_id(s1);
+                let s2 = gc.get_string_by_id(s2);
+                Reg::Bool(s1 < s2)
+            }
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "<", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpAnd {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpAnd {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(*b1 && *b2),
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "and", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpOr {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpOr {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(*b1 || *b2),
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "or", t1, t2));
             }
         };
         gc.write_reg(self.rd, reg);

@@ -441,7 +441,7 @@ impl Lexer {
                     '-' => Ok((Token::Op(Operator::Minus), loc)),
                     '*' => Ok((Token::Op(Operator::Mul), loc)),
                     '/' => Ok((Token::Op(Operator::Div), loc)),
-                    '%' => Ok((Token::Op(Operator::Mod), loc)),
+                    '%' => Ok((Token::Op(Operator::Rem), loc)),
                     '=' => Ok((Token::Op(Operator::Assign), loc)),
                     ',' => Ok((Token::Op(Operator::Comma), loc)),
                     '.' => Ok((Token::Op(Operator::Member), loc)),

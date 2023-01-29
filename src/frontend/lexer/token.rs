@@ -78,7 +78,7 @@ pub enum Operator {
     /// "/"
     Div,
     /// "%"
-    Mod,
+    Rem,
     /// ".."
     Range,
     /// "and"
@@ -195,7 +195,7 @@ impl Display for Operator {
             Operator::Mul => "*",
             Operator::DivFloor => "//",
             Operator::Div => "/",
-            Operator::Mod => "%",
+            Operator::Rem => "%",
             Operator::Range => "..",
             Operator::And => "and",
             Operator::Or => "or",

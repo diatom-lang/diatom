@@ -7,11 +7,11 @@ mod error;
 use crate::{
     diagnostic::{Diagnostic, Loc},
     frontend::{
-        parser::ast::{Const, Expr, Expr_, OpInfix, Stmt, Stmt_},
+        parser::ast::{Const, Expr, Expr_, OpInfix, Stmt, Stmt_, OpPrefix},
         Ast, Parser,
     },
     vm::{
-        op::{OpAdd, OpLoadConstant},
+        op::{OpAdd, OpLoadConstant, OpSub, OpDiv, OpMul, OpNot, OpNeg, OpIDiv, OpRem, OpPow, OpEq, OpLt, OpAnd, OpOr},
         Instruction, Ip, Reg, Vm,
     },
 };
@@ -200,20 +200,27 @@ impl Interpreter {
         match expr {
             Expr_::Block(_) => todo!(),
             Expr_::If(_) => todo!(),
-            Expr_::Prefix(_, _) => todo!(),
+            Expr_::Prefix(op, lhs) => {
+                let (lhs_id, lhs_tmp) = self.compile_expr(lhs)?;
+                if lhs_tmp {
+                    self.release_local_intermediate(lhs_id)
+                };
+                Ok(self.compile_prefix(op, lhs_id, loc.clone()))
+            },
             Expr_::Call(_, _) => todo!(),
             Expr_::Index(_, _) => todo!(),
             Expr_::Construct(_, _) => todo!(),
             Expr_::Infix(op, lhs, rhs) => {
                 let (lhs_id, lhs_tmp) = self.compile_expr(lhs)?;
                 let (rhs_id, rhs_tmp) = self.compile_expr(rhs)?;
+                let ret = self.compile_infix(op, lhs_id, rhs_id, loc.clone());
                 if lhs_tmp {
                     self.release_local_intermediate(lhs_id)
                 };
                 if rhs_tmp {
                     self.release_local_intermediate(rhs_id)
                 };
-                Ok(self.compile_infix(op, lhs_id, rhs_id, loc.clone()))
+                Ok(ret)
             }
             Expr_::Fn(_, _) => todo!(),
             Expr_::Id(_) => todo!(),
@@ -226,7 +233,7 @@ impl Interpreter {
     }
 
     fn compile_constant(&mut self, constant: &Const, loc: Loc) -> (usize, bool) {
-        let rd = self.decalre_local_intermediate();
+        let rd = self.declare_local_intermediate();
         let constant = match constant {
             Const::Unit => Reg::Unit,
             Const::Int(i) => Reg::Int(*i),
@@ -250,32 +257,164 @@ impl Interpreter {
         match op {
             OpInfix::Assign => todo!(),
             OpInfix::Range => todo!(),
-            OpInfix::Or => todo!(),
-            OpInfix::And => todo!(),
-            OpInfix::Eq => todo!(),
-            OpInfix::Ne => todo!(),
-            OpInfix::Le => todo!(),
-            OpInfix::Lt => todo!(),
-            OpInfix::Ge => todo!(),
-            OpInfix::Gt => todo!(),
+            OpInfix::Or => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpOr { loc, lhs, rhs, rd }));
+                (rd, true)
+            },
+            OpInfix::And => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpAnd { loc, lhs, rhs, rd }));
+                (rd, true)
+            },
+            OpInfix::Eq => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpEq { loc, lhs, rhs, rd }));
+                (rd, true)
+            },
+            OpInfix::Ne => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpEq { loc: loc.clone(), lhs, rhs, rd }));
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpNot { loc, lhs: rd, rd }));
+                (rd, true)
+            },
+            OpInfix::Le => {
+                let rd1 = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpLt { loc: loc.clone(), lhs, rhs, rd: rd1 }));
+                let rd2 = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpEq { loc: loc.clone(), lhs, rhs, rd: rd2 }));
+                self.release_local_intermediate(rd1);
+                self.release_local_intermediate(rd2);
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpOr { loc, lhs: rd1, rhs: rd2, rd }));
+                println!("{lhs} {rhs} {rd1} {rd2} {rd}");
+                (rd, true)
+            },
+            OpInfix::Lt => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpLt { loc, lhs, rhs, rd }));
+                (rd, true)
+            },
+            OpInfix::Ge => {
+                let rd1 = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpLt { loc: loc.clone(), lhs, rhs, rd: rd1 }));
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpNot { loc: loc.clone(), lhs: rd1, rd: rd1 }));
+                let rd2 = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpEq { loc: loc.clone(), lhs, rhs, rd: rd2 }));
+                self.release_local_intermediate(rd1);
+                self.release_local_intermediate(rd2);
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpOr { loc, lhs: rd1, rhs: rd2, rd }));
+                (rd, true)
+            },
+            OpInfix::Gt => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpLt { loc: loc.clone(), lhs, rhs, rd }));
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpNot { loc, lhs: rd, rd }));
+                (rd, true)
+            },
             OpInfix::Plus => {
-                let rd = self.decalre_local_intermediate();
+                let rd = self.declare_local_intermediate();
                 self.get_current_func()
                     .insts
                     .push(Box::new(OpAdd { loc, lhs, rhs, rd }));
                 (rd, true)
             }
-            OpInfix::Minus => todo!(),
-            OpInfix::Mul => todo!(),
-            OpInfix::Div => todo!(),
-            OpInfix::DivFloor => todo!(),
-            OpInfix::Mod => todo!(),
-            OpInfix::Exp => todo!(),
+            OpInfix::Minus => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpSub { loc, lhs, rhs, rd }));
+                (rd, true)
+            }
+            OpInfix::Mul => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpMul { loc, lhs, rhs, rd }));
+                (rd, true)
+            },
+            OpInfix::Div => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpDiv { loc, lhs, rhs, rd }));
+                (rd, true)
+            },
+            OpInfix::DivFloor => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpIDiv { loc, lhs, rhs, rd }));
+                (rd, true)
+            },
+            OpInfix::Rem => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpRem { loc, lhs, rhs, rd }));
+                (rd, true)
+            },
+            OpInfix::Exp => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpPow { loc, lhs, rhs, rd }));
+                (rd, true)
+            },
             OpInfix::Comma => todo!(),
             OpInfix::Member => todo!(),
         }
     }
 
+    fn compile_prefix(&mut self, op: &OpPrefix, lhs: usize, loc: Loc) -> (usize, bool) {
+        match op{
+            OpPrefix::Not => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpNot{ loc, lhs, rd }));
+                (rd, true)
+            },
+            OpPrefix::Neg => {
+                let rd = self.declare_local_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpNeg{ loc, lhs, rd }));
+                (rd, true)
+            },
+        }
+    }
     fn get_current_func(&mut self) -> &mut Func {
         let id = self.compile_func_stack.last().unwrap();
         &mut self.byte_code[*id]
@@ -287,7 +426,7 @@ impl Interpreter {
         }
     }
 
-    fn decalre_local_intermediate(&mut self) -> usize {
+    fn declare_local_intermediate(&mut self) -> usize {
         self.variables.last_mut().unwrap().declare_intermediate()
     }
 }
