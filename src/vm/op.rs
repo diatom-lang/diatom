@@ -450,9 +450,9 @@ impl Instruction for OpPow {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
-            (Reg::Int(i1), Reg::Int(i2)) => Reg::Int(i64::wrapping_pow(*i1, *i2 as u32)),
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Float(f64::powf(*i1 as f64, *i2 as f64)),
             (Reg::Int(i1), Reg::Float(f2)) => Reg::Float(f64::powf(*i1 as f64, *f2)),
-            (Reg::Float(f1), Reg::Int(i2)) => Reg::Float(f64::powi(*f1, *i2 as i32)),
+            (Reg::Float(f1), Reg::Int(i2)) => Reg::Float(f64::powf(*f1, *i2 as f64)),
             (Reg::Float(f1), Reg::Float(f2)) => Reg::Float(f64::powf(*f1, *f2)),
             _ => {
                 let t1 = get_type(lhs, gc);

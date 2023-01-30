@@ -26,3 +26,10 @@ console = ["reedline", "nu-ansi-term", "crossterm"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
