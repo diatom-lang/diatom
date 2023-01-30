@@ -597,7 +597,7 @@ impl Instruction for OpOr {
     }
 }
 
-pub struct OpMove{
+pub struct OpMove {
     pub loc: Loc,
     pub rs: usize,
     pub rd: usize,

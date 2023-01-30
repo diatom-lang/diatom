@@ -18,7 +18,9 @@ impl From<VmError> for Diagnostic {
         match value {
             VmError::OpBinNotApplicable(loc, op, t1, t2) => Diagnostic::error()
                 .with_code("E3001")
-                .with_message(format!("`{op}` can not be applied between `{t1}` and `{t2}`"))
+                .with_message(format!(
+                    "`{op}` can not be applied between `{t1}` and `{t2}`"
+                ))
                 .with_labels(vec![Label::primary((), loc)]),
             VmError::OpPrefixNotApplicable(loc, op, t) => Diagnostic::error()
                 .with_code("E3002")

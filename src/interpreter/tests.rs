@@ -11,12 +11,14 @@ macro_rules! test_ok {
 macro_rules! test_err {
     ($code: literal) => {
         let mut interpreter = Interpreter::new();
-        let _ = interpreter.exec($code, false).expect_err("Execution failed!");
+        let _ = interpreter
+            .exec($code, false)
+            .expect_err("Execution failed!");
     };
 }
 
 #[test]
-fn test_binary_op(){
+fn test_binary_op() {
     test_ok!("1+2-3*10/5 + (1 + 2.234**3)", "9.149348904");
     test_ok!("8//5", "1");
     test_ok!("8%5", "3");
@@ -35,6 +37,6 @@ fn test_binary_op(){
 }
 
 #[test]
-fn test_assignment(){
+fn test_assignment() {
     test_ok!("a = 5 b = 1 a", "5");
 }
