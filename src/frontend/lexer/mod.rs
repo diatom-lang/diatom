@@ -609,13 +609,13 @@ mod tests {
             println!("{:?}", token);
         }
 
-        if !should_fail && ast.diagnoser.count() > 0 {
+        if !should_fail && ast.diagnoser.error_count() > 0 {
             println!("{}", ast.diagnoser.render(true));
         }
         if should_fail {
-            assert!(ast.diagnoser.count() > 0);
+            assert!(ast.diagnoser.error_count() > 0);
         } else {
-            assert!(ast.diagnoser.count() == 0);
+            assert!(ast.diagnoser.error_count() == 0);
         }
     }
 

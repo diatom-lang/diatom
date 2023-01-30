@@ -400,7 +400,7 @@ impl Instruction for OpIDiv {
                 return Err(VmError::OpBinNotApplicable(self.loc.clone(), "//", t1, t2));
             }
         };
-        let reg = Reg::Int(result.round() as i64);
+        let reg = Reg::Int(result.floor() as i64);
         gc.write_reg(self.rd, reg);
         Ok(Ip {
             func_id: ip.func_id,
@@ -521,7 +521,7 @@ impl Instruction for OpLt {
             (Reg::Int(i1), Reg::Float(f2)) => Reg::Bool((*i1 as f64) < *f2),
             (Reg::Float(f1), Reg::Int(i2)) => Reg::Bool(*f1 < *i2 as f64),
             (Reg::Float(f1), Reg::Float(f2)) => Reg::Bool(*f1 < *f2),
-            (Reg::Bool(_), Reg::Bool(_)) => Reg::Bool(false),
+            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::lt(b1, b2)),
             (Reg::Str(s1), Reg::Str(s2)) => {
                 let s1 = gc.get_string_by_id(s1);
                 let s2 = gc.get_string_by_id(s2);
@@ -590,6 +590,25 @@ impl Instruction for OpOr {
             }
         };
         gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+}
+
+pub struct OpMove{
+    pub loc: Loc,
+    pub rs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpMove {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let rs = gc.read_reg(self.rs);
+        let rs = gc.clone_reg(rs);
+        gc.write_reg(self.rd, rs);
         Ok(Ip {
             func_id: ip.func_id,
             inst: ip.inst + 1,

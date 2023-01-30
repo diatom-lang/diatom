@@ -16,7 +16,6 @@ mod diagnostic;
 mod frontend;
 mod interpreter;
 mod vm;
-pub use frontend::Parser;
 pub use interpreter::Interpreter;
 /// The version of this build
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

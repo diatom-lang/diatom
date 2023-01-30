@@ -70,28 +70,6 @@ macro_rules! expr_start_pattern {
 }
 
 /// The parser for Diatom.
-///
-/// # Errors
-/// Error code `E1000` to `E1999` is reserved for `Parser`
-///
-/// # Example
-///
-/// ```rust, no_run
-/// use diatom::Parser;
-/// use std::ffi::OsStr;
-///
-/// // Create a new parser
-/// let mut parser = Parser::default();
-///
-/// // Parse a File
-/// let ast = parser.parse(OsStr::new("code.dm"));
-/// // Parse a string
-/// let ast = parser.parse_str(OsStr::new("Custom name"), "a = 1 b = 2");
-///
-/// // Print diagnostics with color
-/// println!("{}", ast.diagnoser.render(true));
-/// ```
-///
 pub struct Parser {
     search_path: Vec<PathBuf>,
     relative_search_path: Option<PathBuf>,
@@ -108,46 +86,14 @@ impl Parser {
     }
 
     /// add module search path
-    pub fn with_path(mut self, path: PathBuf) -> Self {
+    pub fn _with_path(mut self, path: PathBuf) -> Self {
         self.search_path.push(path);
         self
     }
 
     /// Get all loaded modules
-    pub fn modules(&self) -> &AHashMap<OsString, Ast> {
+    pub fn _modules(&self) -> &AHashMap<OsString, Ast> {
         &self.modules
-    }
-
-    /// Parse a file.
-    ///
-    /// Return true if errors are encountered.
-    pub fn parse(&mut self, filepath: &OsStr) -> Ast {
-        let path = fs::canonicalize(filepath);
-        let path = match path {
-            Ok(path) => path,
-            Err(err) => {
-                let mut ast = Ast::new(OsString::new(), SharedFile::from_str(""));
-                ast.add_diagnostic(to_diagnostic(
-                    ErrorCode::NoSuchFile(DisplayableOsString::from(filepath), err),
-                    0..0,
-                ));
-                return ast;
-            }
-        };
-        let path_str = path.as_os_str();
-        let content = SharedFile::new(path_str);
-        let content = match content {
-            Ok(content) => content,
-            Err(err) => {
-                let mut ast = Ast::new(OsString::new(), SharedFile::from_str(""));
-                ast.add_diagnostic(to_diagnostic(
-                    ErrorCode::NoSuchFile(DisplayableOsString::from(path_str), err),
-                    0..0,
-                ));
-                return ast;
-            }
-        };
-        self.parse_file(path_str, content)
     }
 
     /// Parse a string and append to current parse tree
@@ -315,7 +261,7 @@ impl Parser {
                 iter.next();
                 Stmt {
                     loc: start,
-                    val: Stmt_::Break,
+                    val: Stmt_::Continue,
                 }
             }
             Some(Key(Return)) => {

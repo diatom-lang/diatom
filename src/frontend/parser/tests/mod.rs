@@ -3,16 +3,16 @@ use super::*;
 fn test_str(code: &str, should_fail: bool) {
     let mut resource_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     resource_path.push("src/frontend/parser/tests/resources");
-    let mut parser = Parser::new().with_path(resource_path);
+    let mut parser = Parser::new()._with_path(resource_path);
     let ast = parser.parse_str(OsStr::new(file!()), code);
     println!("{:#?}", ast.statements);
-    if !should_fail && ast.diagnoser.count() > 0 {
+    if !should_fail && ast.diagnoser.error_count() > 0 {
         print!("{}", ast.diagnoser.render(true));
     }
     if should_fail {
-        assert!(ast.diagnoser.count() > 0);
+        assert!(ast.diagnoser.error_count() > 0);
     } else {
-        assert!(ast.diagnoser.count() == 0);
+        assert!(ast.diagnoser.error_count() == 0);
     }
 }
 
@@ -22,10 +22,10 @@ fn test_expr_postfix_ambiguous() {
     let mut parser = Parser::new();
     let ast = parser.parse_str(OsStr::new(file!()), code);
     println!("{:#?}", ast.statements);
-    if ast.diagnoser.count() > 0 {
+    if ast.diagnoser.error_count() > 0 {
         print!("{}", ast.diagnoser.render(true));
     }
-    assert_eq!(ast.diagnoser.count(), 0);
+    assert_eq!(ast.diagnoser.error_count(), 0);
     assert_eq!(ast.statements.len(), 3);
 }
 

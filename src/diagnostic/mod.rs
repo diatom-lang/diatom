@@ -108,18 +108,8 @@ impl Diagnoser {
         }
         self.diagnoses.push(diag)
     }
-
-    /// Count all diagnoses
-    pub fn count(&self) -> usize {
-        self.diagnoses.len()
-    }
-
     pub fn error_count(&self) -> usize {
         self.error_count
-    }
-
-    pub fn warning_count(&self) -> usize {
-        self.warning_count
     }
 
     /// Render error to string
@@ -147,12 +137,5 @@ impl Diagnoser {
                 line!()
             )
         })
-    }
-
-    /// Clear current diagnoses
-    pub fn clear(&mut self) {
-        self.diagnoses.clear();
-        self.error_count = 0;
-        self.warning_count = 0;
     }
 }

@@ -78,7 +78,7 @@ mod tests {
     fn test() {
         let mut sp = StringPool::default();
         let id1 = sp.add("abcd".to_string());
-        sp.clone_str(&id1);
+        let _ = sp.clone_str(&id1);
         assert_eq!(sp.pool.len(), 1);
         let id1 = sp.modify_str(id1, |x| x.push_str("efgh"));
         assert_eq!(sp.pool.len(), 2);
@@ -86,7 +86,7 @@ mod tests {
         let id2 = sp.add("1234".to_string());
         let id2 = sp.modify_str(id2, |x| x.push_str("5678"));
         assert_eq!(sp.pool.len(), 3);
-        sp.clone_str(&id1);
+        let _ = sp.clone_str(&id1);
         sp.delete(id1);
         assert_eq!(sp.free.len(), 0);
         sp.delete(id2);

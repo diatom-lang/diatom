@@ -71,7 +71,7 @@ impl Console {
             let sig = line_editor.read_line(&prompt);
             match sig {
                 Ok(Signal::Success(buffer)) => {
-                    let result = self.interpreter.exec_repl(buffer, self.color);
+                    let result = self.interpreter.exec(buffer, self.color);
                     match result {
                         Ok(s) => print!("{s}"),
                         Err(s) => eprint!("{s}"),

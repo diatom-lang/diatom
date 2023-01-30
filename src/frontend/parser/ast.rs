@@ -81,12 +81,6 @@ impl Debug for Stmt {
     }
 }
 
-impl Stmt {
-    pub fn new(val: Stmt_, loc: Loc) -> Self {
-        Self { loc, val }
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub enum OpInfix {
     Assign,
