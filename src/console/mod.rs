@@ -39,7 +39,7 @@ impl Console {
 
         // Lock std for fast print
         let _ = stdout().lock();
-        println!("\nDiatom Console v{}\n", VERSION);
+        println!("\nDiatom Interactive Console v{VERSION}");
 
         // Highlight syntax
         let highlighter = Box::<DiatomHighlighter>::default();
@@ -84,7 +84,7 @@ impl Console {
                     break;
                 }
                 Err(err) => {
-                    println!("Event: {:?}", err);
+                    println!("Event: {err:?}");
                     break;
                 }
             }

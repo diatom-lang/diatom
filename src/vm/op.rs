@@ -16,7 +16,7 @@ fn get_type(reg: &Reg, gc: &Gc) -> String {
             let obj = &gc[*r];
             match obj {
                 GcObject::Closure(_, _) => "Closure".to_string(),
-                GcObject::Object(_) => "Table".to_string(),
+                GcObject::_Object(_) => "Table".to_string(),
             }
         }
     }

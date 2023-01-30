@@ -132,12 +132,12 @@ pub enum Operator {
 impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Token::Str(s) => write!(f, "str({})", s),
-            Token::Integer(i) => write!(f, "int({})", i),
-            Token::Float(fp) => write!(f, "float({})", fp),
-            Token::Id(id) => write!(f, "id({})", id),
-            Token::Key(key) => write!(f, "`{}`", key),
-            Token::Op(op) => write!(f, "\"{}\"", op),
+            Token::Str(s) => write!(f, "str({s})"),
+            Token::Integer(i) => write!(f, "int({i})"),
+            Token::Float(fp) => write!(f, "float({fp})"),
+            Token::Id(id) => write!(f, "id({id})"),
+            Token::Key(key) => write!(f, "`{key}`"),
+            Token::Op(op) => write!(f, "\"{op}\""),
         }
     }
 }
@@ -176,7 +176,7 @@ impl Display for Keyword {
             Keyword::Require => "require",
             Keyword::Of => "of",
         };
-        write!(f, "{}", name)
+        write!(f, "{name}")
     }
 }
 
@@ -221,7 +221,7 @@ impl Display for Operator {
             Operator::At => "@",
             Operator::Arm => "=>",
         };
-        write!(f, "{}", name)
+        write!(f, "{name}")
     }
 }
 

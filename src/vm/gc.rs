@@ -17,7 +17,7 @@ enum Mark {
 
 pub enum GcObject {
     Closure(FuncId, Vec<Rc<UnsafeCell<Reg>>>),
-    Object(Object),
+    _Object(Object),
 }
 
 #[derive(Default)]

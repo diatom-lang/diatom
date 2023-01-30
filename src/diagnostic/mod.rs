@@ -126,8 +126,8 @@ impl Diagnoser {
         for diagnostic in &self.diagnoses {
             let r = term::emit(&mut writer, &config, &self.file, diagnostic);
             if let Err(r) = r {
-                let _ = writeln!(writer, "{:?}", r);
-                let _ = writeln!(writer, "{:?}", diagnostic);
+                let _ = writeln!(writer, "{r:?}");
+                let _ = writeln!(writer, "{diagnostic:?}");
             }
         }
         String::from_utf8(writer.into_inner()).unwrap_or_else(|_| {

@@ -46,7 +46,7 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc) -> (Diagnostic, bool) {
             let mut diagnostic = Diagnostic::error().with_code("E1000");
             if let Some(t) = met {
                 diagnostic = diagnostic
-                    .with_message(format!("Unexpected token `{}`", t))
+                    .with_message(format!("Unexpected token `{t}`"))
                     .with_labels(vec![Label::primary((), loc)]);
             } else {
                 diagnostic = diagnostic
@@ -54,11 +54,11 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc) -> (Diagnostic, bool) {
                     .with_labels(vec![Label::primary((), loc)]);
             }
             if let Some(t) = expected {
-                diagnostic = diagnostic.with_notes(vec![format!("Consider add a `{}` here", t)]);
+                diagnostic = diagnostic.with_notes(vec![format!("Consider add a `{t}` here")]);
             }
             if let Some((t, loc)) = to_match {
                 diagnostic = diagnostic.with_labels(vec![
-                    Label::secondary((), loc).with_message(format!("Due to `{}` here", t))
+                    Label::secondary((), loc).with_message(format!("Due to `{t}` here"))
                 ]);
             }
             diagnostic
@@ -106,7 +106,7 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc) -> (Diagnostic, bool) {
             .with_code("E1008")
             .with_message("Module can not be found")
             .with_labels(vec![Label::primary((), loc)])
-            .with_notes(vec![format!("Looking for `{}.dm` or `{}/mod.dm`", s, s)]),
+            .with_notes(vec![format!("Looking for `{s}.dm` or `{s}/mod.dm`")]),
         ErrorCode::InvalidModule => Diagnostic::error()
             .with_code("E1009")
             .with_message("Error encountered while parsing module")

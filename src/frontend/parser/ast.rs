@@ -127,10 +127,10 @@ pub enum ConstPattern {
 impl Debug for ConstPattern {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConstPattern::Int(i) => write!(f, "{}", i),
-            ConstPattern::Float(fl) => write!(f, "{}", fl),
-            ConstPattern::Str(s) => write!(f, "\"{}\"", s),
-            ConstPattern::Bool(b) => write!(f, "{}", b),
+            ConstPattern::Int(i) => write!(f, "{i}"),
+            ConstPattern::Float(fl) => write!(f, "{fl}"),
+            ConstPattern::Str(s) => write!(f, "\"{s}\""),
+            ConstPattern::Bool(b) => write!(f, "{b}"),
         }
     }
 }
@@ -168,12 +168,12 @@ impl Pattern {
 impl Debug for Pattern {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.val {
-            Pattern_::Id(id) => write!(f, "{:?}", id),
+            Pattern_::Id(id) => write!(f, "{id:?}"),
             Pattern_::Bind(id, p) => f.debug_tuple("").field(id).field(&"@").field(p).finish(),
             Pattern_::Or(a, b) => f.debug_tuple("").field(a).field(&"|").field(b).finish(),
             Pattern_::And(a, b) => f.debug_tuple("").field(a).field(&",").field(b).finish(),
             Pattern_::Inner(name, p) => f.debug_tuple("").field(name).field(&"$").field(p).finish(),
-            Pattern_::Const(c) => write!(f, "{:?}", c),
+            Pattern_::Const(c) => write!(f, "{c:?}"),
             Pattern_::Parentheses(p) => f.debug_tuple("").field(p).finish(),
             Pattern_::Error => write!(f, "Error"),
         }
@@ -213,8 +213,8 @@ impl Debug for Expr {
             Expr_::Block(b) => f.debug_list().entries(b.iter()).finish(),
             Expr_::Prefix(op, expr) => f.debug_tuple("").field(&op).field(&expr).finish(),
             Expr_::Infix(op, e1, e2) => f.debug_tuple("").field(&e1).field(&op).field(&e2).finish(),
-            Expr_::Id(id) => write!(f, "{:?}", id),
-            Expr_::Const(c) => write!(f, "{:?}", c),
+            Expr_::Id(id) => write!(f, "{id:?}"),
+            Expr_::Const(c) => write!(f, "{c:?}"),
             Expr_::Error => write!(f, "Error"),
             Expr_::If(v) => f.debug_tuple("").field(&"if").field(&v).finish(),
             Expr_::Parentheses(expr) => f
@@ -261,10 +261,10 @@ impl Debug for Const {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Const::Unit => write!(f, "()"),
-            Const::Int(i) => write!(f, "{}", i),
-            Const::Float(fp) => write!(f, "{}", fp),
-            Const::Str(s) => write!(f, "{}", s),
-            Const::Bool(b) => write!(f, "{}", b),
+            Const::Int(i) => write!(f, "{i}"),
+            Const::Float(fp) => write!(f, "{fp}"),
+            Const::Str(s) => write!(f, "{s}"),
+            Const::Bool(b) => write!(f, "{b}"),
             Const::List(l) => f.debug_list().entries(l.iter()).finish(),
             Const::Set(val) => f.debug_set().entries(val).finish(),
             Const::Dict(keys, vals) => f.debug_map().entries(keys.iter().zip(vals.iter())).finish(),

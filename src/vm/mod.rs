@@ -22,8 +22,8 @@ pub trait Instruction {
     fn exec(&self, ip: Ip, context: &mut Vm, functions: &[Func]) -> Result<Ip, VmError>;
 }
 
-struct Object {
-    attributes: AHashMap<String, Reg>,
+pub struct Object {
+    _attributes: AHashMap<String, Reg>,
 }
 
 pub struct Vm {

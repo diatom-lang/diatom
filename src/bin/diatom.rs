@@ -15,7 +15,7 @@ fn main() {
     let args = Args::parse();
 
     if let Some(path) = args.file {
-        println!("Path is {:?}", path);
+        println!("Path is {path:?}");
         todo!()
     } else {
         let mut console = Console::new(true);
