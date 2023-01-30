@@ -12,10 +12,11 @@
 //! See examples in [Parser].
 //!
 //!
-mod backend;
 mod diagnostic;
 mod frontend;
-pub use frontend::Parser;
+mod interpreter;
+mod vm;
+pub use interpreter::Interpreter;
 /// The version of this build
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -23,6 +24,3 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 mod console;
 #[cfg(feature = "console")]
 pub use console::Console;
-
-#[cfg(feature = "vm")]
-pub use backend::{AsmFile, VM, VM_VERSION};

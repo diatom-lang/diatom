@@ -108,18 +108,8 @@ impl Diagnoser {
         }
         self.diagnoses.push(diag)
     }
-
-    /// Count all diagnoses
-    pub fn count(&self) -> usize {
-        self.diagnoses.len()
-    }
-
     pub fn error_count(&self) -> usize {
         self.error_count
-    }
-
-    pub fn warning_count(&self) -> usize {
-        self.warning_count
     }
 
     /// Render error to string
@@ -136,8 +126,8 @@ impl Diagnoser {
         for diagnostic in &self.diagnoses {
             let r = term::emit(&mut writer, &config, &self.file, diagnostic);
             if let Err(r) = r {
-                let _ = writeln!(writer, "{:?}", r);
-                let _ = writeln!(writer, "{:?}", diagnostic);
+                let _ = writeln!(writer, "{r:?}");
+                let _ = writeln!(writer, "{diagnostic:?}");
             }
         }
         String::from_utf8(writer.into_inner()).unwrap_or_else(|_| {
@@ -147,12 +137,5 @@ impl Diagnoser {
                 line!()
             )
         })
-    }
-
-    /// Clear current diagnoses
-    pub fn clear(&mut self) {
-        self.diagnoses.clear();
-        self.error_count = 0;
-        self.warning_count = 0;
     }
 }

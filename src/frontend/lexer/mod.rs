@@ -441,7 +441,7 @@ impl Lexer {
                     '-' => Ok((Token::Op(Operator::Minus), loc)),
                     '*' => Ok((Token::Op(Operator::Mul), loc)),
                     '/' => Ok((Token::Op(Operator::Div), loc)),
-                    '%' => Ok((Token::Op(Operator::Mod), loc)),
+                    '%' => Ok((Token::Op(Operator::Rem), loc)),
                     '=' => Ok((Token::Op(Operator::Assign), loc)),
                     ',' => Ok((Token::Op(Operator::Comma), loc)),
                     '.' => Ok((Token::Op(Operator::Member), loc)),
@@ -609,13 +609,13 @@ mod tests {
             println!("{:?}", token);
         }
 
-        if !should_fail && ast.diagnoser.count() > 0 {
+        if !should_fail && ast.diagnoser.error_count() > 0 {
             println!("{}", ast.diagnoser.render(true));
         }
         if should_fail {
-            assert!(ast.diagnoser.count() > 0);
+            assert!(ast.diagnoser.error_count() > 0);
         } else {
-            assert!(ast.diagnoser.count() == 0);
+            assert!(ast.diagnoser.error_count() == 0);
         }
     }
 

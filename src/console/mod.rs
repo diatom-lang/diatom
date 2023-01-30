@@ -1,6 +1,6 @@
-use std::{env, ffi::OsStr};
+use std::env;
 
-use crate::Parser;
+use crate::Interpreter;
 
 mod highlighter;
 mod prompt;
@@ -10,17 +10,16 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// An interactive console for Diatom
 pub struct Console {
-    parser: Parser,
+    interpreter: Interpreter,
     color: bool,
 }
 
 impl Console {
     pub fn new(color: bool) -> Self {
-        let parser = match env::current_dir() {
-            Ok(path) => Parser::new().with_path(path),
-            Err(_) => Parser::new(),
-        };
-        Self { parser, color }
+        Self {
+            interpreter: Interpreter::new(),
+            color,
+        }
     }
 
     /// Run this console
@@ -40,7 +39,7 @@ impl Console {
 
         // Lock std for fast print
         let _ = stdout().lock();
-        println!("\nDiatom Console v{}\n", VERSION);
+        println!("\nDiatom Interactive Console v{VERSION}");
 
         // Highlight syntax
         let highlighter = Box::<DiatomHighlighter>::default();
@@ -72,13 +71,11 @@ impl Console {
             let sig = line_editor.read_line(&prompt);
             match sig {
                 Ok(Signal::Success(buffer)) => {
-                    let ast = self.parser.parse_str(OsStr::new("stdin"), &buffer);
-                    let diags = ast.diagnoser.render(self.color);
-                    println!("{}", diags);
-                    if ast.diagnoser.error_count() > 0 {
-                        continue;
+                    let result = self.interpreter.exec(buffer, self.color);
+                    match result {
+                        Ok(s) => print!("{s}"),
+                        Err(s) => eprint!("{s}"),
                     }
-                    println!("{:?}", ast.statements);
                 }
                 Ok(Signal::CtrlC) => {
                     line_editor.run_edit_commands(&[EditCommand::Clear]);
@@ -87,7 +84,7 @@ impl Console {
                     break;
                 }
                 Err(err) => {
-                    println!("Event: {:?}", err);
+                    println!("Event: {err:?}");
                     break;
                 }
             }

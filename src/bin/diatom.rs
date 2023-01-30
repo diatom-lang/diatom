@@ -1,4 +1,4 @@
-use diatom::{Console, Parser};
+use diatom::Console;
 use std::path::PathBuf;
 
 use clap::Parser as ArgParser;
@@ -15,17 +15,8 @@ fn main() {
     let args = Args::parse();
 
     if let Some(path) = args.file {
-        let mut parser = Parser::new();
-        let ast = parser.parse(path.as_os_str());
-        print!("{}", ast.diagnoser.render(true));
-        println!("{:#?}", ast.statements);
-        for (path, ast) in parser.modules() {
-            println!(
-                "{}:\n{:#?}",
-                path.to_str().unwrap_or("Path can not be displayed"),
-                ast.statements
-            );
-        }
+        println!("Path is {path:?}");
+        todo!()
     } else {
         let mut console = Console::new(true);
         console.run();

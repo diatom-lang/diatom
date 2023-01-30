@@ -1,23 +1,16 @@
-use std::{env, ffi::OsStr};
-
 use reedline::{ValidationResult, Validator};
 
-use crate::Parser;
+use crate::Interpreter;
 
 #[derive(Default)]
 pub struct DiatomValidator;
 
 impl Validator for DiatomValidator {
     fn validate(&self, line: &str) -> ValidationResult {
-        let mut parser = match env::current_dir() {
-            Ok(path) => Parser::new().with_path(path),
-            Err(_) => Parser::new(),
-        };
-        let ast = parser.parse_str(OsStr::new(""), line);
-        if ast.input_can_continue() {
-            ValidationResult::Incomplete
-        } else {
+        if Interpreter::new().verify_input_completeness(line) {
             ValidationResult::Complete
+        } else {
+            ValidationResult::Incomplete
         }
     }
 }
