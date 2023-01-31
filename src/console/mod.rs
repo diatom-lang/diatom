@@ -39,7 +39,7 @@ impl Console {
 
         // Lock std for fast print
         let _ = stdout().lock();
-        println!("\nDiatom Interactive Console v{VERSION}");
+        println!("Diatom Interactive Console v{VERSION}");
 
         // Highlight syntax
         let highlighter = Box::<DiatomHighlighter>::default();

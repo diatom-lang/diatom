@@ -20,6 +20,7 @@ pub struct Ip {
 
 pub trait Instruction {
     fn exec(&self, ip: Ip, context: &mut Vm, functions: &[Func]) -> Result<Ip, VmError>;
+    fn decompile(&self, decompiled: &mut String, context: &Vm);
 }
 
 pub struct Object {
@@ -44,29 +45,31 @@ impl Vm {
         }
     }
 
-    pub fn exec(&mut self, byte_code: &[Func]) -> Result<String, VmError> {
+    pub fn exec(&mut self, byte_code: &[Func]) -> VmError {
         self.output.clear();
         loop {
             let Ip { func_id, inst } = self.ip;
-            if func_id == 0 && inst >= byte_code[0].insts.len() {
-                break;
-            }
-            self.ip = byte_code[func_id].insts[inst]
+            debug_assert!(byte_code.len() > func_id);
+            let func = unsafe { byte_code.get_unchecked(func_id) };
+            debug_assert!(func.insts.len() > inst);
+            self.ip = match unsafe { func.insts.get_unchecked(inst) }
                 .exec(self.ip, self, byte_code)
                 .map_err(|err| {
                     self.gc.clean_call_stack();
                     err
-                })?;
+                }) {
+                Ok(ip) => ip,
+                Err(err) => return err,
+            };
         }
-        Ok(std::mem::take(&mut self.output))
+    }
+
+    pub fn take_output(&mut self) -> String {
+        std::mem::take(&mut self.output)
     }
 
     pub fn set_ip(&mut self, ip: Ip) {
         self.ip = ip
-    }
-
-    pub fn gc(&self) -> &Gc {
-        &self.gc
     }
 
     pub fn gc_mut(&mut self) -> &mut Gc {

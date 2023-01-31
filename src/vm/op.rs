@@ -1,4 +1,5 @@
 use crate::diagnostic::Loc;
+use std::fmt::Write;
 
 use super::{
     gc::{Gc, GcObject, Reg},
@@ -21,6 +22,8 @@ fn get_type(reg: &Reg, gc: &Gc) -> String {
         }
     }
 }
+
+const FORMAT_PAD: usize = 7;
 
 pub struct OpCallClosure {
     pub reg_id: usize,
@@ -100,6 +103,10 @@ impl Instruction for OpCallClosure {
 
         Ok(Ip { func_id, inst: 0 })
     }
+
+    fn decompile(&self, _decompiled: &mut String, _context: &Vm) {
+        todo!()
+    }
 }
 
 pub struct OpRet {
@@ -122,6 +129,10 @@ impl Instruction for OpRet {
         }
 
         Ok(ip)
+    }
+
+    fn decompile(&self, _decompiled: &mut String, _context: &Vm) {
+        todo!()
     }
 }
 
@@ -153,6 +164,10 @@ impl Instruction for OpMakeClosure {
             inst: ip.inst + 1,
         })
     }
+
+    fn decompile(&self, _decompiled: &mut String, _context: &Vm) {
+        todo!()
+    }
 }
 
 pub struct OpLoadConstant {
@@ -171,6 +186,23 @@ impl Instruction for OpLoadConstant {
             inst: ip.inst + 1,
         })
     }
+
+    fn decompile(&self, decompiled: &mut String, context: &Vm) {
+        let content = match &self.constant {
+            Reg::Unit => "()".to_string(),
+            Reg::Bool(b) => b.to_string(),
+            Reg::Int(i) => i.to_string(),
+            Reg::Float(f) => f.to_string(),
+            Reg::Str(sid) => context.gc.get_string_by_id(sid).to_string(),
+            Reg::Ref(_) => unreachable!(),
+        };
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    {} -> Reg#{}",
+            "load", content, self.rd
+        )
+        .unwrap();
+    }
 }
 
 pub struct OpPanic {
@@ -181,6 +213,15 @@ pub struct OpPanic {
 impl Instruction for OpPanic {
     fn exec(&self, _ip: Ip, _context: &mut Vm, _byte_code: &[Func]) -> Result<Ip, VmError> {
         Err(VmError::Panic(self.loc.clone(), self.reason.clone()))
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    \"{}\"",
+            "panic", self.reason
+        )
+        .unwrap()
     }
 }
 
@@ -207,6 +248,15 @@ impl Instruction for OpNot {
             inst: ip.inst + 1,
         })
     }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: <FORMAT_PAD$} Reg#{} -> Reg#{}",
+            "not", self.lhs, self.rd
+        )
+        .unwrap()
+    }
 }
 
 pub struct OpNeg {
@@ -232,6 +282,15 @@ impl Instruction for OpNeg {
             func_id: ip.func_id,
             inst: ip.inst + 1,
         })
+    }
+
+    fn decompile(&self, decompiled: &mut String, __context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: <FORMAT_PAD$} Reg#{} -> Reg#{}",
+            "neg", self.lhs, self.rd
+        )
+        .unwrap();
     }
 }
 
@@ -270,6 +329,15 @@ impl Instruction for OpAdd {
             inst: ip.inst + 1,
         })
     }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "add", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
 }
 
 pub struct OpSub {
@@ -300,6 +368,15 @@ impl Instruction for OpSub {
             func_id: ip.func_id,
             inst: ip.inst + 1,
         })
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "sub", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
     }
 }
 
@@ -344,6 +421,15 @@ impl Instruction for OpMul {
             inst: ip.inst + 1,
         })
     }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "mul", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
 }
 
 pub struct OpDiv {
@@ -374,6 +460,15 @@ impl Instruction for OpDiv {
             func_id: ip.func_id,
             inst: ip.inst + 1,
         })
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "div", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
     }
 }
 
@@ -407,6 +502,15 @@ impl Instruction for OpIDiv {
             inst: ip.inst + 1,
         })
     }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "idiv", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
 }
 
 pub struct OpRem {
@@ -434,6 +538,15 @@ impl Instruction for OpRem {
             func_id: ip.func_id,
             inst: ip.inst + 1,
         })
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "rem", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
     }
 }
 
@@ -465,6 +578,15 @@ impl Instruction for OpPow {
             func_id: ip.func_id,
             inst: ip.inst + 1,
         })
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "power", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
     }
 }
 
@@ -501,31 +623,40 @@ impl Instruction for OpEq {
             inst: ip.inst + 1,
         })
     }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "eq", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
 }
 
-pub struct OpLt {
+pub struct OpGt {
     pub loc: Loc,
     pub lhs: usize,
     pub rhs: usize,
     pub rd: usize,
 }
 
-impl Instruction for OpLt {
+impl Instruction for OpGt {
     fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
             (Reg::Unit, Reg::Unit) => Reg::Bool(false),
-            (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 < *i2),
-            (Reg::Int(i1), Reg::Float(f2)) => Reg::Bool((*i1 as f64) < *f2),
-            (Reg::Float(f1), Reg::Int(i2)) => Reg::Bool(*f1 < *i2 as f64),
-            (Reg::Float(f1), Reg::Float(f2)) => Reg::Bool(*f1 < *f2),
-            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::lt(b1, b2)),
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 > *i2),
+            (Reg::Int(i1), Reg::Float(f2)) => Reg::Bool((*i1 as f64) > *f2),
+            (Reg::Float(f1), Reg::Int(i2)) => Reg::Bool(*f1 > *i2 as f64),
+            (Reg::Float(f1), Reg::Float(f2)) => Reg::Bool(*f1 > *f2),
+            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::gt(b1, b2)),
             (Reg::Str(s1), Reg::Str(s2)) => {
                 let s1 = gc.get_string_by_id(s1);
                 let s2 = gc.get_string_by_id(s2);
-                Reg::Bool(s1 < s2)
+                Reg::Bool(s1 > s2)
             }
             _ => {
                 let t1 = get_type(lhs, gc);
@@ -538,6 +669,15 @@ impl Instruction for OpLt {
             func_id: ip.func_id,
             inst: ip.inst + 1,
         })
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "gt", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
     }
 }
 
@@ -567,6 +707,15 @@ impl Instruction for OpAnd {
             inst: ip.inst + 1,
         })
     }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "and", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
 }
 
 pub struct OpOr {
@@ -595,6 +744,15 @@ impl Instruction for OpOr {
             inst: ip.inst + 1,
         })
     }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "or", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
 }
 
 pub struct OpMove {
@@ -613,5 +771,124 @@ impl Instruction for OpMove {
             func_id: ip.func_id,
             inst: ip.inst + 1,
         })
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} -> Reg#{}",
+            "mov", self.rs, self.rd
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpBranch {
+    pub loc: Loc,
+    pub condition: usize,
+    pub offset: i64,
+}
+
+impl Instruction for OpBranch {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        let gc = &mut context.gc;
+        let condition = gc.read_reg(self.condition);
+        if let Reg::Bool(b) = condition {
+            Ok(if *b {
+                Ip {
+                    func_id: ip.func_id,
+                    inst: (ip.inst as i64 + self.offset) as usize,
+                }
+            } else {
+                Ip {
+                    func_id: ip.func_id,
+                    inst: ip.inst + 1,
+                }
+            })
+        } else {
+            let t = get_type(condition, gc);
+            Err(VmError::InvalidCondition(self.loc.clone(), t))
+        }
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} => {:+}",
+            "branch", self.condition, self.offset
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpJump {
+    pub loc: Loc,
+    pub offset: i64,
+}
+
+impl Instruction for OpJump {
+    fn exec(&self, ip: Ip, _context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: (ip.inst as i64 + self.offset) as usize,
+        })
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(decompiled, "{: >FORMAT_PAD$}    {}", "jump", self.offset).unwrap()
+    }
+}
+
+pub struct OpDummy;
+
+impl Instruction for OpDummy {
+    fn exec(&self, ip: Ip, _context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(decompiled, "{: >FORMAT_PAD$}   ", "dummy").unwrap()
+    }
+}
+
+/// Print register to output and stop execution
+pub struct OpYield {
+    pub show_id: Option<usize>,
+}
+
+impl Instruction for OpYield {
+    fn exec(&self, _ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        if let Some(id) = self.show_id {
+            let gc = &context.gc;
+            let reg = gc.read_reg(id);
+            let mut output = match reg {
+                Reg::Unit => "()".to_string(),
+                Reg::Bool(b) => format!("{b}"),
+                Reg::Int(i) => format!("{i}"),
+                Reg::Float(f) => format!("{f}"),
+                Reg::Str(sid) => gc.get_string_by_id(sid).to_string(),
+                Reg::Ref(r) => format!("Object@<{r}>"),
+            };
+            output.push('\n');
+            context.output.push_str(&output)
+        }
+        Err(VmError::Yield)
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    {}",
+            "yield",
+            if let Some(id) = self.show_id {
+                format!("Reg#{id}")
+            } else {
+                String::new()
+            }
+        )
+        .unwrap()
     }
 }

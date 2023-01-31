@@ -24,12 +24,15 @@ clap = { version = "4.0.29", features = ["derive"] }
 default = ["console"]
 console = ["reedline", "nu-ansi-term", "crossterm"]
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
-strip = true
 panic = "abort"
+
+[dev-dependencies]
+criterion = "0.4"
+
+[[bench]]
+name = "performance"
+harness = false

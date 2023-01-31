@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
+use std::fmt::Write;
 
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 
 mod error;
 
@@ -11,9 +12,10 @@ use crate::{
         Ast, Parser,
     },
     vm::{
+        error::VmError,
         op::{
-            OpAdd, OpAnd, OpDiv, OpEq, OpIDiv, OpLoadConstant, OpLt, OpMove, OpMul, OpNeg, OpNot,
-            OpOr, OpPow, OpRem, OpSub,
+            OpAdd, OpAnd, OpBranch, OpDiv, OpDummy, OpEq, OpGt, OpIDiv, OpJump, OpLoadConstant,
+            OpMove, OpMul, OpNeg, OpNot, OpOr, OpPow, OpRem, OpSub, OpYield,
         },
         Instruction, Ip, Reg, Vm,
     },
@@ -21,12 +23,24 @@ use crate::{
 
 use self::error::ErrorCode;
 
+#[derive(Clone, Hash, PartialEq, Eq)]
+enum ConstantValue {
+    Unit,
+    Bool(bool),
+    Int(i64),
+    // Float must be transmuted in order to compare
+    Float(u64),
+    Str(String),
+}
+
 #[derive(Clone)]
 struct RegisterTable {
     prev: Option<Box<RegisterTable>>,
     variables: AHashMap<String, usize>,
     free: Vec<usize>,
     assigned: usize,
+    func_id: usize,
+    constant_table: AHashMap<ConstantValue, usize>,
 }
 
 impl RegisterTable {
@@ -36,11 +50,13 @@ impl RegisterTable {
             variables: AHashMap::default(),
             free: vec![],
             assigned: 0,
+            func_id: 0,
+            constant_table: AHashMap::default(),
         }
     }
 
     fn declare_or_get_variable(&mut self, name: impl AsRef<str>) -> (usize, usize) {
-        let exist = self.lookup_variable(name.as_ref(), 0);
+        let exist = self.lookup_variable(name.as_ref());
         if let Ok(ret) = exist {
             return ret;
         }
@@ -49,13 +65,13 @@ impl RegisterTable {
         (id, 0)
     }
 
-    /// Return (reg_id, depth)
-    fn lookup_variable(&self, name: impl AsRef<str>, depth: usize) -> Result<(usize, usize), ()> {
+    /// Return (reg_id, func_id)
+    fn lookup_variable(&self, name: impl AsRef<str>) -> Result<(usize, usize), ()> {
         let var = self.variables.get(name.as_ref());
         match var {
-            Some(id) => Ok((*id, depth)),
+            Some(id) => Ok((*id, self.func_id)),
             None => match &self.prev {
-                Some(prev) => prev.lookup_variable(name, depth + 1),
+                Some(prev) => prev.lookup_variable(name),
                 None => Err(()),
             },
         }
@@ -73,6 +89,22 @@ impl RegisterTable {
             self.free.push(id)
         }
     }
+
+    /// Return ok is constant is in table, otherwise alloc a new register for this constant
+    fn get_or_alloc_constant(&mut self, constant: ConstantValue) -> Result<usize, usize> {
+        match self.constant_table.get(&constant) {
+            Some(id) => Ok(*id),
+            None => {
+                // must alloc new register to prevent
+                // already compiled Instruction
+                // overwrite constant value
+                let id = self.assigned;
+                self.assigned += 1;
+                self.constant_table.insert(constant, id);
+                Err(id)
+            }
+        }
+    }
 }
 
 pub struct Func {
@@ -84,8 +116,12 @@ pub struct Func {
 
 pub struct Interpreter {
     registers: RegisterTable,
-    compile_func_stack: Vec<usize>,
+    scopes: Vec<AHashSet<String>>,
     byte_code: Vec<Func>,
+    /// Location to insert load constant
+    current_start_loc: usize,
+    /// Count how many load constant inserted
+    insert_offset: usize,
     vm: Vm,
 }
 
@@ -99,8 +135,10 @@ impl Interpreter {
         };
         Self {
             registers: RegisterTable::new(),
-            compile_func_stack: vec![0],
+            scopes: vec![AHashSet::new()],
             byte_code: vec![main],
+            current_start_loc: 0,
+            insert_offset: 0,
             vm: Vm::new(),
         }
     }
@@ -111,7 +149,29 @@ impl Interpreter {
         !ast.input_can_continue()
     }
 
-    pub fn exec(&mut self, code: impl AsRef<str>, color: bool) -> Result<String, String> {
+    pub fn decompile(&mut self, code: impl AsRef<str>, color: bool) -> Result<String, String> {
+        self.compile(code, color)?;
+        let mut decompiled = String::new();
+        for Func {
+            name,
+            parameters,
+            insts,
+            captures: _,
+        } in self.byte_code.iter()
+        {
+            writeln!(decompiled, "Function: {name}\nParameters: {parameters}").unwrap();
+            writeln!(decompiled, "Body:").unwrap();
+            let pad = insts.len().ilog10() as usize + 1;
+            for (n, inst) in insts.iter().enumerate() {
+                write!(decompiled, "    {n: <pad$} ").unwrap();
+                inst.decompile(&mut decompiled, &self.vm);
+            }
+            writeln!(decompiled).unwrap();
+        }
+        Ok(decompiled)
+    }
+
+    fn compile(&mut self, code: impl AsRef<str>, color: bool) -> Result<Ast, String> {
         let mut parser = Parser::new();
         let mut ast = parser.parse_str(OsStr::new("<interactive>"), code.as_ref());
         if ast.diagnoser.error_count() > 0 {
@@ -123,31 +183,31 @@ impl Interpreter {
             func_id: 0,
             inst: self.byte_code[0].insts.len(),
         });
+        self.current_start_loc = self.byte_code[0].insts.len();
+        self.insert_offset = 0;
 
         let return_value = self.compile_ast(&mut ast).map_err(|_| {
             // restore variable table if compile failed
             self.registers = registers_prev;
             ast.diagnoser.render(color)
         })?;
-        self.vm.exec(&self.byte_code).map_err(|error_code| {
-            let diagnostic = Diagnostic::from(error_code);
-            ast.diagnoser.push(diagnostic);
-            ast.diagnoser.render(color)
-        })?;
 
-        return_value
-            .map(|reg_id| {
-                let reg = self.vm.gc().read_reg(reg_id);
-                match reg {
-                    Reg::Unit => "()".to_string(),
-                    Reg::Bool(b) => format!("{b}"),
-                    Reg::Int(i) => format!("{i}"),
-                    Reg::Float(f) => format!("{f}"),
-                    Reg::Str(sid) => self.vm.gc().get_string_by_id(sid).to_string(),
-                    Reg::Ref(r) => format!("Object@<{r}>"),
-                }
-            })
-            .ok_or_else(String::new)
+        self.byte_code[0].insts.push(Box::new(OpYield {
+            show_id: return_value,
+        }));
+        Ok(ast)
+    }
+
+    pub fn exec(&mut self, code: impl AsRef<str>, color: bool) -> Result<String, String> {
+        let mut ast = self.compile(code, color)?;
+        match self.vm.exec(&self.byte_code) {
+            VmError::Yield => Ok(self.vm.take_output()),
+            error_code => {
+                let diagnostic = Diagnostic::from(error_code);
+                ast.diagnoser.push(diagnostic);
+                Err(ast.diagnoser.render(color))
+            }
+        }
     }
 
     /// if compile succeeded, return last expression's reg id
@@ -172,8 +232,8 @@ impl Interpreter {
     }
 
     fn compile_stmt(&mut self, stmt: &Stmt) -> Result<Option<usize>, ErrorCode> {
-        let Stmt { loc: _, val: stmt } = stmt;
-        let return_value: Option<_>;
+        let Stmt { loc, val: stmt } = stmt;
+        let mut return_value = None;
         match stmt {
             Stmt_::Expr(expr) => {
                 let (reg_id, tmp) = self.compile_expr(expr)?;
@@ -186,7 +246,54 @@ impl Interpreter {
             Stmt_::Break => todo!(),
             Stmt_::Return(_) => todo!(),
             Stmt_::Data(_, _, _) => todo!(),
-            Stmt_::Loop(_, _) => todo!(),
+            Stmt_::Loop(condition, body) => {
+                let start_label = self.get_current_func().insts.len();
+                let before_test_inserted = self.insert_offset;
+                let branch_inst = if let Some(condition) = condition {
+                    let (condition_reg, tmp) = self.compile_expr(condition)?;
+                    if tmp {
+                        self.registers.free_intermediate(condition_reg);
+                    }
+                    self.get_current_func().insts.push(Box::new(OpDummy));
+                    Some((
+                        self.get_current_func().insts.len() - 1,
+                        condition_reg,
+                        condition.loc.clone(),
+                    ))
+                } else {
+                    None
+                };
+                let after_test_inserted = self.insert_offset;
+                self.enter_block();
+                for stmt in body.iter() {
+                    self.compile_stmt(stmt).map_err(|err| {
+                        self.leave_block();
+                        err
+                    })?;
+                }
+                self.leave_block();
+
+                // number of load const inserted after compile block
+                let inserted = self.insert_offset - before_test_inserted;
+                let jump_loc = self.get_current_func().insts.len();
+
+                self.get_current_func().insts.push(Box::new(OpJump {
+                    loc: loc.clone(),
+                    offset: start_label as i64 + inserted as i64 - jump_loc as i64,
+                }));
+
+                // jump out of loop
+                let inserted = self.insert_offset - after_test_inserted;
+                if let Some((inst, reg, loc)) = branch_inst {
+                    self.get_current_func().insts[inst + inserted] = Box::new(OpBranch {
+                        condition: reg,
+                        loc,
+                        offset: self.get_current_func().insts.len() as i64
+                            - inst as i64
+                            - inserted as i64,
+                    })
+                };
+            }
             Stmt_::For(_, _, _) => todo!(),
             Stmt_::Def(_, _, _, _) => todo!(),
             Stmt_::Error => unreachable!(),
@@ -226,7 +333,7 @@ impl Interpreter {
                 }
             }
             Expr_::Fn(_, _) => todo!(),
-            Expr_::Id(id) => match self.registers.lookup_variable(id, 0) {
+            Expr_::Id(id) => match self.registers.lookup_variable(id) {
                 Ok((id, _)) => Ok((id, false)),
                 Err(()) => Err(ErrorCode::NameNotDefined(loc.clone(), id.clone())),
             },
@@ -249,6 +356,11 @@ impl Interpreter {
             loc: _,
         } = lhs
         {
+            // register to local block
+            if self.registers.lookup_variable(id).is_err() {
+                self.scopes.last_mut().unwrap().insert(id.clone());
+            }
+            // declare variable
             let (id, _) = self.registers.declare_or_get_variable(id);
             let (rhs, tmp) = self.compile_expr(rhs)?;
             if tmp {
@@ -272,24 +384,50 @@ impl Interpreter {
     }
 
     fn compile_constant(&mut self, constant: &Const, loc: Loc) -> (usize, bool) {
-        let rd = self.registers.declare_intermediate();
         let constant = match constant {
-            Const::Unit => Reg::Unit,
-            Const::Int(i) => Reg::Int(*i),
-            Const::Float(f) => Reg::Float(*f),
-            Const::Str(s) => {
-                let sid = self.vm.gc_mut().string_pool().add(s.clone());
-                Reg::Str(sid)
-            }
-            Const::Bool(b) => Reg::Bool(*b),
+            Const::Unit => self
+                .registers
+                .get_or_alloc_constant(ConstantValue::Unit)
+                .map_err(|reg| (reg, Reg::Unit)),
+            Const::Int(i) => self
+                .registers
+                .get_or_alloc_constant(ConstantValue::Int(*i))
+                .map_err(|reg| (reg, Reg::Int(*i))),
+            Const::Float(f) => self
+                .registers
+                .get_or_alloc_constant(ConstantValue::Float((*f).to_bits()))
+                .map_err(|reg| (reg, Reg::Float(*f))),
+            Const::Str(s) => self
+                .registers
+                .get_or_alloc_constant(ConstantValue::Str(s.clone()))
+                .map_err(|reg| {
+                    let sid = self.vm.gc_mut().string_pool().add(s.clone());
+                    (reg, Reg::Str(sid))
+                }),
+            Const::Bool(b) => self
+                .registers
+                .get_or_alloc_constant(ConstantValue::Bool(*b))
+                .map_err(|reg| (reg, Reg::Bool(*b))),
             Const::List(_) => todo!(),
             Const::Set(_) => todo!(),
             Const::Dict(_, _) => todo!(),
         };
-        self.get_current_func()
-            .insts
-            .push(Box::new(OpLoadConstant { constant, rd, loc }));
-        (rd, true)
+        match constant {
+            Ok(reg_id) => (reg_id, false),
+            Err((reg_id, reg)) => {
+                let insert_loc = self.current_start_loc;
+                self.insert_offset += 1;
+                self.get_current_func().insts.insert(
+                    insert_loc,
+                    Box::new(OpLoadConstant {
+                        constant: reg,
+                        rd: reg_id,
+                        loc,
+                    }),
+                );
+                (reg_id, false)
+            }
+        }
     }
 
     fn compile_infix(&mut self, op: &OpInfix, lhs: usize, rhs: usize, loc: Loc) -> (usize, bool) {
@@ -330,51 +468,12 @@ impl Interpreter {
                     .push(Box::new(OpNot { loc, lhs: rd, rd }));
                 (rd, true)
             }
-            OpInfix::Le => {
-                let rd1 = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpLt {
-                    loc: loc.clone(),
-                    lhs,
-                    rhs,
-                    rd: rd1,
-                }));
-                let rd2 = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpEq {
-                    loc: loc.clone(),
-                    lhs,
-                    rhs,
-                    rd: rd2,
-                }));
-                self.registers.free_intermediate(rd1);
-                self.registers.free_intermediate(rd2);
-                let rd = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpOr {
-                    loc,
-                    lhs: rd1,
-                    rhs: rd2,
-                    rd,
-                }));
-                println!("{lhs} {rhs} {rd1} {rd2} {rd}");
-                (rd, true)
-            }
-            OpInfix::Lt => {
-                let rd = self.registers.declare_intermediate();
-                self.get_current_func()
-                    .insts
-                    .push(Box::new(OpLt { loc, lhs, rhs, rd }));
-                (rd, true)
-            }
             OpInfix::Ge => {
                 let rd1 = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpLt {
+                self.get_current_func().insts.push(Box::new(OpGt {
                     loc: loc.clone(),
                     lhs,
                     rhs,
-                    rd: rd1,
-                }));
-                self.get_current_func().insts.push(Box::new(OpNot {
-                    loc: loc.clone(),
-                    lhs: rd1,
                     rd: rd1,
                 }));
                 let rd2 = self.registers.declare_intermediate();
@@ -397,7 +496,43 @@ impl Interpreter {
             }
             OpInfix::Gt => {
                 let rd = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpLt {
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpGt { loc, lhs, rhs, rd }));
+                (rd, true)
+            }
+            OpInfix::Lt => {
+                let rd1 = self.registers.declare_intermediate();
+                self.get_current_func().insts.push(Box::new(OpGt {
+                    loc: loc.clone(),
+                    lhs,
+                    rhs,
+                    rd: rd1,
+                }));
+                let rd2 = self.registers.declare_intermediate();
+                self.get_current_func().insts.push(Box::new(OpEq {
+                    loc: loc.clone(),
+                    lhs,
+                    rhs,
+                    rd: rd2,
+                }));
+                self.registers.free_intermediate(rd1);
+                self.registers.free_intermediate(rd2);
+                let rd = self.registers.declare_intermediate();
+                self.get_current_func().insts.push(Box::new(OpOr {
+                    loc: loc.clone(),
+                    lhs: rd1,
+                    rhs: rd2,
+                    rd,
+                }));
+                self.get_current_func()
+                    .insts
+                    .push(Box::new(OpNot { loc, lhs: rd, rd }));
+                (rd, true)
+            }
+            OpInfix::Le => {
+                let rd = self.registers.declare_intermediate();
+                self.get_current_func().insts.push(Box::new(OpGt {
                     loc: loc.clone(),
                     lhs,
                     rhs,
@@ -482,8 +617,19 @@ impl Interpreter {
     }
 
     fn get_current_func(&mut self) -> &mut Func {
-        let id = self.compile_func_stack.last().unwrap();
-        &mut self.byte_code[*id]
+        let id = self.registers.func_id;
+        &mut self.byte_code[id]
+    }
+
+    fn enter_block(&mut self) {
+        self.scopes.push(AHashSet::new());
+    }
+
+    fn leave_block(&mut self) {
+        let scope = self.scopes.pop().unwrap();
+        for name in scope.into_iter() {
+            self.registers.variables.remove(&name);
+        }
     }
 }
 
