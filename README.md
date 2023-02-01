@@ -13,17 +13,20 @@
 [crates-url]: https://crates.io/crates/diatom
 [license-badge]: https://img.shields.io/crates/l/diatom
 
-A dynamic typed scripting language for embedded use in applications.
+A dynamic typed scripting language for embedded use in applications. This project is yet another attempt of being a "better" lua.
 
-## Warning: Project is under development and not useable now.
+**Warning**: Project is still in experimental stage and API is considered as unstable.
 
 ## Features
- - [ ] **Gradual Typing**: Support for optional type hint.
- - [x] **Security**: Diatom is completely isolated and is only able to interact with its host.
- - [x] **ADT**: Diatom use algebraic data type.
- - [x] **No Null, No Exceptions**: Diatom encourages the use of `Maybe` **functor** and **monad**. The concept of `null` and `exception` in other languages like Java is completely useless in Diatom.
- - [x] **Impure Functional**: Diatom makes everything mutable and public like Python. We also support a little OOP in `data`(aka `class` in OOP languages) declaration.
- - [ ] **Native Speed**: Given every variable is marked, diatom is able to theoretically reach C/C++ level speed.
+- [x] High Performance: Runs as fast as lua
+- [ ] Support for a tracing jit 
+- [x] No global variable
+- [x] No `nil` value
+- [x] Has real integer type 
+- [ ] Has real list type
+- [ ] Support tuple for multiple return
+- [ ] Support for gradual typing
+- [ ] Support for macro system
 
 ## Try Diatom
 
