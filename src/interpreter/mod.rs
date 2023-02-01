@@ -235,6 +235,10 @@ impl Interpreter {
         let Stmt { loc, val: stmt } = stmt;
         let mut return_value = None;
         match stmt {
+            Stmt_::Expr(Expr {
+                loc,
+                val: Expr_::Infix(OpInfix::Assign, lhs, rhs),
+            }) => self.compile_assignment(lhs, rhs, loc.clone())?,
             Stmt_::Expr(expr) => {
                 let (reg_id, tmp) = self.compile_expr(expr)?;
                 return_value = Some(reg_id);
@@ -316,21 +320,18 @@ impl Interpreter {
             Expr_::Call(_, _) => todo!(),
             Expr_::Index(_, _) => todo!(),
             Expr_::Construct(_, _) => todo!(),
+            Expr_::Infix(OpInfix::Assign, _, _) => Err(ErrorCode::InvalidAssignment(loc.clone())),
             Expr_::Infix(op, lhs, rhs) => {
-                if let OpInfix::Assign = op {
-                    self.compile_assignment(lhs, rhs, loc.clone())
-                } else {
-                    let (lhs_id, lhs_tmp) = self.compile_expr(lhs)?;
-                    let (rhs_id, rhs_tmp) = self.compile_expr(rhs)?;
-                    let ret = self.compile_infix(op, lhs_id, rhs_id, loc.clone());
-                    if lhs_tmp {
-                        self.registers.free_intermediate(lhs_id);
-                    };
-                    if rhs_tmp {
-                        self.registers.free_intermediate(rhs_id);
-                    };
-                    Ok(ret)
-                }
+                let (lhs_id, lhs_tmp) = self.compile_expr(lhs)?;
+                let (rhs_id, rhs_tmp) = self.compile_expr(rhs)?;
+                let ret = self.compile_infix(op, lhs_id, rhs_id, loc.clone());
+                if lhs_tmp {
+                    self.registers.free_intermediate(lhs_id);
+                };
+                if rhs_tmp {
+                    self.registers.free_intermediate(rhs_id);
+                };
+                Ok(ret)
             }
             Expr_::Fn(_, _) => todo!(),
             Expr_::Id(id) => match self.registers.lookup_variable(id) {
@@ -345,12 +346,7 @@ impl Interpreter {
         }
     }
 
-    fn compile_assignment(
-        &mut self,
-        lhs: &Expr,
-        rhs: &Expr,
-        loc: Loc,
-    ) -> Result<(usize, bool), ErrorCode> {
+    fn compile_assignment(&mut self, lhs: &Expr, rhs: &Expr, loc: Loc) -> Result<(), ErrorCode> {
         if let Expr {
             val: Expr_::Id(id),
             loc: _,
@@ -367,17 +363,11 @@ impl Interpreter {
                 self.registers.free_intermediate(rhs);
             }
             self.get_current_func().insts.push(Box::new(OpMove {
-                loc: loc.clone(),
+                loc,
                 rs: rhs,
                 rd: id,
             }));
-            let ret = self.registers.declare_intermediate();
-            self.get_current_func().insts.push(Box::new(OpLoadConstant {
-                constant: Reg::Unit,
-                rd: ret,
-                loc,
-            }));
-            Ok((ret, true))
+            Ok(())
         } else {
             Err(ErrorCode::CannotAssign(lhs.loc.clone()))
         }
@@ -401,7 +391,7 @@ impl Interpreter {
                 .registers
                 .get_or_alloc_constant(ConstantValue::Str(s.clone()))
                 .map_err(|reg| {
-                    let sid = self.vm.gc_mut().string_pool().add(s.clone());
+                    let sid = self.vm.gc_mut().string_pool().alloc(s.clone());
                     (reg, Reg::Str(sid))
                 }),
             Const::Bool(b) => self

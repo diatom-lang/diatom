@@ -10,6 +10,8 @@ pub enum ErrorCode {
     CannotAssign(Loc),
     /// E2001 Name not defined
     NameNotDefined(Loc, String),
+    /// E2002 Assignment Not Allowed here
+    InvalidAssignment(Loc),
 }
 
 impl From<ErrorCode> for Diagnostic {
@@ -22,6 +24,10 @@ impl From<ErrorCode> for Diagnostic {
             ErrorCode::NameNotDefined(loc, name) => Diagnostic::error()
                 .with_code("E2001")
                 .with_message(format!("Name `{name}` is not defined"))
+                .with_labels(vec![Label::primary((), loc)]),
+            ErrorCode::InvalidAssignment(loc) => Diagnostic::error()
+                .with_code("E2002")
+                .with_message("Assignment can not be used as expression")
                 .with_labels(vec![Label::primary((), loc)]),
         }
     }
