@@ -17,7 +17,7 @@ use crate::{
             OpAdd, OpAnd, OpBranch, OpDiv, OpDummy, OpEq, OpGt, OpIDiv, OpJump, OpLoadConstant,
             OpMove, OpMul, OpNeg, OpNot, OpOr, OpPow, OpRem, OpSub, OpYield,
         },
-        Instruction, Ip, Reg, Vm,
+        Instruction, Ip, Reg, Vm, VmInst,
     },
 };
 
@@ -110,7 +110,7 @@ impl RegisterTable {
 pub struct Func {
     pub name: String,
     pub parameters: usize,
-    pub insts: Vec<Box<dyn Instruction>>,
+    pub insts: Vec<VmInst>,
     pub captures: Vec<usize>,
 }
 
@@ -192,7 +192,7 @@ impl Interpreter {
             ast.diagnoser.render(color)
         })?;
 
-        self.byte_code[0].insts.push(Box::new(OpYield {
+        self.byte_code[0].insts.push(VmInst::OpYield(OpYield {
             show_id: return_value,
         }));
         Ok(ast)
@@ -258,7 +258,7 @@ impl Interpreter {
                     if tmp {
                         self.registers.free_intermediate(condition_reg);
                     }
-                    self.get_current_func().insts.push(Box::new(OpDummy));
+                    self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
                     Some((
                         self.get_current_func().insts.len() - 1,
                         condition_reg,
@@ -281,7 +281,7 @@ impl Interpreter {
                 let inserted = self.insert_offset - before_test_inserted;
                 let jump_loc = self.get_current_func().insts.len();
 
-                self.get_current_func().insts.push(Box::new(OpJump {
+                self.get_current_func().insts.push(VmInst::OpJump(OpJump {
                     loc: loc.clone(),
                     offset: start_label as i64 + inserted as i64 - jump_loc as i64,
                 }));
@@ -289,7 +289,7 @@ impl Interpreter {
                 // jump out of loop
                 let inserted = self.insert_offset - after_test_inserted;
                 if let Some((inst, reg, loc)) = branch_inst {
-                    self.get_current_func().insts[inst + inserted] = Box::new(OpBranch {
+                    self.get_current_func().insts[inst + inserted] = VmInst::OpBranch(OpBranch {
                         condition: reg,
                         loc,
                         offset: self.get_current_func().insts.len() as i64
@@ -362,7 +362,7 @@ impl Interpreter {
             if tmp {
                 self.registers.free_intermediate(rhs);
             }
-            self.get_current_func().insts.push(Box::new(OpMove {
+            self.get_current_func().insts.push(VmInst::OpMove(OpMove {
                 loc,
                 rs: rhs,
                 rd: id,
@@ -409,7 +409,7 @@ impl Interpreter {
                 self.insert_offset += 1;
                 self.get_current_func().insts.insert(
                     insert_loc,
-                    Box::new(OpLoadConstant {
+                    VmInst::OpLoadConstant(OpLoadConstant {
                         constant: reg,
                         rd: reg_id,
                         loc,
@@ -428,26 +428,26 @@ impl Interpreter {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpOr { loc, lhs, rhs, rd }));
+                    .push(VmInst::OpOr(OpOr { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::And => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpAnd { loc, lhs, rhs, rd }));
+                    .push(VmInst::OpAnd(OpAnd { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Eq => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpEq { loc, lhs, rhs, rd }));
+                    .push(VmInst::OpEq(OpEq { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Ne => {
                 let rd = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpEq {
+                self.get_current_func().insts.push(VmInst::OpEq(OpEq {
                     loc: loc.clone(),
                     lhs,
                     rhs,
@@ -455,19 +455,19 @@ impl Interpreter {
                 }));
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpNot { loc, lhs: rd, rd }));
+                    .push(VmInst::OpNot(OpNot { loc, lhs: rd, rd }));
                 (rd, true)
             }
             OpInfix::Ge => {
                 let rd1 = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpGt {
+                self.get_current_func().insts.push(VmInst::OpGt(OpGt {
                     loc: loc.clone(),
                     lhs,
                     rhs,
                     rd: rd1,
                 }));
                 let rd2 = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpEq {
+                self.get_current_func().insts.push(VmInst::OpEq(OpEq {
                     loc: loc.clone(),
                     lhs,
                     rhs,
@@ -476,7 +476,7 @@ impl Interpreter {
                 self.registers.free_intermediate(rd1);
                 self.registers.free_intermediate(rd2);
                 let rd = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpOr {
+                self.get_current_func().insts.push(VmInst::OpOr(OpOr {
                     loc,
                     lhs: rd1,
                     rhs: rd2,
@@ -488,19 +488,19 @@ impl Interpreter {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpGt { loc, lhs, rhs, rd }));
+                    .push(VmInst::OpGt(OpGt { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Lt => {
                 let rd1 = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpGt {
+                self.get_current_func().insts.push(VmInst::OpGt(OpGt {
                     loc: loc.clone(),
                     lhs,
                     rhs,
                     rd: rd1,
                 }));
                 let rd2 = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpEq {
+                self.get_current_func().insts.push(VmInst::OpEq(OpEq {
                     loc: loc.clone(),
                     lhs,
                     rhs,
@@ -509,7 +509,7 @@ impl Interpreter {
                 self.registers.free_intermediate(rd1);
                 self.registers.free_intermediate(rd2);
                 let rd = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpOr {
+                self.get_current_func().insts.push(VmInst::OpOr(OpOr {
                     loc: loc.clone(),
                     lhs: rd1,
                     rhs: rd2,
@@ -517,12 +517,12 @@ impl Interpreter {
                 }));
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpNot { loc, lhs: rd, rd }));
+                    .push(VmInst::OpNot(OpNot { loc, lhs: rd, rd }));
                 (rd, true)
             }
             OpInfix::Le => {
                 let rd = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(Box::new(OpGt {
+                self.get_current_func().insts.push(VmInst::OpGt(OpGt {
                     loc: loc.clone(),
                     lhs,
                     rhs,
@@ -530,56 +530,56 @@ impl Interpreter {
                 }));
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpNot { loc, lhs: rd, rd }));
+                    .push(VmInst::OpNot(OpNot { loc, lhs: rd, rd }));
                 (rd, true)
             }
             OpInfix::Plus => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpAdd { loc, lhs, rhs, rd }));
+                    .push(VmInst::OpAdd(OpAdd { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Minus => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpSub { loc, lhs, rhs, rd }));
+                    .push(VmInst::OpSub(OpSub { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Mul => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpMul { loc, lhs, rhs, rd }));
+                    .push(VmInst::OpMul(OpMul { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Div => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpDiv { loc, lhs, rhs, rd }));
+                    .push(VmInst::OpDiv(OpDiv { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::DivFloor => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpIDiv { loc, lhs, rhs, rd }));
+                    .push(VmInst::OpIDiv(OpIDiv { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Rem => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpRem { loc, lhs, rhs, rd }));
+                    .push(VmInst::OpRem(OpRem { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Exp => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpPow { loc, lhs, rhs, rd }));
+                    .push(VmInst::OpPow(OpPow { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Comma => todo!(),
@@ -593,14 +593,14 @@ impl Interpreter {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpNot { loc, lhs, rd }));
+                    .push(VmInst::OpNot(OpNot { loc, lhs, rd }));
                 (rd, true)
             }
             OpPrefix::Neg => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(Box::new(OpNeg { loc, lhs, rd }));
+                    .push(VmInst::OpNeg(OpNeg { loc, lhs, rd }));
                 (rd, true)
             }
         }

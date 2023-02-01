@@ -1,6 +1,6 @@
 use crate::interpreter::Func;
 
-use self::{error::VmError, gc::Gc};
+use self::{error::VmError, gc::Gc, op::*};
 
 use ahash::AHashMap;
 
@@ -8,6 +8,7 @@ pub mod error;
 mod gc;
 pub mod op;
 mod string_pool;
+use enum_dispatch::enum_dispatch;
 pub use gc::Reg;
 
 type FuncId = usize;
@@ -18,9 +19,34 @@ pub struct Ip {
     pub inst: usize,
 }
 
+#[enum_dispatch(VmInst)]
 pub trait Instruction {
     fn exec(&self, ip: Ip, context: &mut Vm, functions: &[Func]) -> Result<Ip, VmError>;
     fn decompile(&self, decompiled: &mut String, context: &Vm);
+}
+
+#[allow(clippy::enum_variant_names)]
+#[enum_dispatch]
+pub enum VmInst {
+    OpAdd,
+    OpAnd,
+    OpBranch,
+    OpDiv,
+    OpDummy,
+    OpEq,
+    OpGt,
+    OpIDiv,
+    OpJump,
+    OpLoadConstant,
+    OpMove,
+    OpMul,
+    OpNeg,
+    OpNot,
+    OpOr,
+    OpPow,
+    OpRem,
+    OpSub,
+    OpYield,
 }
 
 pub struct Object {

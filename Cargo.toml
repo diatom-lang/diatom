@@ -19,6 +19,7 @@ reedline = { version = "0.14.0", optional = true }
 nu-ansi-term = { version = "0.46.0", optional = true }
 crossterm = { version = "0.24.0", optional = true }
 clap = { version = "4.0.29", features = ["derive"] }
+enum_dispatch = "0.3.11"
 
 [features]
 default = ["console"]
