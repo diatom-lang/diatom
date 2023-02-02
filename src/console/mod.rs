@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, ffi::OsStr};
 
 use crate::Interpreter;
 
@@ -71,7 +71,7 @@ impl Console {
             let sig = line_editor.read_line(&prompt);
             match sig {
                 Ok(Signal::Success(buffer)) => {
-                    let result = self.interpreter.exec(buffer, self.color);
+                    let result = self.interpreter.exec(buffer, OsStr::new("<interactive>"), self.color);
                     match result {
                         Ok(s) => print!("{s}"),
                         Err(s) => eprint!("{s}"),

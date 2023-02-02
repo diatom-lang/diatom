@@ -149,8 +149,8 @@ impl Interpreter {
         !ast.input_can_continue()
     }
 
-    pub fn decompile(&mut self, code: impl AsRef<str>, color: bool) -> Result<String, String> {
-        self.compile(code, color)?;
+    pub fn decompile(&mut self, code: impl AsRef<str>, source: &OsStr, color: bool) -> Result<String, String> {
+        self.compile(code, source, color)?;
         let mut decompiled = String::new();
         for Func {
             name,
@@ -171,9 +171,9 @@ impl Interpreter {
         Ok(decompiled)
     }
 
-    fn compile(&mut self, code: impl AsRef<str>, color: bool) -> Result<Ast, String> {
+    fn compile(&mut self, code: impl AsRef<str>, source: &OsStr, color: bool) -> Result<Ast, String> {
         let mut parser = Parser::new();
-        let mut ast = parser.parse_str(OsStr::new("<interactive>"), code.as_ref());
+        let mut ast = parser.parse_str(source, code.as_ref());
         if ast.diagnoser.error_count() > 0 {
             return Err(ast.diagnoser.render(color));
         }
@@ -198,8 +198,8 @@ impl Interpreter {
         Ok(ast)
     }
 
-    pub fn exec(&mut self, code: impl AsRef<str>, color: bool) -> Result<String, String> {
-        let mut ast = self.compile(code, color)?;
+    pub fn exec(&mut self, code: impl AsRef<str>, source: &OsStr, color: bool) -> Result<String, String> {
+        let mut ast = self.compile(code, source, color)?;
         match self.vm.exec(&self.byte_code) {
             VmError::Yield => Ok(self.vm.take_output()),
             error_code => {
