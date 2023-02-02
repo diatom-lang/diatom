@@ -41,6 +41,10 @@ struct RegisterTable {
     assigned: usize,
     func_id: usize,
     constant_table: AHashMap<ConstantValue, usize>,
+    /// Location to insert load constant
+    current_start_loc: usize,
+    /// Count how many load constant inserted
+    insert_offset: usize,
 }
 
 impl RegisterTable {
@@ -52,6 +56,8 @@ impl RegisterTable {
             assigned: 0,
             func_id: 0,
             constant_table: AHashMap::default(),
+            current_start_loc: 0,
+            insert_offset: 0,
         }
     }
 
@@ -118,10 +124,6 @@ pub struct Interpreter {
     registers: RegisterTable,
     scopes: Vec<AHashSet<String>>,
     byte_code: Vec<Func>,
-    /// Location to insert load constant
-    current_start_loc: usize,
-    /// Count how many load constant inserted
-    insert_offset: usize,
     vm: Vm,
 }
 
@@ -137,8 +139,6 @@ impl Interpreter {
             registers: RegisterTable::new(),
             scopes: vec![AHashSet::new()],
             byte_code: vec![main],
-            current_start_loc: 0,
-            insert_offset: 0,
             vm: Vm::new(),
         }
     }
@@ -193,8 +193,8 @@ impl Interpreter {
             func_id: 0,
             inst: self.byte_code[0].insts.len(),
         });
-        self.current_start_loc = self.byte_code[0].insts.len();
-        self.insert_offset = 0;
+        self.registers.current_start_loc = self.byte_code[0].insts.len();
+        self.registers.insert_offset = 0;
 
         let return_value = self.compile_ast(&mut ast).map_err(|_| {
             // restore variable table if compile failed
@@ -276,7 +276,7 @@ impl Interpreter {
             Stmt_::Data(_, _, _) => todo!(),
             Stmt_::Loop(condition, body) => {
                 let start_label = self.get_current_func().insts.len();
-                let before_test_inserted = self.insert_offset;
+                let before_test_inserted = self.registers.insert_offset;
                 let branch_inst = if let Some(condition) = condition {
                     let (condition_reg, tmp) = self.compile_expr(condition)?;
                     if tmp {
@@ -291,7 +291,7 @@ impl Interpreter {
                 } else {
                     None
                 };
-                let after_test_inserted = self.insert_offset;
+                let after_test_inserted = self.registers.insert_offset;
                 self.enter_block();
                 for stmt in body.iter() {
                     self.compile_stmt(stmt).map_err(|err| {
@@ -302,7 +302,7 @@ impl Interpreter {
                 self.leave_block();
 
                 // number of load const inserted after compile block
-                let inserted = self.insert_offset - before_test_inserted;
+                let inserted = self.registers.insert_offset - before_test_inserted;
                 let jump_loc = self.get_current_func().insts.len();
 
                 self.get_current_func().insts.push(VmInst::OpJump(OpJump {
@@ -311,7 +311,7 @@ impl Interpreter {
                 }));
 
                 // jump out of loop
-                let inserted = self.insert_offset - after_test_inserted;
+                let inserted = self.registers.insert_offset - after_test_inserted;
                 if let Some((inst, reg, loc)) = branch_inst {
                     self.get_current_func().insts[inst + inserted] = VmInst::OpBranch(OpBranch {
                         condition: reg,
@@ -429,8 +429,8 @@ impl Interpreter {
         match constant {
             Ok(reg_id) => (reg_id, false),
             Err((reg_id, reg)) => {
-                let insert_loc = self.current_start_loc;
-                self.insert_offset += 1;
+                let insert_loc = self.registers.current_start_loc;
+                self.registers.insert_offset += 1;
                 self.get_current_func().insts.insert(
                     insert_loc,
                     VmInst::OpLoadConstant(OpLoadConstant {
