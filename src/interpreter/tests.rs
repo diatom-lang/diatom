@@ -3,7 +3,9 @@ use super::*;
 macro_rules! test_ok {
     ($code: literal, $output_expected: literal) => {
         let mut interpreter = Interpreter::new();
-        let mut output = interpreter.exec($code, false).expect("Execution failed!");
+        let mut output = interpreter
+            .exec($code, OsStr::new("<test>"), false)
+            .expect("Execution failed!");
         // pop newline
         output.pop();
         assert_eq!(output, $output_expected)
@@ -14,7 +16,7 @@ macro_rules! test_err {
     ($code: literal) => {
         let mut interpreter = Interpreter::new();
         let _ = interpreter
-            .exec($code, false)
+            .exec($code, OsStr::new("<test>"), false)
             .expect_err("Execution failed!");
     };
 }

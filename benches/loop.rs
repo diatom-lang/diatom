@@ -1,5 +1,7 @@
 #![allow(unused)]
 
+use std::ffi::OsStr;
+
 use diatom::Interpreter;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -14,6 +16,7 @@ fn loop_1million() {
                 a = a + 1
             end
         "#,
+            OsStr::new("<loop>"),
             false,
         )
         .expect("Should work");

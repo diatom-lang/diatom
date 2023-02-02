@@ -25,6 +25,29 @@ fn get_type(reg: &Reg, gc: &Gc) -> String {
 
 const FORMAT_PAD: usize = 7;
 
+pub struct OpAllocReg {
+    pub n_reg: usize,
+}
+
+impl Instruction for OpAllocReg {
+    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+        context.gc.alloc_reg_file(self.n_reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    N_REG#{}",
+            "alloc", self.n_reg
+        )
+        .unwrap();
+    }
+}
+
 pub struct OpCallClosure {
     pub reg_id: usize,
     pub parameters: Vec<usize>,
@@ -250,7 +273,7 @@ impl Instruction for OpNot {
     fn decompile(&self, decompiled: &mut String, _context: &Vm) {
         writeln!(
             decompiled,
-            "{: <FORMAT_PAD$} Reg#{} -> Reg#{}",
+            "{: >FORMAT_PAD$}    Reg#{} -> Reg#{}",
             "not", self.lhs, self.rd
         )
         .unwrap()
@@ -285,7 +308,7 @@ impl Instruction for OpNeg {
     fn decompile(&self, decompiled: &mut String, __context: &Vm) {
         writeln!(
             decompiled,
-            "{: <FORMAT_PAD$} Reg#{} -> Reg#{}",
+            "{: >FORMAT_PAD$}    Reg#{} -> Reg#{}",
             "neg", self.lhs, self.rd
         )
         .unwrap();

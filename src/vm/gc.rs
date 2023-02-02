@@ -75,6 +75,15 @@ impl Gc {
         }
     }
 
+    pub fn alloc_reg_file(&mut self, n: usize) {
+        let stack = &mut self.call_stack;
+        if n >= stack.regs.len() {
+            (0..=n - stack.regs.len())
+                .into_iter()
+                .for_each(|_| stack.regs.push(StackReg::Reg(Reg::Unit)))
+        }
+    }
+
     pub fn read_reg(&self, n: usize) -> &Reg {
         debug_assert!(self.call_stack.regs.len() > n);
         let reg = unsafe { self.call_stack.regs.get_unchecked(n) };
@@ -103,12 +112,6 @@ impl Gc {
     /// Automatically extend reg file size if n > regs.len()
     pub fn write_reg(&mut self, n: usize, reg: Reg) {
         let stack = &mut self.call_stack;
-        if n >= stack.regs.len() {
-            (0..=n - stack.regs.len())
-                .into_iter()
-                .for_each(|_| stack.regs.push(StackReg::Reg(Reg::Unit)))
-        }
-
         debug_assert!(stack.regs.len() > n);
         let prev = unsafe { stack.regs.get_unchecked_mut(n) };
         match prev {

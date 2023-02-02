@@ -28,6 +28,7 @@ pub trait Instruction {
 #[allow(clippy::enum_variant_names)]
 #[enum_dispatch]
 pub enum VmInst {
+    OpAllocReg,
     OpAdd,
     OpAnd,
     OpBranch,

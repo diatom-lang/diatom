@@ -14,8 +14,8 @@ use crate::{
     vm::{
         error::VmError,
         op::{
-            OpAdd, OpAnd, OpBranch, OpDiv, OpDummy, OpEq, OpGt, OpIDiv, OpJump, OpLoadConstant,
-            OpMove, OpMul, OpNeg, OpNot, OpOr, OpPow, OpRem, OpSub, OpYield,
+            OpAdd, OpAllocReg, OpAnd, OpBranch, OpDiv, OpDummy, OpEq, OpGt, OpIDiv, OpJump,
+            OpLoadConstant, OpMove, OpMul, OpNeg, OpNot, OpOr, OpPow, OpRem, OpSub, OpYield,
         },
         Instruction, Ip, Reg, Vm, VmInst,
     },
@@ -149,7 +149,12 @@ impl Interpreter {
         !ast.input_can_continue()
     }
 
-    pub fn decompile(&mut self, code: impl AsRef<str>, source: &OsStr, color: bool) -> Result<String, String> {
+    pub fn decompile(
+        &mut self,
+        code: impl AsRef<str>,
+        source: &OsStr,
+        color: bool,
+    ) -> Result<String, String> {
         self.compile(code, source, color)?;
         let mut decompiled = String::new();
         for Func {
@@ -171,7 +176,12 @@ impl Interpreter {
         Ok(decompiled)
     }
 
-    fn compile(&mut self, code: impl AsRef<str>, source: &OsStr, color: bool) -> Result<Ast, String> {
+    fn compile(
+        &mut self,
+        code: impl AsRef<str>,
+        source: &OsStr,
+        color: bool,
+    ) -> Result<Ast, String> {
         let mut parser = Parser::new();
         let mut ast = parser.parse_str(source, code.as_ref());
         if ast.diagnoser.error_count() > 0 {
@@ -192,13 +202,27 @@ impl Interpreter {
             ast.diagnoser.render(color)
         })?;
 
+        // return after main
         self.byte_code[0].insts.push(VmInst::OpYield(OpYield {
             show_id: return_value,
         }));
+
+        //
+        self.byte_code[0].insts.insert(
+            0,
+            VmInst::OpAllocReg(OpAllocReg {
+                n_reg: self.registers.assigned,
+            }),
+        );
         Ok(ast)
     }
 
-    pub fn exec(&mut self, code: impl AsRef<str>, source: &OsStr, color: bool) -> Result<String, String> {
+    pub fn exec(
+        &mut self,
+        code: impl AsRef<str>,
+        source: &OsStr,
+        color: bool,
+    ) -> Result<String, String> {
         let mut ast = self.compile(code, source, color)?;
         match self.vm.exec(&self.byte_code) {
             VmError::Yield => Ok(self.vm.take_output()),

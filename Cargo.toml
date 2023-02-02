@@ -35,5 +35,5 @@ panic = "abort"
 criterion = "0.4"
 
 [[bench]]
-name = "performance"
+name = "loop"
 harness = false
