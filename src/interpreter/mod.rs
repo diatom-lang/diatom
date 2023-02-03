@@ -14,8 +14,9 @@ use crate::{
     vm::{
         error::VmError,
         op::{
-            OpAdd, OpAllocReg, OpAnd, OpBranch, OpDiv, OpDummy, OpEq, OpGt, OpIDiv, OpJump,
-            OpLoadConstant, OpMove, OpMul, OpNeg, OpNot, OpOr, OpPow, OpRem, OpSub, OpYield,
+            OpAdd, OpAllocReg, OpAnd, OpBranch, OpCallClosure, OpDiv, OpDummy, OpEq, OpGt, OpIDiv,
+            OpJump, OpLoadConstant, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot, OpOr, OpPow, OpRem,
+            OpRet, OpSub, OpYield,
         },
         Instruction, Ip, Reg, Vm, VmInst,
     },
@@ -34,9 +35,16 @@ enum ConstantValue {
 }
 
 #[derive(Clone)]
+pub struct Capture {
+    pub rd: usize,
+    pub rs: usize,
+    pub depth: usize,
+}
+
+#[derive(Clone)]
 struct RegisterTable {
     prev: Option<Box<RegisterTable>>,
-    variables: AHashMap<String, usize>,
+    variables: AHashMap<String, (usize, Loc)>,
     free: Vec<usize>,
     assigned: usize,
     func_id: usize,
@@ -45,42 +53,46 @@ struct RegisterTable {
     current_start_loc: usize,
     /// Count how many load constant inserted
     insert_offset: usize,
+    /// captured variables
+    capture: Vec<Capture>,
 }
 
 impl RegisterTable {
-    fn new() -> Self {
+    fn new(func_id: usize) -> Self {
         Self {
             prev: None,
             variables: AHashMap::default(),
             free: vec![],
             assigned: 0,
-            func_id: 0,
+            func_id,
             constant_table: AHashMap::default(),
             current_start_loc: 0,
             insert_offset: 0,
+            capture: vec![],
         }
     }
 
-    fn declare_or_get_variable(&mut self, name: impl AsRef<str>) -> (usize, usize) {
-        let exist = self.lookup_variable(name.as_ref());
-        if let Ok(ret) = exist {
-            return ret;
-        }
+    fn declare_variable(&mut self, name: impl AsRef<str>, loc: Loc) -> usize {
         let id = self.declare_intermediate();
-        self.variables.insert(name.as_ref().to_string(), id);
-        (id, 0)
+        self.variables.insert(name.as_ref().to_string(), (id, loc));
+        id
     }
 
-    /// Return (reg_id, func_id)
-    fn lookup_variable(&self, name: impl AsRef<str>) -> Result<(usize, usize), ()> {
-        let var = self.variables.get(name.as_ref());
+    /// (reg_id, depth, loc)
+    fn lookup_variable_(&self, name: &str, depth: usize) -> Option<(usize, usize, Loc)> {
+        let var = self.variables.get(name);
         match var {
-            Some(id) => Ok((*id, self.func_id)),
+            Some((id, loc)) => Some((*id, depth, loc.clone())),
             None => match &self.prev {
-                Some(prev) => prev.lookup_variable(name),
-                None => Err(()),
+                Some(prev) => prev.lookup_variable_(name, depth + 1),
+                None => None,
             },
         }
+    }
+
+    /// Return (reg_id, depth, loc)
+    pub fn lookup_variable(&self, name: impl AsRef<str>) -> Option<(usize, usize, Loc)> {
+        self.lookup_variable_(name.as_ref(), 0)
     }
 
     fn declare_intermediate(&mut self) -> usize {
@@ -111,13 +123,23 @@ impl RegisterTable {
             }
         }
     }
+
+    fn enter_function(&mut self, func_id: usize) {
+        let old = std::mem::replace(self, RegisterTable::new(func_id));
+        self.prev = Some(Box::new(old));
+    }
+
+    fn leave_function(&mut self) -> Vec<Capture> {
+        let prev = *std::mem::take(&mut self.prev).unwrap();
+        let pop = std::mem::replace(self, prev);
+        pop.capture
+    }
 }
 
 pub struct Func {
     pub name: String,
     pub parameters: usize,
     pub insts: Vec<VmInst>,
-    pub captures: Vec<usize>,
 }
 
 pub struct Interpreter {
@@ -133,10 +155,9 @@ impl Interpreter {
             name: "main".to_string(),
             parameters: 0,
             insts: vec![],
-            captures: vec![],
         };
         Self {
-            registers: RegisterTable::new(),
+            registers: RegisterTable::new(0),
             scopes: vec![AHashSet::new()],
             byte_code: vec![main],
             vm: Vm::new(),
@@ -161,7 +182,6 @@ impl Interpreter {
             name,
             parameters,
             insts,
-            captures: _,
         } in self.byte_code.iter()
         {
             writeln!(decompiled, "Function: {name}\nParameters: {parameters}").unwrap();
@@ -193,6 +213,7 @@ impl Interpreter {
             func_id: 0,
             inst: self.byte_code[0].insts.len(),
         });
+
         self.registers.current_start_loc = self.byte_code[0].insts.len();
         self.registers.insert_offset = 0;
 
@@ -209,7 +230,7 @@ impl Interpreter {
 
         //
         self.byte_code[0].insts.insert(
-            0,
+            self.registers.current_start_loc,
             VmInst::OpAllocReg(OpAllocReg {
                 n_reg: self.registers.assigned,
             }),
@@ -238,8 +259,8 @@ impl Interpreter {
     fn compile_ast(&mut self, ast: &mut Ast) -> Result<Option<usize>, ()> {
         let mut return_value = None;
         let mut has_error = false;
-        for stmt in ast.statements.iter() {
-            match self.compile_stmt(stmt) {
+        for (i, stmt) in ast.statements.iter().enumerate() {
+            match self.compile_stmt(stmt, i != ast.statements.len() - 1) {
                 Ok(ret) => return_value = ret,
                 Err(code) => {
                     has_error = true;
@@ -251,11 +272,17 @@ impl Interpreter {
         if has_error {
             Err(())
         } else {
-            Ok(return_value)
+            Ok(return_value.map(|(reg, _)| reg))
         }
     }
 
-    fn compile_stmt(&mut self, stmt: &Stmt) -> Result<Option<usize>, ErrorCode> {
+    /// Compile a statement
+    /// Return value is already properly freed
+    fn compile_stmt(
+        &mut self,
+        stmt: &Stmt,
+        discard: bool,
+    ) -> Result<Option<(usize, bool)>, ErrorCode> {
         let mut return_value = None;
         match stmt {
             Stmt::Expr {
@@ -269,11 +296,8 @@ impl Interpreter {
                     },
             } => self.compile_assignment(lhs, rhs, loc.clone())?,
             Stmt::Expr { loc: _, expr } => {
-                let (reg_id, tmp) = self.compile_expr(expr)?;
-                return_value = Some(reg_id);
-                if tmp {
-                    self.registers.free_intermediate(reg_id)
-                }
+                let (reg_id, tmp) = self.compile_expr(expr, discard)?;
+                return_value = Some((reg_id, tmp));
             }
             Stmt::Loop {
                 loc,
@@ -283,7 +307,7 @@ impl Interpreter {
                 let start_label = self.get_current_func().insts.len();
                 let before_test_inserted = self.registers.insert_offset;
                 let branch_inst = if let Some(condition) = condition {
-                    let (condition_reg, tmp) = self.compile_expr(condition)?;
+                    let (condition_reg, tmp) = self.compile_expr(condition, false)?;
                     if tmp {
                         self.registers.free_intermediate(condition_reg);
                     }
@@ -299,7 +323,7 @@ impl Interpreter {
                 let after_test_inserted = self.registers.insert_offset;
                 self.enter_block();
                 for stmt in body.iter() {
-                    self.compile_stmt(stmt).map_err(|err| {
+                    self.compile_stmt(stmt, true).map_err(|err| {
                         self.leave_block();
                         err
                     })?;
@@ -347,10 +371,10 @@ impl Interpreter {
         Ok(return_value)
     }
 
-    fn compile_expr(&mut self, expr: &Expr) -> Result<(usize, bool), ErrorCode> {
+    fn compile_expr(&mut self, expr: &Expr, discard: bool) -> Result<(usize, bool), ErrorCode> {
         match expr {
             Expr::Prefix { loc, op, rhs } => {
-                let (rhs_id, rhs_tmp) = self.compile_expr(rhs)?;
+                let (rhs_id, rhs_tmp) = self.compile_expr(rhs, false)?;
                 if rhs_tmp {
                     self.registers.free_intermediate(rhs_id)
                 };
@@ -363,8 +387,8 @@ impl Interpreter {
                 rhs: _,
             } => Err(ErrorCode::InvalidAssignment(loc.clone())),
             Expr::Infix { loc, op, lhs, rhs } => {
-                let (lhs_id, lhs_tmp) = self.compile_expr(lhs)?;
-                let (rhs_id, rhs_tmp) = self.compile_expr(rhs)?;
+                let (lhs_id, lhs_tmp) = self.compile_expr(lhs, false)?;
+                let (rhs_id, rhs_tmp) = self.compile_expr(rhs, false)?;
                 let ret = self.compile_infix(op, lhs_id, rhs_id, loc.clone());
                 if lhs_tmp {
                     self.registers.free_intermediate(lhs_id);
@@ -375,46 +399,140 @@ impl Interpreter {
                 Ok(ret)
             }
             Expr::Id { loc, name } => match self.registers.lookup_variable(name) {
-                Ok((id, _)) => Ok((id, false)),
-                Err(()) => Err(ErrorCode::NameNotDefined(loc.clone(), name.clone())),
+                Some((id, depth, loc)) => {
+                    // variable is captured
+                    // make a local copy and register capture info
+                    if depth > 0 {
+                        let local_id = self.registers.declare_variable(name, loc);
+                        self.registers.capture.push(Capture {
+                            rd: local_id,
+                            rs: id,
+                            depth,
+                        });
+                        Ok((local_id, false))
+                    } else {
+                        Ok((id, false))
+                    }
+                }
+                None => Err(ErrorCode::NameNotDefined(loc.clone(), name.clone())),
             },
-            Expr::Parentheses { loc: _, content } => self.compile_expr(content),
+            Expr::Parentheses { loc: _, content } => self.compile_expr(content, discard),
             Expr::Const { loc, value } => Ok(self.compile_constant(value, loc.clone())),
             Expr::Error => unreachable!(),
-            Expr::Block { loc: _, body: _ } => todo!(),
+            Expr::Block { loc, body } => {
+                self.enter_block();
+                let mut ret = None;
+                for (i, stmt) in body.iter().enumerate() {
+                    let reg = self
+                        .compile_stmt(stmt, i != body.len() - 1)
+                        .map_err(|err| {
+                            self.leave_block();
+                            err
+                        })?;
+                    ret = reg;
+                }
+                self.leave_block();
+                match (ret, discard) {
+                    (_, true) => Ok((usize::MAX, true)),
+                    (Some(ret), false) => Ok(ret),
+                    (None, false) => {
+                        let rd = self.compile_constant(&Const::Unit, loc.clone());
+                        Ok(rd)
+                    }
+                }
+            }
             Expr::If {
                 loc: _,
                 conditional: _,
                 default: _,
             } => todo!(),
             Expr::Call {
-                loc: _,
-                lhs: _,
-                parameters: _,
-            } => todo!(),
+                loc,
+                lhs,
+                parameters,
+            } => {
+                let mut para_regs = vec![];
+                for para in parameters {
+                    let result = self.compile_expr(para, false)?;
+                    para_regs.push(result);
+                }
+                let (lhs, lhs_tmp) = self.compile_expr(lhs, false)?;
+                if lhs_tmp {
+                    self.registers.free_intermediate(lhs);
+                }
+                let rd = if discard {
+                    None
+                } else {
+                    Some(self.registers.declare_intermediate())
+                };
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpCallClosure(OpCallClosure {
+                        reg_id: lhs,
+                        parameters: para_regs.iter().map(|(reg, _)| *reg).collect(),
+                        write_back: rd,
+                        loc: loc.clone(),
+                    }));
+                para_regs.into_iter().for_each(|(reg, tmp)| {
+                    if tmp {
+                        self.registers.free_intermediate(reg)
+                    }
+                });
+                Ok((rd.unwrap_or(usize::MAX), true))
+            }
             Expr::Index {
                 loc: _,
                 lhs: _,
                 rhs: _,
             } => todo!(),
             Expr::Fn {
-                loc: _,
-                parameters: _,
-                body: _,
-            } => todo!(),
+                loc,
+                parameters,
+                body,
+            } => {
+                let (func_id, parameters, capture, reg_size) =
+                    self.compile_closure(parameters, body, loc.clone())?;
+                let rd = self.registers.declare_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpMakeClosure(OpMakeClosure {
+                        loc: loc.clone(),
+                        func_id,
+                        parameters,
+                        rd,
+                        capture,
+                        reg_size,
+                    }));
+                Ok((rd, true))
+            }
             Expr::Module { loc: _, path: _ } => todo!(),
         }
     }
 
     fn compile_assignment(&mut self, lhs: &Expr, rhs: &Expr, loc: Loc) -> Result<(), ErrorCode> {
-        if let Expr::Id { loc: _, name } = lhs {
+        if let Expr::Id { loc: id_loc, name } = lhs {
             // register to local block
-            if self.registers.lookup_variable(name).is_err() {
-                self.scopes.last_mut().unwrap().insert(name.clone());
-            }
+            if self.registers.lookup_variable(name).is_none() {}
             // declare variable
-            let (id, _) = self.registers.declare_or_get_variable(name);
-            let (rhs, tmp) = self.compile_expr(rhs)?;
+            let id = if let Some((id, depth, loc)) = self.registers.lookup_variable(name) {
+                // variable is captured
+                // make a local copy and register capture info
+                if depth > 0 {
+                    let local_id = self.registers.declare_variable(name, loc);
+                    self.registers.capture.push(Capture {
+                        rd: local_id,
+                        rs: id,
+                        depth,
+                    });
+                    local_id
+                } else {
+                    id
+                }
+            } else {
+                self.scopes.last_mut().unwrap().insert(name.clone());
+                self.registers.declare_variable(name, id_loc.clone())
+            };
+            let (rhs, tmp) = self.compile_expr(rhs, false)?;
             if tmp {
                 self.registers.free_intermediate(rhs);
             }
@@ -659,6 +777,45 @@ impl Interpreter {
                 (rd, true)
             }
         }
+    }
+
+    /// Return (func_id, parameters len, captured_regs, reg_size)
+    fn compile_closure(
+        &mut self,
+        parameters: &[(String, Loc)],
+        body: &Expr,
+        loc: Loc,
+    ) -> std::result::Result<(usize, usize, Vec<Capture>, usize), ErrorCode> {
+        let func_id = self.byte_code.len();
+        self.byte_code.push(Func {
+            name: format!("Anonymous@{func_id}"),
+            parameters: parameters.len(),
+            insts: vec![],
+        });
+        self.registers.enter_function(func_id);
+        for (para, loc) in parameters.iter() {
+            if let Some((_, _, loc_prev)) = self.registers.lookup_variable(para) {
+                return Err(ErrorCode::ParameterShadowing {
+                    previous: loc_prev,
+                    parameter: loc.clone(),
+                    name: para.clone(),
+                });
+            } else {
+                self.registers.declare_variable(para, loc.clone());
+            }
+        }
+        let result = self.compile_expr(body, false).map_err(|err| {
+            self.registers.leave_function();
+            err
+        })?;
+        // return expression value
+        self.get_current_func().insts.push(VmInst::OpRet(OpRet {
+            return_reg: result.0,
+            loc,
+        }));
+        let reg_size = self.registers.assigned;
+        let captured_regs = self.registers.leave_function();
+        Ok((func_id, parameters.len(), captured_regs, reg_size))
     }
 
     fn get_current_func(&mut self) -> &mut Func {

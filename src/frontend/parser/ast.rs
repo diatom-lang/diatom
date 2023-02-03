@@ -108,7 +108,7 @@ pub enum Expr {
     },
     Fn {
         loc: Loc,
-        parameters: Vec<String>,
+        parameters: Vec<(String, Loc)>,
         body: Box<Expr>,
     },
     Id {

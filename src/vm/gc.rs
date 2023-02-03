@@ -13,7 +13,13 @@ enum Mark {
 }
 
 pub enum GcObject {
-    Closure(FuncId, Vec<Rc<UnsafeCell<Reg>>>),
+    Closure {
+        func_id: FuncId,
+        parameters: usize,
+        reg_size: usize,
+        /// local id, shared reg
+        captured: Vec<(usize, Rc<UnsafeCell<Reg>>)>,
+    },
     _Object(Object),
 }
 
@@ -93,9 +99,17 @@ impl Gc {
         }
     }
 
-    pub fn share_reg(&mut self, id: usize) -> Rc<UnsafeCell<Reg>> {
+    pub fn share_reg(&mut self, id: usize, depth: usize) -> Rc<UnsafeCell<Reg>> {
         debug_assert!(self.call_stack.regs.len() > id);
-        let shared_reg = unsafe { self.call_stack.regs.get_unchecked_mut(id) };
+        let mut call_stack = &mut self.call_stack;
+        debug_assert!(depth > 0);
+        // relative depth to capture and make_closure is 1
+        let depth = depth - 1;
+        for _ in 0..depth {
+            debug_assert!(call_stack.prev.is_some());
+            call_stack = unsafe { call_stack.prev.as_mut().unwrap_unchecked().as_mut() }
+        }
+        let shared_reg = unsafe { call_stack.regs.get_unchecked_mut(id) };
         let reg = std::mem::replace(shared_reg, StackReg::Reg(Reg::Unit));
         match reg {
             StackReg::Reg(reg) => {

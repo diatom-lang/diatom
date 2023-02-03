@@ -51,3 +51,50 @@ fn test_assignment() {
 fn test_loop() {
     test_ok!("a = 0 until a > 100 do a = a + 1 end a", "101");
 }
+
+#[test]
+fn test_closure() {
+    // fn return () by default
+    test_ok!(
+        r#"
+    f = fn = begin 
+        a = 0 
+        until a > 0 do
+            a = a + 1
+        end
+    end
+    f$()
+    "#,
+        "()"
+    );
+    // fn capture variable
+    test_ok!(
+        r#"
+    a = 1
+    f = fn x = begin 
+       a = x
+    end
+    f$(3)
+    a
+    "#,
+        "3"
+    );
+    // fn share capture
+    test_ok!(
+        r#"
+    x1 = ()
+    x2 = ()
+    f = fn = begin
+        a = 1
+        x1 = fn = a
+        x2 = fn x = begin 
+            a = x
+        end
+    end
+    f$()
+    x2$(10)
+    x1$()
+    "#,
+        "10"
+    );
+}

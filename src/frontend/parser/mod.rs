@@ -563,7 +563,7 @@ impl Parser {
         loop {
             match iter.peek() {
                 Some(Id(name)) => {
-                    parameters.push(name.clone());
+                    parameters.push((name.clone(), iter.next_loc()));
                     iter.next();
                 }
                 Some(Op(Assign)) => {

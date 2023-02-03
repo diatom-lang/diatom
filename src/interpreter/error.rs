@@ -12,6 +12,12 @@ pub enum ErrorCode {
     NameNotDefined(Loc, String),
     /// E2002 Assignment Not Allowed here
     InvalidAssignment(Loc),
+    /// E2003 Parameter Shadowing
+    ParameterShadowing {
+        previous: Loc,
+        parameter: Loc,
+        name: String,
+    },
 }
 
 impl From<ErrorCode> for Diagnostic {
@@ -29,6 +35,17 @@ impl From<ErrorCode> for Diagnostic {
                 .with_code("E2002")
                 .with_message("Assignment can not be used as expression")
                 .with_labels(vec![Label::primary((), loc)]),
+            ErrorCode::ParameterShadowing {
+                previous,
+                parameter,
+                name,
+            } => Diagnostic::error()
+                .with_code("E2003")
+                .with_message(format!("Function parameter `{name}` is already defined"))
+                .with_labels(vec![
+                    Label::primary((), parameter),
+                    Label::secondary((), previous).with_message("Name previously defined here"),
+                ]),
         }
     }
 }

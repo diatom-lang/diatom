@@ -28,9 +28,9 @@ fn main() {
     let args = Args::parse();
 
     match (&args.path, args.inspect) {
-        (None, _) => {
+        (None, inspect) => {
             let mut console = Console::new(!args.no_color);
-            console.run();
+            console.run(inspect);
         }
         (Some(path), false) => {
             let code = fs::read_to_string(path).expect("Error: File can not be read!");

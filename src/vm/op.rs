@@ -1,9 +1,9 @@
-use crate::diagnostic::Loc;
+use crate::{diagnostic::Loc, interpreter::Capture};
 use std::fmt::Write;
 
 use super::{
     gc::{Gc, GcObject, Reg},
-    Func, FuncId, Instruction, Ip, Vm, VmError,
+    FuncId, Instruction, Ip, Vm, VmError,
 };
 
 fn get_type(reg: &Reg, gc: &Gc) -> String {
@@ -16,7 +16,12 @@ fn get_type(reg: &Reg, gc: &Gc) -> String {
         Reg::Ref(r) => {
             let obj = &gc[*r];
             match obj {
-                GcObject::Closure(_, _) => "Closure".to_string(),
+                GcObject::Closure {
+                    func_id: _,
+                    parameters: _,
+                    captured: _,
+                    reg_size: _,
+                } => "Closure".to_string(),
                 GcObject::_Object(_) => "Table".to_string(),
             }
         }
@@ -30,7 +35,7 @@ pub struct OpAllocReg {
 }
 
 impl Instruction for OpAllocReg {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         context.gc.alloc_reg_file(self.n_reg);
         Ok(Ip {
             func_id: ip.func_id,
@@ -56,16 +61,21 @@ pub struct OpCallClosure {
 }
 
 impl Instruction for OpCallClosure {
-    fn exec(&self, ip: Ip, context: &mut Vm, byte_code: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
 
         // get closure
         let obj = gc.read_reg(self.reg_id);
-        let (func_id, capture) = match obj {
+        let (func_id, parameters, capture, reg_size) = match obj {
             Reg::Ref(r) => {
                 let obj = &gc[*r];
                 match obj {
-                    GcObject::Closure(func_id, capture) => Ok((func_id, capture)),
+                    GcObject::Closure {
+                        func_id,
+                        parameters,
+                        captured,
+                        reg_size,
+                    } => Ok((*func_id, *parameters, captured.to_vec(), *reg_size)),
                     _ => Err(()),
                 }
             }
@@ -75,22 +85,10 @@ impl Instruction for OpCallClosure {
             VmError::NotCallable(self.loc.clone(), "Object is not callable".to_string())
         })?;
 
-        let func_id = *func_id;
-        let capture_owned: Vec<_> = capture.to_vec();
-
-        let Func {
-            name: _,
-            parameters,
-            insts: _,
-            captures,
-        } = byte_code
-            .get(func_id)
-            .ok_or_else(|| VmError::InvalidFunc(self.loc.clone(), func_id))?;
-
-        if *parameters != self.parameters.len() {
+        if parameters != self.parameters.len() {
             return Err(VmError::ParameterLengthNotMatch(
                 self.loc.clone(),
-                *parameters,
+                parameters,
                 self.parameters.len(),
             ));
         }
@@ -111,6 +109,9 @@ impl Instruction for OpCallClosure {
             self.write_back,
         );
 
+        // alloc reg file
+        gc.alloc_reg_file(reg_size);
+
         // write parameters to call stack
         parameters
             .into_iter()
@@ -118,16 +119,29 @@ impl Instruction for OpCallClosure {
             .for_each(|(i, reg)| gc.write_reg(i, reg));
 
         // write capture values to stack
-        capture_owned
+        capture
             .into_iter()
-            .zip(captures.iter())
-            .for_each(|(reg, rd)| gc.write_shared_reg(*rd, reg));
+            .for_each(|(rd, reg)| gc.write_shared_reg(rd, reg));
 
         Ok(Ip { func_id, inst: 0 })
     }
 
-    fn decompile(&self, _decompiled: &mut String, _context: &Vm) {
-        todo!()
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        let parameters = self.parameters.iter().fold(String::new(), |mut s, x| {
+            s.push_str(&format!("{x}, "));
+            s
+        });
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} $ Reg#{{{}}} -> {}",
+            "call",
+            self.reg_id,
+            parameters,
+            self.write_back
+                .map(|x| x.to_string())
+                .unwrap_or_else(|| "[[discard]]".to_string())
+        )
+        .unwrap()
     }
 }
 
@@ -137,7 +151,7 @@ pub struct OpRet {
 }
 
 impl Instruction for OpRet {
-    fn exec(&self, _: Ip, context: &mut Vm, _byte_code: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, _: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let reg = gc.read_reg(self.return_reg).clone();
 
@@ -152,8 +166,13 @@ impl Instruction for OpRet {
         Ok(ip)
     }
 
-    fn decompile(&self, _decompiled: &mut String, _context: &Vm) {
-        todo!()
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{}",
+            "ret", self.return_reg
+        )
+        .unwrap()
     }
 }
 
@@ -161,23 +180,30 @@ pub struct OpMakeClosure {
     pub loc: Loc,
     /// closure function id
     pub func_id: FuncId,
+    /// parameter len
+    pub parameters: usize,
     /// write closure to target
     pub rd: usize,
-    /// capture <reg id>
-    pub capture: Vec<usize>,
+    pub capture: Vec<Capture>,
+    pub reg_size: usize,
 }
 
 impl Instruction for OpMakeClosure {
-    fn exec(&self, ip: Ip, context: &mut Vm, _byte_code: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let mut captured_regs = vec![];
 
-        for rs in self.capture.iter() {
-            let reg = gc.share_reg(*rs);
-            captured_regs.push(reg);
+        for Capture { rd, rs, depth } in self.capture.iter() {
+            let reg = gc.share_reg(*rs, *depth);
+            captured_regs.push((*rd, reg));
         }
 
-        let closure = GcObject::Closure(self.func_id, captured_regs);
+        let closure = GcObject::Closure {
+            func_id: self.func_id,
+            parameters: self.parameters,
+            captured: captured_regs,
+            reg_size: self.reg_size,
+        };
         let reg = Reg::Ref(gc.alloc(closure));
         gc.write_reg(self.rd, reg);
         Ok(Ip {
@@ -186,8 +212,21 @@ impl Instruction for OpMakeClosure {
         })
     }
 
-    fn decompile(&self, _decompiled: &mut String, _context: &Vm) {
-        todo!()
+    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Func@{} -> Reg#{}",
+            "clos", self.func_id, self.rd
+        )
+        .unwrap();
+        for Capture { rd, rs, depth } in self.capture.iter() {
+            writeln!(
+                decompiled,
+                "    {: >FORMAT_PAD$}    Reg#{rd} <- Reg@-{depth}#{rs}",
+                ""
+            )
+            .unwrap()
+        }
     }
 }
 
@@ -198,7 +237,7 @@ pub struct OpLoadConstant {
 }
 
 impl Instruction for OpLoadConstant {
-    fn exec(&self, ip: Ip, context: &mut Vm, _byte_code: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let reg = self.constant.clone();
         gc.write_reg(self.rd, reg);
@@ -232,7 +271,7 @@ pub struct OpPanic {
 }
 
 impl Instruction for OpPanic {
-    fn exec(&self, _ip: Ip, _context: &mut Vm, _byte_code: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, _ip: Ip, _context: &mut Vm) -> Result<Ip, VmError> {
         Err(VmError::Panic(self.loc.clone(), self.reason.clone()))
     }
 
@@ -253,7 +292,7 @@ pub struct OpNot {
 }
 
 impl Instruction for OpNot {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let reg = match lhs {
@@ -287,7 +326,7 @@ pub struct OpNeg {
 }
 
 impl Instruction for OpNeg {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let reg = match lhs {
@@ -323,7 +362,7 @@ pub struct OpAdd {
 }
 
 impl Instruction for OpAdd {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
@@ -371,7 +410,7 @@ pub struct OpSub {
 }
 
 impl Instruction for OpSub {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
@@ -411,7 +450,7 @@ pub struct OpMul {
 }
 
 impl Instruction for OpMul {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
@@ -461,7 +500,7 @@ pub struct OpDiv {
 }
 
 impl Instruction for OpDiv {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
@@ -501,7 +540,7 @@ pub struct OpIDiv {
 }
 
 impl Instruction for OpIDiv {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
@@ -542,7 +581,7 @@ pub struct OpRem {
 }
 
 impl Instruction for OpRem {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
@@ -579,7 +618,7 @@ pub struct OpPow {
 }
 
 impl Instruction for OpPow {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
@@ -619,7 +658,7 @@ pub struct OpEq {
 }
 
 impl Instruction for OpEq {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
@@ -663,7 +702,7 @@ pub struct OpGt {
 }
 
 impl Instruction for OpGt {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
@@ -710,7 +749,7 @@ pub struct OpAnd {
 }
 
 impl Instruction for OpAnd {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
@@ -747,7 +786,7 @@ pub struct OpOr {
 }
 
 impl Instruction for OpOr {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
@@ -783,7 +822,7 @@ pub struct OpMove {
 }
 
 impl Instruction for OpMove {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let rs = gc.read_reg(self.rs).clone();
         gc.write_reg(self.rd, rs);
@@ -810,7 +849,7 @@ pub struct OpBranch {
 }
 
 impl Instruction for OpBranch {
-    fn exec(&self, ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         let gc = &mut context.gc;
         let condition = gc.read_reg(self.condition);
         if let Reg::Bool(b) = condition {
@@ -847,7 +886,7 @@ pub struct OpJump {
 }
 
 impl Instruction for OpJump {
-    fn exec(&self, ip: Ip, _context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, _context: &mut Vm) -> Result<Ip, VmError> {
         Ok(Ip {
             func_id: ip.func_id,
             inst: (ip.inst as i64 + self.offset) as usize,
@@ -862,7 +901,7 @@ impl Instruction for OpJump {
 pub struct OpDummy;
 
 impl Instruction for OpDummy {
-    fn exec(&self, ip: Ip, _context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, ip: Ip, _context: &mut Vm) -> Result<Ip, VmError> {
         Ok(Ip {
             func_id: ip.func_id,
             inst: ip.inst + 1,
@@ -880,7 +919,7 @@ pub struct OpYield {
 }
 
 impl Instruction for OpYield {
-    fn exec(&self, _ip: Ip, context: &mut Vm, _functions: &[Func]) -> Result<Ip, VmError> {
+    fn exec(&self, _ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
         if let Some(id) = self.show_id {
             let gc = &context.gc;
             let reg = gc.read_reg(id);

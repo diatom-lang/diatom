@@ -23,7 +23,7 @@ impl Console {
     }
 
     /// Run this console
-    pub fn run(&mut self) {
+    pub fn run(&mut self, inspect: bool) {
         use std::io::stdout;
 
         use reedline::{
@@ -71,9 +71,13 @@ impl Console {
             let sig = line_editor.read_line(&prompt);
             match sig {
                 Ok(Signal::Success(buffer)) => {
-                    let result =
+                    let result = if inspect {
                         self.interpreter
-                            .exec(buffer, OsStr::new("<interactive>"), self.color);
+                            .decompile(buffer, OsStr::new("<interactive>"), self.color)
+                    } else {
+                        self.interpreter
+                            .exec(buffer, OsStr::new("<interactive>"), self.color)
+                    };
                     match result {
                         Ok(s) => print!("{s}"),
                         Err(s) => eprint!("{s}"),

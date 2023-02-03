@@ -21,7 +21,7 @@ pub struct Ip {
 
 #[enum_dispatch(VmInst)]
 pub trait Instruction {
-    fn exec(&self, ip: Ip, context: &mut Vm, functions: &[Func]) -> Result<Ip, VmError>;
+    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError>;
     fn decompile(&self, decompiled: &mut String, context: &Vm);
 }
 
@@ -29,6 +29,9 @@ pub trait Instruction {
 #[enum_dispatch]
 pub enum VmInst {
     OpAllocReg,
+    OpCallClosure,
+    OpMakeClosure,
+    OpRet,
     OpAdd,
     OpAnd,
     OpBranch,
@@ -80,7 +83,7 @@ impl Vm {
             let func = unsafe { byte_code.get_unchecked(func_id) };
             debug_assert!(func.insts.len() > inst);
             self.ip = match unsafe { func.insts.get_unchecked(inst) }
-                .exec(self.ip, self, byte_code)
+                .exec(self.ip, self)
                 .map_err(|err| {
                     self.gc.clean_call_stack();
                     err
