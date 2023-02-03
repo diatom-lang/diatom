@@ -20,19 +20,15 @@ pub enum ErrorCode {
     UnexpectedEof,
     /// E1002 Missing expression
     MissingExpr(Loc),
-    /// E1003 Missing statement
-    MissingStmt(Loc),
-    /// E1004 Missing map value
-    MissingMapValue,
-    /// E1005 Missing data constructor
-    MissingConstructor,
-    /// E1006 Require Wrong Argument
+    /// E1003 Invalid Table Key
+    InvalidTableKey,
+    /// E1004 Require Wrong Argument
     RequireWrongArgument,
-    /// E1007 Invalid module string
+    /// E1005 Invalid module string
     InvalidModuleString,
-    /// E1008 Module Not Found
+    /// E1006 Module Not Found
     ModuleNotFound(String),
-    /// E1009 Invalid Module, Can Not Parse
+    /// E1007 Invalid Module, Can Not Parse
     InvalidModule,
 }
 
@@ -74,28 +70,16 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc) -> (Diagnostic, bool) {
                 Label::primary((), loc),
                 Label::secondary((), loc_pre).with_message("Previous token here"),
             ]),
-        ErrorCode::MissingStmt(loc_pre) => Diagnostic::error()
+        ErrorCode::InvalidTableKey => Diagnostic::error()
             .with_code("E1003")
-            .with_message("Missing statement here")
-            .with_labels(vec![
-                Label::primary((), loc),
-                Label::secondary((), loc_pre).with_message("Previous token here"),
-            ]),
-        ErrorCode::MissingMapValue => Diagnostic::error()
-            .with_code("E1004")
-            .with_message("Missing map value here")
-            .with_labels(vec![Label::primary((), loc)])
-            .with_notes(vec!["Consider add `: <some value>` here".to_string()]),
-        ErrorCode::MissingConstructor => Diagnostic::error()
-            .with_code("E1005")
-            .with_message("Missing data type constructor here")
+            .with_message("Table key must be an identifier")
             .with_labels(vec![Label::primary((), loc)]),
         ErrorCode::RequireWrongArgument => Diagnostic::error()
-            .with_code("E1006")
+            .with_code("E1004")
             .with_message("Module must be a string literal")
             .with_labels(vec![Label::primary((), loc)]),
         ErrorCode::InvalidModuleString => Diagnostic::error()
-            .with_code("E1007")
+            .with_code("E1005")
             .with_message("Invalid character in module string")
             .with_labels(vec![Label::primary((), loc)])
             .with_notes(vec![
@@ -103,12 +87,12 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc) -> (Diagnostic, bool) {
                 "Module String must not be empty.".to_string(),
             ]),
         ErrorCode::ModuleNotFound(s) => Diagnostic::error()
-            .with_code("E1008")
+            .with_code("E1006")
             .with_message("Module can not be found")
             .with_labels(vec![Label::primary((), loc)])
             .with_notes(vec![format!("Looking for `{s}.dm` or `{s}/mod.dm`")]),
         ErrorCode::InvalidModule => Diagnostic::error()
-            .with_code("E1009")
+            .with_code("E1007")
             .with_message("Error encountered while parsing module")
             .with_labels(vec![Label::primary((), loc)]),
     };

@@ -5,7 +5,6 @@ fn test_str(code: &str, should_fail: bool) {
     resource_path.push("src/frontend/parser/tests/resources");
     let mut parser = Parser::new()._with_path(resource_path);
     let ast = parser.parse_str(OsStr::new(file!()), code);
-    println!("{:#?}", ast.statements);
     if !should_fail && ast.diagnoser.error_count() > 0 {
         print!("{}", ast.diagnoser.render(true));
     }
@@ -21,7 +20,6 @@ fn test_expr_postfix_ambiguous() {
     let code = "0,a $ (1,2,3) (3,4)$[2-1]+0.333//[0 1 2]$[1][v]";
     let mut parser = Parser::new();
     let ast = parser.parse_str(OsStr::new(file!()), code);
-    println!("{:#?}", ast.statements);
     if ast.diagnoser.error_count() > 0 {
         print!("{}", ast.diagnoser.render(true));
     }
@@ -96,23 +94,6 @@ fn test_statement() {
 }
 
 #[test]
-fn test_data() {
-    test_str("data  = X def new() end", true);
-    test_str("data Maybe = end", true);
-    test_str("data Maybe = | X end", true);
-    test_str("data Maybe = X | end", true);
-    test_str("data Maybe = Just a | Nothing end", false);
-    test_str("data Maybe = Just a end", false);
-    test_str("data Maybe = Nothing end", false);
-    test_str(
-        "data Maybe = Nothing def new() = x end def map(f) = f$(x) end end",
-        false,
-    );
-    test_str("data Shape = Circle r | Rect x y | Tri a b c end", false);
-    test_str("Just${1} Just${x: 1}", false);
-}
-
-#[test]
 fn test_loop() {
     test_str("loop end", false);
     test_str("loop continue false true return end", false);
@@ -124,54 +105,10 @@ fn test_loop() {
 }
 
 #[test]
-fn test_dict_set() {
-    test_str("{:}", false);
+fn test_table() {
     test_str("{}", false);
-    test_str("{ a }", false);
-    test_str("{123 567 ()}", false);
-    test_str("{123:1 567:2 'asdf': 7+8}", false);
-    test_str("{break}", true);
-    test_str("{c:break}", true);
-    test_str("{c:1 b:3<=2 d}", true);
-    test_str("{c:1 b:3<=2 }", false);
-}
-
-#[test]
-fn test_case() {
-    test_str(
-        r#"
-        case i of
-            1 | 2,3,4| y@x@Just${_ g@Nothing} => break
-            true => 1
-            std.io.error${s} => s
-            a@std.io.error${s} if m>= 0 => s
-            _ if t == "s" => "what ever"
-            "str", 1 | false | 1e4 => panic$()
-            (1,2), (3,4) | 0 if false => 1
-        end"#,
-        false,
-    );
-    test_str(
-        r#"
-        case i of
-            | x => 1
-        end"#,
-        true,
-    );
-    test_str(
-        r#"
-        case i of
-            1 $ { c } => 1
-        end"#,
-        true,
-    );
-    test_str(
-        r#"
-        case i of
-            1 @ 1 => 1
-        end"#,
-        true,
-    );
+    test_str("{ a = 1 b= 3 c= 'abc'}", false);
+    test_str("{loop = 1}", true);
 }
 
 #[test]

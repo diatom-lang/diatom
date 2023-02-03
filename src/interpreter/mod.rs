@@ -8,7 +8,7 @@ mod error;
 use crate::{
     diagnostic::{Diagnostic, Loc},
     frontend::{
-        parser::ast::{Const, Expr, Expr_, OpInfix, OpPrefix, Stmt, Stmt_},
+        parser::ast::{Const, Expr, OpInfix, OpPrefix, Stmt},
         Ast, Parser,
     },
     vm::{
@@ -256,25 +256,30 @@ impl Interpreter {
     }
 
     fn compile_stmt(&mut self, stmt: &Stmt) -> Result<Option<usize>, ErrorCode> {
-        let Stmt { loc, val: stmt } = stmt;
         let mut return_value = None;
         match stmt {
-            Stmt_::Expr(Expr {
-                loc,
-                val: Expr_::Infix(OpInfix::Assign, lhs, rhs),
-            }) => self.compile_assignment(lhs, rhs, loc.clone())?,
-            Stmt_::Expr(expr) => {
+            Stmt::Expr {
+                loc: _,
+                expr:
+                    Expr::Infix {
+                        loc,
+                        op: OpInfix::Assign,
+                        lhs,
+                        rhs,
+                    },
+            } => self.compile_assignment(lhs, rhs, loc.clone())?,
+            Stmt::Expr { loc: _, expr } => {
                 let (reg_id, tmp) = self.compile_expr(expr)?;
                 return_value = Some(reg_id);
                 if tmp {
                     self.registers.free_intermediate(reg_id)
                 }
             }
-            Stmt_::Continue => todo!(),
-            Stmt_::Break => todo!(),
-            Stmt_::Return(_) => todo!(),
-            Stmt_::Data(_, _, _) => todo!(),
-            Stmt_::Loop(condition, body) => {
+            Stmt::Loop {
+                loc,
+                condition,
+                body,
+            } => {
                 let start_label = self.get_current_func().insts.len();
                 let before_test_inserted = self.registers.insert_offset;
                 let branch_inst = if let Some(condition) = condition {
@@ -286,7 +291,7 @@ impl Interpreter {
                     Some((
                         self.get_current_func().insts.len() - 1,
                         condition_reg,
-                        condition.loc.clone(),
+                        condition.get_loc(),
                     ))
                 } else {
                     None
@@ -322,30 +327,42 @@ impl Interpreter {
                     })
                 };
             }
-            Stmt_::For(_, _, _) => todo!(),
-            Stmt_::Def(_, _, _, _) => todo!(),
-            Stmt_::Error => unreachable!(),
+            Stmt::Continue { loc: _ } => todo!(),
+            Stmt::Break { loc: _ } => todo!(),
+            Stmt::Return { loc: _, value: _ } => todo!(),
+            Stmt::For {
+                loc: _,
+                loop_variable: _,
+                iterator: _,
+                body: _,
+            } => todo!(),
+            Stmt::Def {
+                loc: _,
+                name: _,
+                parameters: _,
+                body: _,
+            } => todo!(),
+            Stmt::Error => unreachable!(),
         }
         Ok(return_value)
     }
 
     fn compile_expr(&mut self, expr: &Expr) -> Result<(usize, bool), ErrorCode> {
-        let Expr { loc, val: expr } = expr;
         match expr {
-            Expr_::Block(_) => todo!(),
-            Expr_::If(_) => todo!(),
-            Expr_::Prefix(op, lhs) => {
-                let (lhs_id, lhs_tmp) = self.compile_expr(lhs)?;
-                if lhs_tmp {
-                    self.registers.free_intermediate(lhs_id)
+            Expr::Prefix { loc, op, rhs } => {
+                let (rhs_id, rhs_tmp) = self.compile_expr(rhs)?;
+                if rhs_tmp {
+                    self.registers.free_intermediate(rhs_id)
                 };
-                Ok(self.compile_prefix(op, lhs_id, loc.clone()))
+                Ok(self.compile_prefix(op, rhs_id, loc.clone()))
             }
-            Expr_::Call(_, _) => todo!(),
-            Expr_::Index(_, _) => todo!(),
-            Expr_::Construct(_, _) => todo!(),
-            Expr_::Infix(OpInfix::Assign, _, _) => Err(ErrorCode::InvalidAssignment(loc.clone())),
-            Expr_::Infix(op, lhs, rhs) => {
+            Expr::Infix {
+                loc,
+                op: OpInfix::Assign,
+                lhs: _,
+                rhs: _,
+            } => Err(ErrorCode::InvalidAssignment(loc.clone())),
+            Expr::Infix { loc, op, lhs, rhs } => {
                 let (lhs_id, lhs_tmp) = self.compile_expr(lhs)?;
                 let (rhs_id, rhs_tmp) = self.compile_expr(rhs)?;
                 let ret = self.compile_infix(op, lhs_id, rhs_id, loc.clone());
@@ -357,31 +374,46 @@ impl Interpreter {
                 };
                 Ok(ret)
             }
-            Expr_::Fn(_, _) => todo!(),
-            Expr_::Id(id) => match self.registers.lookup_variable(id) {
+            Expr::Id { loc, name } => match self.registers.lookup_variable(name) {
                 Ok((id, _)) => Ok((id, false)),
-                Err(()) => Err(ErrorCode::NameNotDefined(loc.clone(), id.clone())),
+                Err(()) => Err(ErrorCode::NameNotDefined(loc.clone(), name.clone())),
             },
-            Expr_::Parentheses(expr) => self.compile_expr(expr),
-            Expr_::Const(c) => Ok(self.compile_constant(c, loc.clone())),
-            Expr_::Case(_, _) => todo!(),
-            Expr_::Module(_) => todo!(),
-            Expr_::Error => unreachable!(),
+            Expr::Parentheses { loc: _, content } => self.compile_expr(content),
+            Expr::Const { loc, value } => Ok(self.compile_constant(value, loc.clone())),
+            Expr::Error => unreachable!(),
+            Expr::Block { loc: _, body: _ } => todo!(),
+            Expr::If {
+                loc: _,
+                conditional: _,
+                default: _,
+            } => todo!(),
+            Expr::Call {
+                loc: _,
+                lhs: _,
+                parameters: _,
+            } => todo!(),
+            Expr::Index {
+                loc: _,
+                lhs: _,
+                rhs: _,
+            } => todo!(),
+            Expr::Fn {
+                loc: _,
+                parameters: _,
+                body: _,
+            } => todo!(),
+            Expr::Module { loc: _, path: _ } => todo!(),
         }
     }
 
     fn compile_assignment(&mut self, lhs: &Expr, rhs: &Expr, loc: Loc) -> Result<(), ErrorCode> {
-        if let Expr {
-            val: Expr_::Id(id),
-            loc: _,
-        } = lhs
-        {
+        if let Expr::Id { loc: _, name } = lhs {
             // register to local block
-            if self.registers.lookup_variable(id).is_err() {
-                self.scopes.last_mut().unwrap().insert(id.clone());
+            if self.registers.lookup_variable(name).is_err() {
+                self.scopes.last_mut().unwrap().insert(name.clone());
             }
             // declare variable
-            let (id, _) = self.registers.declare_or_get_variable(id);
+            let (id, _) = self.registers.declare_or_get_variable(name);
             let (rhs, tmp) = self.compile_expr(rhs)?;
             if tmp {
                 self.registers.free_intermediate(rhs);
@@ -393,7 +425,7 @@ impl Interpreter {
             }));
             Ok(())
         } else {
-            Err(ErrorCode::CannotAssign(lhs.loc.clone()))
+            Err(ErrorCode::CannotAssign(lhs.get_loc()))
         }
     }
 
@@ -423,8 +455,7 @@ impl Interpreter {
                 .get_or_alloc_constant(ConstantValue::Bool(*b))
                 .map_err(|reg| (reg, Reg::Bool(*b))),
             Const::List(_) => todo!(),
-            Const::Set(_) => todo!(),
-            Const::Dict(_, _) => todo!(),
+            Const::Table(_) => todo!(),
         };
         match constant {
             Ok(reg_id) => (reg_id, false),
@@ -611,20 +642,20 @@ impl Interpreter {
         }
     }
 
-    fn compile_prefix(&mut self, op: &OpPrefix, lhs: usize, loc: Loc) -> (usize, bool) {
+    fn compile_prefix(&mut self, op: &OpPrefix, rhs: usize, loc: Loc) -> (usize, bool) {
         match op {
             OpPrefix::Not => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(VmInst::OpNot(OpNot { loc, lhs, rd }));
+                    .push(VmInst::OpNot(OpNot { loc, lhs: rhs, rd }));
                 (rd, true)
             }
             OpPrefix::Neg => {
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
-                    .push(VmInst::OpNeg(OpNeg { loc, lhs, rd }));
+                    .push(VmInst::OpNeg(OpNeg { loc, lhs: rhs, rd }));
                 (rd, true)
             }
         }
