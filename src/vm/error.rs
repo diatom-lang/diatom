@@ -11,10 +11,20 @@ pub enum VmError {
     OpPrefixNotApplicable(Loc, &'static str, String),
     /// E3003 Invalid Condition
     InvalidCondition(Loc, String),
-    InvalidFunc(Loc, usize),
+    /// E3004 Type is not callable
     NotCallable(Loc, String),
-    ParameterLengthNotMatch(Loc, usize, usize),
-    Panic(Loc, String),
+    /// E3005 Function call with wrong parameters length
+    ParameterLengthNotMatch {
+        loc: Loc,
+        expected: usize,
+        got: usize,
+    },
+    /// E3006 Panic
+    Panic {
+        loc: Loc,
+        reason: String,
+        notes: Vec<String>,
+    },
 }
 
 impl From<VmError> for Diagnostic {
@@ -35,10 +45,21 @@ impl From<VmError> for Diagnostic {
                 .with_code("E3003")
                 .with_message(format!("Expect a bool value as condition, got a `{t}`"))
                 .with_labels(vec![Label::primary((), loc)]),
-            VmError::Panic(_, _) => todo!(),
-            VmError::InvalidFunc(_, _) => todo!(),
-            VmError::NotCallable(_, _) => todo!(),
-            VmError::ParameterLengthNotMatch(_, _, _) => todo!(),
+            VmError::NotCallable(loc, t) => Diagnostic::error()
+                .with_code("E3004")
+                .with_message(format!("Type `{t}` is not callable"))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::ParameterLengthNotMatch { loc, expected, got } => Diagnostic::error()
+                .with_code("E3005")
+                .with_message(format!(
+                    "Function takes {expected} parameters but {got} is provided"
+                ))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::Panic { loc, reason, notes } => Diagnostic::error()
+                .with_code("E3006")
+                .with_message("Main function panic durning execution")
+                .with_labels(vec![Label::primary((), loc).with_message(reason)])
+                .with_notes(notes),
         }
     }
 }

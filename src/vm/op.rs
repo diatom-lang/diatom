@@ -22,6 +22,7 @@ fn get_type(reg: &Reg, gc: &Gc) -> String {
                     captured: _,
                     reg_size: _,
                 } => "Closure".to_string(),
+                GcObject::NativeFunction(_) => "Extern_Function".to_string(),
                 GcObject::_Object(_) => "Table".to_string(),
             }
         }
@@ -76,21 +77,48 @@ impl Instruction for OpCallClosure {
                         captured,
                         reg_size,
                     } => Ok((*func_id, *parameters, captured.to_vec(), *reg_size)),
+                    GcObject::NativeFunction(f) => {
+                        let f = f.clone();
+                        let mut f = f.try_borrow_mut().map_err(|err| VmError::Panic {
+                            loc: self.loc.clone(),
+                            reason: "Extern function violates borrow rules".to_string(),
+                            notes: vec![
+                                format!("Reason: {err}"),
+                                "This is likely to be caused by a recursive call to this function"
+                                    .to_string(),
+                            ],
+                        })?;
+                        let mut parameters = vec![];
+                        for para in self.parameters.iter() {
+                            let reg = gc.read_reg(*para).clone();
+                            parameters.push(reg);
+                        }
+                        let ret = f(context, &parameters).map_err(|s| VmError::Panic {
+                            loc: self.loc.clone(),
+                            reason: s,
+                            notes: vec![],
+                        })?;
+                        if let Some(write_back) = self.write_back {
+                            context.gc.write_reg(write_back, ret)
+                        }
+                        return Ok(Ip {
+                            func_id: ip.func_id,
+                            inst: ip.inst + 1,
+                        });
+                    }
                     _ => Err(()),
                 }
             }
             _ => Err(()),
         }
-        .map_err(|_| {
-            VmError::NotCallable(self.loc.clone(), "Object is not callable".to_string())
-        })?;
+        .map_err(|_| VmError::NotCallable(self.loc.clone(), get_type(obj, gc)))?;
 
         if parameters != self.parameters.len() {
-            return Err(VmError::ParameterLengthNotMatch(
-                self.loc.clone(),
-                parameters,
-                self.parameters.len(),
-            ));
+            return Err(VmError::ParameterLengthNotMatch {
+                loc: self.loc.clone(),
+                expected: parameters,
+                got: self.parameters.len(),
+            });
         }
 
         // clone parameters
@@ -262,26 +290,6 @@ impl Instruction for OpLoadConstant {
             "load", content, self.rd
         )
         .unwrap();
-    }
-}
-
-pub struct OpPanic {
-    pub loc: Loc,
-    pub reason: String,
-}
-
-impl Instruction for OpPanic {
-    fn exec(&self, _ip: Ip, _context: &mut Vm) -> Result<Ip, VmError> {
-        Err(VmError::Panic(self.loc.clone(), self.reason.clone()))
-    }
-
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
-        writeln!(
-            decompiled,
-            "{: >FORMAT_PAD$}    \"{}\"",
-            "panic", self.reason
-        )
-        .unwrap()
     }
 }
 
@@ -924,14 +932,17 @@ impl Instruction for OpYield {
             let gc = &context.gc;
             let reg = gc.read_reg(id);
             let mut output = match reg {
-                Reg::Unit => "()".to_string(),
+                // omit unit output in repl
+                Reg::Unit => String::new(),
                 Reg::Bool(b) => format!("{b}"),
                 Reg::Int(i) => format!("{i}"),
                 Reg::Float(f) => format!("{f}"),
                 Reg::Str(sid) => gc.get_string_by_id(*sid).to_string(),
                 Reg::Ref(r) => format!("Object@<{r}>"),
             };
-            output.push('\n');
+            if !output.is_empty() {
+                output.push('\n')
+            };
             context.output.push_str(&output)
         }
         Err(VmError::Yield)

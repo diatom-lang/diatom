@@ -14,7 +14,9 @@ pub enum ErrorCode {
     InvalidAssignment(Loc),
     /// E2003 Parameter Shadowing
     ParameterShadowing {
-        previous: Loc,
+        // if previously defined by external function
+        // it does not have a location
+        previous: Option<Loc>,
         parameter: Loc,
         name: String,
     },
@@ -39,13 +41,18 @@ impl From<ErrorCode> for Diagnostic {
                 previous,
                 parameter,
                 name,
-            } => Diagnostic::error()
-                .with_code("E2003")
-                .with_message(format!("Function parameter `{name}` is already defined"))
-                .with_labels(vec![
-                    Label::primary((), parameter),
-                    Label::secondary((), previous).with_message("Name previously defined here"),
-                ]),
+            } => {
+                let error = Diagnostic::error()
+                    .with_code("E2003")
+                    .with_message(format!("Function parameter `{name}` is already defined"));
+                let mut labels = vec![Label::primary((), parameter)];
+                if let Some(previous) = previous {
+                    labels.push(
+                        Label::secondary((), previous).with_message("Name previously defined here"),
+                    )
+                };
+                error.with_labels(labels)
+            }
         }
     }
 }

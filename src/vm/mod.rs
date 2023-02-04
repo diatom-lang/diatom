@@ -9,7 +9,7 @@ mod gc;
 pub mod op;
 mod string_pool;
 use enum_dispatch::enum_dispatch;
-pub use gc::Reg;
+pub use gc::{GcObject, Reg};
 
 type FuncId = usize;
 
@@ -64,7 +64,7 @@ pub struct Vm {
 }
 
 impl Vm {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             gc: Gc::new(),
             ip: Ip {
@@ -75,7 +75,7 @@ impl Vm {
         }
     }
 
-    pub fn exec(&mut self, byte_code: &[Func]) -> VmError {
+    pub(crate) fn exec(&mut self, byte_code: &[Func]) -> VmError {
         self.output.clear();
         loop {
             let Ip { func_id, inst } = self.ip;
@@ -94,15 +94,22 @@ impl Vm {
         }
     }
 
-    pub fn take_output(&mut self) -> String {
+    pub(crate) fn take_output(&mut self) -> String {
         std::mem::take(&mut self.output)
     }
 
-    pub fn set_ip(&mut self, ip: Ip) {
+    pub(crate) fn set_ip(&mut self, ip: Ip) {
         self.ip = ip
     }
 
-    pub fn gc_mut(&mut self) -> &mut Gc {
+    pub(crate) fn gc_mut(&mut self) -> &mut Gc {
         &mut self.gc
+    }
+
+    pub fn print(&mut self, s: &str) {
+        self.output.push_str(s);
+    }
+    pub fn get_string_by_id(&self, id: usize) -> Option<&str> {
+        self.gc.get_string_by_id_checked(id)
     }
 }

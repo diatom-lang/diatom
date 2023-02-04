@@ -1,12 +1,13 @@
 use std::{
-    cell::UnsafeCell,
+    cell::{RefCell, UnsafeCell},
     ops::{Index, IndexMut},
     rc::Rc,
 };
 
-use super::{string_pool::StringPool, FuncId, Ip, Object};
+use super::{string_pool::StringPool, FuncId, Ip, Object, Vm};
 
-pub type GcId = usize;
+/// Reference id of heap allocated object
+pub type RefId = usize;
 
 enum Mark {
     White,
@@ -20,9 +21,11 @@ pub enum GcObject {
         /// local id, shared reg
         captured: Vec<(usize, Rc<UnsafeCell<Reg>>)>,
     },
+    NativeFunction(Rc<RefCell<dyn FnMut(&mut Vm, &[Reg]) -> Result<Reg, String>>>),
     _Object(Object),
 }
 
+/// Diatom's unboxed value type
 #[derive(Default, Clone)]
 pub enum Reg {
     #[default]
@@ -31,7 +34,7 @@ pub enum Reg {
     Int(i64),
     Float(f64),
     Str(usize),
-    Ref(GcId),
+    Ref(RefId),
 }
 
 enum StackReg {
@@ -72,7 +75,7 @@ impl Gc {
         }
     }
 
-    pub fn alloc(&mut self, obj: GcObject) -> GcId {
+    pub fn alloc(&mut self, obj: GcObject) -> RefId {
         if self.free.is_empty() {
             self.pool.push((obj, Mark::White));
             self.pool.len() - 1
@@ -186,20 +189,24 @@ impl Gc {
         &mut self.string_pool
     }
 
+    pub fn get_string_by_id_checked(&self, id: usize) -> Option<&str> {
+        self.string_pool.get(id)
+    }
+
     pub fn get_string_by_id(&self, id: usize) -> &str {
         &self.string_pool[id]
     }
 }
 
-impl Index<GcId> for Gc {
+impl Index<RefId> for Gc {
     type Output = GcObject;
-    fn index(&self, index: GcId) -> &Self::Output {
+    fn index(&self, index: RefId) -> &Self::Output {
         &self.pool[index].0
     }
 }
 
-impl IndexMut<GcId> for Gc {
-    fn index_mut(&mut self, index: GcId) -> &mut Self::Output {
+impl IndexMut<RefId> for Gc {
+    fn index_mut(&mut self, index: RefId) -> &mut Self::Output {
         &mut self.pool[index].0
     }
 }

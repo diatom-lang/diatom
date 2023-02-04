@@ -1,9 +1,11 @@
-use std::ffi::OsStr;
+use std::cell::RefCell;
 use std::fmt::Write;
+use std::{ffi::OsStr, rc::Rc};
 
 use ahash::{AHashMap, AHashSet};
 
 mod error;
+mod prelude;
 
 use crate::{
     diagnostic::{Diagnostic, Loc},
@@ -18,11 +20,13 @@ use crate::{
             OpJump, OpLoadConstant, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot, OpOr, OpPow, OpRem,
             OpRet, OpSub, OpYield,
         },
-        Instruction, Ip, Reg, Vm, VmInst,
+        GcObject, Instruction, Ip, Reg, Vm, VmInst,
     },
+    DiatomValue,
 };
 
 use self::error::ErrorCode;
+use self::prelude::impl_prelude;
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 enum ConstantValue {
@@ -44,7 +48,7 @@ pub struct Capture {
 #[derive(Clone)]
 struct RegisterTable {
     prev: Option<Box<RegisterTable>>,
-    variables: AHashMap<String, (usize, Loc)>,
+    variables: AHashMap<String, (usize, Option<Loc>)>,
     free: Vec<usize>,
     assigned: usize,
     func_id: usize,
@@ -72,14 +76,14 @@ impl RegisterTable {
         }
     }
 
-    fn declare_variable(&mut self, name: impl AsRef<str>, loc: Loc) -> usize {
+    fn declare_variable(&mut self, name: impl AsRef<str>, loc: Option<Loc>) -> usize {
         let id = self.declare_intermediate();
         self.variables.insert(name.as_ref().to_string(), (id, loc));
         id
     }
 
     /// (reg_id, depth, loc)
-    fn lookup_variable_(&self, name: &str, depth: usize) -> Option<(usize, usize, Loc)> {
+    fn lookup_variable_(&self, name: &str, depth: usize) -> Option<(usize, usize, Option<Loc>)> {
         let var = self.variables.get(name);
         match var {
             Some((id, loc)) => Some((*id, depth, loc.clone())),
@@ -91,7 +95,7 @@ impl RegisterTable {
     }
 
     /// Return (reg_id, depth, loc)
-    pub fn lookup_variable(&self, name: impl AsRef<str>) -> Option<(usize, usize, Loc)> {
+    pub fn lookup_variable(&self, name: impl AsRef<str>) -> Option<(usize, usize, Option<Loc>)> {
         self.lookup_variable_(name.as_ref(), 0)
     }
 
@@ -156,12 +160,26 @@ impl Interpreter {
             parameters: 0,
             insts: vec![],
         };
-        Self {
+        let mut interpreter = Self {
             registers: RegisterTable::new(0),
             scopes: vec![AHashSet::new()],
             byte_code: vec![main],
             vm: Vm::new(),
-        }
+        };
+        impl_prelude(&mut interpreter);
+        interpreter
+    }
+
+    pub fn add_extern_function<F>(&mut self, name: String, f: F)
+    where
+        F: FnMut(&mut Vm, &[DiatomValue]) -> Result<DiatomValue, String> + 'static,
+    {
+        let f = GcObject::NativeFunction(Rc::new(RefCell::new(f)));
+        let gc_id = self.vm.gc_mut().alloc(f);
+        let reg = Reg::Ref(gc_id);
+        let reg_id = self.registers.declare_variable(name, None);
+        self.vm.gc_mut().alloc_reg_file(reg_id + 1);
+        self.vm.gc_mut().write_reg(reg_id, reg);
     }
 
     pub fn verify_input_completeness(&self, code: impl AsRef<str>) -> bool {
@@ -530,7 +548,7 @@ impl Interpreter {
                 }
             } else {
                 self.scopes.last_mut().unwrap().insert(name.clone());
-                self.registers.declare_variable(name, id_loc.clone())
+                self.registers.declare_variable(name, Some(id_loc.clone()))
             };
             let (rhs, tmp) = self.compile_expr(rhs, false)?;
             if tmp {
@@ -801,7 +819,7 @@ impl Interpreter {
                     name: para.clone(),
                 });
             } else {
-                self.registers.declare_variable(para, loc.clone());
+                self.registers.declare_variable(para, Some(loc.clone()));
             }
         }
         let result = self.compile_expr(body, false).map_err(|err| {
