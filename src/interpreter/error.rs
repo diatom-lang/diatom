@@ -42,14 +42,18 @@ impl From<ErrorCode> for Diagnostic {
                 parameter,
                 name,
             } => {
-                let error = Diagnostic::error()
-                    .with_code("E2003")
-                    .with_message(format!("Function parameter `{name}` is already defined"));
+                let mut error = Diagnostic::error().with_code("E2003").with_message(format!(
+                    "Function parameter `{name}` has a name that is already defined"
+                ));
                 let mut labels = vec![Label::primary((), parameter)];
                 if let Some(previous) = previous {
                     labels.push(
                         Label::secondary((), previous).with_message("Name previously defined here"),
                     )
+                } else {
+                    error = error.with_notes(vec![format!(
+                        "`{name}` is an external function defined by host"
+                    )])
                 };
                 error.with_labels(labels)
             }

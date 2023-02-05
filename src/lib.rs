@@ -17,8 +17,8 @@ mod frontend;
 mod interpreter;
 mod vm;
 pub use interpreter::Interpreter;
-pub use vm::Vm;
 pub use vm::Reg as DiatomValue;
+pub use vm::State;
 /// The version of this build
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

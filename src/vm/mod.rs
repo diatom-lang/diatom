@@ -7,9 +7,11 @@ use ahash::AHashMap;
 pub mod error;
 mod gc;
 pub mod op;
+mod state;
 mod string_pool;
 use enum_dispatch::enum_dispatch;
 pub use gc::{GcObject, Reg};
+pub use state::State;
 
 type FuncId = usize;
 
@@ -61,10 +63,11 @@ pub struct Vm {
     gc: Gc,
     ip: Ip,
     output: String,
+    is_repl: bool,
 }
 
 impl Vm {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             gc: Gc::new(),
             ip: Ip {
@@ -72,11 +75,13 @@ impl Vm {
                 inst: 0,
             },
             output: String::new(),
+            is_repl: false,
         }
     }
 
-    pub(crate) fn exec(&mut self, byte_code: &[Func]) -> VmError {
+    pub fn exec(&mut self, byte_code: &[Func], is_repl: bool) -> VmError {
         self.output.clear();
+        self.is_repl = is_repl;
         loop {
             let Ip { func_id, inst } = self.ip;
             debug_assert!(byte_code.len() > func_id);
@@ -94,22 +99,15 @@ impl Vm {
         }
     }
 
-    pub(crate) fn take_output(&mut self) -> String {
+    pub fn take_output(&mut self) -> String {
         std::mem::take(&mut self.output)
     }
 
-    pub(crate) fn set_ip(&mut self, ip: Ip) {
+    pub fn set_ip(&mut self, ip: Ip) {
         self.ip = ip
     }
 
-    pub(crate) fn gc_mut(&mut self) -> &mut Gc {
+    pub fn gc_mut(&mut self) -> &mut Gc {
         &mut self.gc
-    }
-
-    pub fn print(&mut self, s: &str) {
-        self.output.push_str(s);
-    }
-    pub fn get_string_by_id(&self, id: usize) -> Option<&str> {
-        self.gc.get_string_by_id_checked(id)
     }
 }

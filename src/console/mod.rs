@@ -75,8 +75,7 @@ impl Console {
                         self.interpreter
                             .decompile(buffer, OsStr::new("<interactive>"), self.color)
                     } else {
-                        self.interpreter
-                            .exec(buffer, OsStr::new("<interactive>"), self.color)
+                        self.interpreter.exec_repl(buffer, self.color)
                     };
                     match result {
                         Ok(s) => print!("{s}"),

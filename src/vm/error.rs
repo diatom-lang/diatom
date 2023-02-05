@@ -25,6 +25,12 @@ pub enum VmError {
         reason: String,
         notes: Vec<String>,
     },
+    /// E3007 Invalid Ref from external function
+    InvalidRef {
+        loc: Loc,
+        t: &'static str,
+        id: usize,
+    },
 }
 
 impl From<VmError> for Diagnostic {
@@ -60,6 +66,12 @@ impl From<VmError> for Diagnostic {
                 .with_message("Main function panic durning execution")
                 .with_labels(vec![Label::primary((), loc).with_message(reason)])
                 .with_notes(notes),
+            VmError::InvalidRef { loc, t, id } => Diagnostic::error()
+                .with_code("E3007")
+                .with_message(format!(
+                    "External function returns an invalid reference to {t}@{id}"
+                ))
+                .with_labels(vec![Label::primary((), loc)]),
         }
     }
 }

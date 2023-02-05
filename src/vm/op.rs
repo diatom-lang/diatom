@@ -1,4 +1,4 @@
-use crate::{diagnostic::Loc, interpreter::Capture};
+use crate::{diagnostic::Loc, interpreter::Capture, State};
 use std::fmt::Write;
 
 use super::{
@@ -79,25 +79,31 @@ impl Instruction for OpCallClosure {
                     } => Ok((*func_id, *parameters, captured.to_vec(), *reg_size)),
                     GcObject::NativeFunction(f) => {
                         let f = f.clone();
-                        let mut f = f.try_borrow_mut().map_err(|err| VmError::Panic {
-                            loc: self.loc.clone(),
-                            reason: "Extern function violates borrow rules".to_string(),
-                            notes: vec![
-                                format!("Reason: {err}"),
-                                "This is likely to be caused by a recursive call to this function"
-                                    .to_string(),
-                            ],
-                        })?;
+                        let f = f.borrow();
                         let mut parameters = vec![];
                         for para in self.parameters.iter() {
                             let reg = gc.read_reg(*para).clone();
                             parameters.push(reg);
                         }
-                        let ret = f(context, &parameters).map_err(|s| VmError::Panic {
+                        let mut state = State { vm: context };
+                        let ret = f(&mut state, &parameters).map_err(|s| VmError::Panic {
                             loc: self.loc.clone(),
                             reason: s,
                             notes: vec![],
                         })?;
+                        match ret {
+                            Reg::Str(id) => {
+                                if context.gc.get_string_by_id_checked(id).is_none() {
+                                    return Err(VmError::InvalidRef {
+                                        loc: self.loc.clone(),
+                                        t: "Str",
+                                        id,
+                                    });
+                                }
+                            }
+                            Reg::Ref(_) => todo!(),
+                            _ => (),
+                        }
                         if let Some(write_back) = self.write_back {
                             context.gc.write_reg(write_back, ret)
                         }
@@ -928,6 +934,9 @@ pub struct OpYield {
 
 impl Instruction for OpYield {
     fn exec(&self, _ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
+        if !context.is_repl {
+            return Err(VmError::Yield);
+        }
         if let Some(id) = self.show_id {
             let gc = &context.gc;
             let reg = gc.read_reg(id);

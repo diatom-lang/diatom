@@ -4,7 +4,7 @@ macro_rules! test_ok {
     ($code: literal, $output_expected: literal) => {
         let mut interpreter = Interpreter::new();
         let mut output = interpreter
-            .exec($code, OsStr::new("<test>"), false)
+            .exec_repl($code, false)
             .expect("Execution failed!");
         // pop newline
         output.pop();
@@ -65,7 +65,7 @@ fn test_closure() {
     end
     f$()
     "#,
-        "()"
+        ""
     );
     // fn capture variable
     test_ok!(
@@ -93,8 +93,8 @@ fn test_closure() {
     end
     f$()
     x2$(10)
-    x1$()
+    assert$(x1$() == 10)
     "#,
-        "10"
+        ""
     );
 }

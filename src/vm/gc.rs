@@ -4,7 +4,9 @@ use std::{
     rc::Rc,
 };
 
-use super::{string_pool::StringPool, FuncId, Ip, Object, Vm};
+use crate::State;
+
+use super::{string_pool::StringPool, FuncId, Ip, Object};
 
 /// Reference id of heap allocated object
 pub type RefId = usize;
@@ -21,7 +23,8 @@ pub enum GcObject {
         /// local id, shared reg
         captured: Vec<(usize, Rc<UnsafeCell<Reg>>)>,
     },
-    NativeFunction(Rc<RefCell<dyn FnMut(&mut Vm, &[Reg]) -> Result<Reg, String>>>),
+    #[allow(clippy::type_complexity)]
+    NativeFunction(Rc<RefCell<dyn Fn(&mut State, &[Reg]) -> Result<Reg, String>>>),
     _Object(Object),
 }
 

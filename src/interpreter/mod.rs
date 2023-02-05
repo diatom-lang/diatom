@@ -7,6 +7,7 @@ use ahash::{AHashMap, AHashSet};
 mod error;
 mod prelude;
 
+use crate::State;
 use crate::{
     diagnostic::{Diagnostic, Loc},
     frontend::{
@@ -146,6 +147,57 @@ pub struct Func {
     pub insts: Vec<VmInst>,
 }
 
+/// # The Diatom Interpreter
+///
+/// High performance interpreter for the diatom programming language. This interpreter compiles
+/// diatom source code into byte code and executes the byte code with carefully tuned virtual
+/// machine. Our benchmark shows it can reach up to **2x** the execution speed of Lua 5.4 .
+///
+/// # Example
+///
+/// ## 1. Run a piece of code
+/// ```
+/// use diatom::Interpreter;
+///
+/// // Create a new instance of interpreter
+/// let mut interpreter = Interpreter::new();
+/// // Execute source code
+/// let output = interpreter.exec(
+///     "print$('Hello, world!')",
+///     Default::default(),
+///     false).unwrap();
+/// // print the output
+/// println!("{output}");
+/// ```
+///
+/// ## 2. Add call back to the interpreter
+/// ```
+/// use std::{cell::Cell, rc::Rc};
+/// use diatom::{DiatomValue, Interpreter};
+///
+/// // this value will be modified
+/// let value = Rc::new(Cell::new(0));
+/// let value_capture = value.clone();
+///
+/// let mut interpreter = Interpreter::new();
+/// // add a callback named "set_value"
+/// interpreter.add_extern_function("set_value".to_string(), move |_state, parameters| {
+///     if parameters.len() != 1 {
+///         return Err("Expected 1 parameter!".to_string());
+///     }
+///     match parameters[0] {
+///         DiatomValue::Int(i) => {
+///             value_capture.set(i);
+///             Ok(DiatomValue::Unit)
+///         }
+///         _ => Err("Invalid type".to_string()),
+///     }
+/// });
+///
+/// // change value to 5
+/// interpreter.exec("set_value$(5)", Default::default(), false).unwrap();
+/// assert_eq!(value.get(), 5);
+/// ```
 pub struct Interpreter {
     registers: RegisterTable,
     scopes: Vec<AHashSet<String>>,
@@ -154,6 +206,7 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
+    /// Create a new interpreter instance
     pub fn new() -> Self {
         let main = Func {
             name: "main".to_string(),
@@ -170,9 +223,48 @@ impl Interpreter {
         interpreter
     }
 
+    /// Register an external rust function
+    ///
+    /// This function does not accept due to potential recursive calls on a FnMut would violating
+    /// borrow rules. You may want to use interior mutability if Fn is not flexible enough.
+    /// External function should **NEVER PANIC**, otherwise it will crush the virtual machine.
+    ///
+    /// # External function parameters:
+    /// * `State` - Access state and heap memory of the virtual machine.
+    /// * `[DiatomValue]` - Parameters passed. The function is expected to check type and the
+    /// number of parameters it received.
+    ///
+    /// # External function return value:
+    /// * Return a single unboxed value as return value. If the function does not intended to
+    /// return anything, return an unit type `DiatomValue::Unit`.
+    /// * If any unrecoverable error happens, return an `Err(String)` that illustrates the error.
+    /// This will cause virtual machine to enter **panic mode** and stop execution.
+    /// * If return value is `DiatomValue::Str` or `DiatomValue::Ref`, the reference id is checked.
+    /// An invalid id would cause virtual machine to enter **panic mode** and stop execution.
+    ///
+    /// # Examples:
+    /// ```
+    /// use diatom::{Interpreter, DiatomValue};
+    ///
+    /// let mut interpreter = Interpreter::new();
+    /// interpreter.add_extern_function(
+    ///     "hello_world".to_string(),
+    ///     |state, parameters| {
+    ///         if !parameters.is_empty(){
+    ///             Err("Too many parameters!".to_string())
+    ///         }else{
+    ///             state.print("Hello, world!");
+    ///             Ok(DiatomValue::Unit)
+    ///         }
+    ///     }
+    /// );
+    ///
+    /// let output = interpreter.exec("hello_world$()", Default::default(), false).unwrap();
+    /// assert_eq!(output, "Hello, world!")
+    /// ```
     pub fn add_extern_function<F>(&mut self, name: String, f: F)
     where
-        F: FnMut(&mut Vm, &[DiatomValue]) -> Result<DiatomValue, String> + 'static,
+        F: Fn(&mut State, &[DiatomValue]) -> Result<DiatomValue, String> + 'static,
     {
         let f = GcObject::NativeFunction(Rc::new(RefCell::new(f)));
         let gc_id = self.vm.gc_mut().alloc(f);
@@ -182,12 +274,18 @@ impl Interpreter {
         self.vm.gc_mut().write_reg(reg_id, reg);
     }
 
+    /// Check if input is completeness
+    ///
+    /// Incomplete input usually contains unclosed parentheses, quotes or open expression.
     pub fn verify_input_completeness(&self, code: impl AsRef<str>) -> bool {
         let mut parser = Parser::new();
         let ast = parser.parse_str(OsStr::new("<interactive>"), code.as_ref());
         !ast.input_can_continue()
     }
 
+    /// Show decompiled byte code for given source code.
+    ///
+    /// If compilation failed, `Err` will be returned.
     pub fn decompile(
         &mut self,
         code: impl AsRef<str>,
@@ -256,6 +354,18 @@ impl Interpreter {
         Ok(ast)
     }
 
+    /// Run a piece of diatom source code
+    ///
+    /// # Parameters
+    /// * `code` - Source code
+    /// * `source` - name of source code file or where it is from
+    /// * `color` - render output with ansi color. Set to false if you do not want to print the
+    /// output to terminal.
+    ///
+    /// # Return
+    /// * Return the output of the program
+    /// * If compilation failed or error occurs durning execution, an `Err(String)` that
+    /// illustrates the error is returned.
     pub fn exec(
         &mut self,
         code: impl AsRef<str>,
@@ -263,7 +373,23 @@ impl Interpreter {
         color: bool,
     ) -> Result<String, String> {
         let mut ast = self.compile(code, source, color)?;
-        match self.vm.exec(&self.byte_code) {
+        match self.vm.exec(&self.byte_code, false) {
+            VmError::Yield => Ok(self.vm.take_output()),
+            error_code => {
+                let diagnostic = Diagnostic::from(error_code);
+                ast.diagnoser.push(diagnostic);
+                Err(ast.diagnoser.render(color))
+            }
+        }
+    }
+
+    pub(crate) fn exec_repl(
+        &mut self,
+        code: impl AsRef<str>,
+        color: bool,
+    ) -> Result<String, String> {
+        let mut ast = self.compile(code, OsStr::new("<interactive>"), color)?;
+        match self.vm.exec(&self.byte_code, true) {
             VmError::Yield => Ok(self.vm.take_output()),
             error_code => {
                 let diagnostic = Diagnostic::from(error_code);

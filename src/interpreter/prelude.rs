@@ -1,9 +1,9 @@
 use std::fmt::Write;
 
-use crate::{vm::Vm, DiatomValue, Interpreter};
+use crate::{DiatomValue, Interpreter, State};
 
 pub fn impl_prelude(interpreter: &mut Interpreter) {
-    let print = |vm: &mut Vm, parameters: &[DiatomValue]| {
+    let print = |state: &mut State, parameters: &[DiatomValue]| {
         let mut output = String::new();
         for parameter in parameters {
             match parameter {
@@ -12,7 +12,7 @@ pub fn impl_prelude(interpreter: &mut Interpreter) {
                 DiatomValue::Int(i) => write!(output, "{i}").unwrap(),
                 DiatomValue::Float(f) => write!(output, "{f}").unwrap(),
                 DiatomValue::Str(sid) => {
-                    write!(output, "{}", vm.get_string_by_id(*sid).unwrap()).unwrap()
+                    write!(output, "{}", state.get_string_by_id(*sid).unwrap()).unwrap()
                 }
                 DiatomValue::Ref(rid) => write!(output, "Object@<{rid}>").unwrap(),
             }
@@ -23,12 +23,12 @@ pub fn impl_prelude(interpreter: &mut Interpreter) {
             output.pop();
         }
         output.push('\n');
-        vm.print(&output);
+        state.print(&output);
         Ok(DiatomValue::Unit)
     };
     interpreter.add_extern_function("print".to_string(), print);
 
-    let assert = |_vm: &mut Vm, parameters: &[DiatomValue]| {
+    let assert = |_state: &mut State, parameters: &[DiatomValue]| {
         if parameters.len() != 1 {
             return Err(format!(
                 "Assert expected 1 parameter while {} is provided",
@@ -47,4 +47,26 @@ pub fn impl_prelude(interpreter: &mut Interpreter) {
         }
     };
     interpreter.add_extern_function("assert".to_string(), assert);
+
+    let panic = |state: &mut State, parameters: &[DiatomValue]| {
+        if parameters.len() > 1 {
+            return Err(format!(
+                "Assert expected 1 or 0 parameter while {} is provided",
+                parameters.len()
+            ));
+        }
+        if parameters.is_empty() {
+            return Err("Panic triggered here".to_string());
+        }
+        match parameters[0] {
+            DiatomValue::Str(sid) => {
+                let reason = state.get_string_by_id(sid).unwrap().to_string();
+                Err(format!("Panic triggered: `{reason}`"))
+            }
+            _ => Err(
+                "Panic triggered with invalid type(Can not show non-string parameter)".to_string(),
+            ),
+        }
+    };
+    interpreter.add_extern_function("panic".to_string(), panic);
 }
