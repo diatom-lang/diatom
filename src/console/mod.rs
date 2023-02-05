@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, ffi::OsStr};
 
 use crate::Interpreter;
 
@@ -23,7 +23,7 @@ impl Console {
     }
 
     /// Run this console
-    pub fn run(&mut self) {
+    pub fn run(&mut self, inspect: bool) {
         use std::io::stdout;
 
         use reedline::{
@@ -39,7 +39,7 @@ impl Console {
 
         // Lock std for fast print
         let _ = stdout().lock();
-        println!("\nDiatom Interactive Console v{VERSION}");
+        println!("Diatom Interactive Console v{VERSION}");
 
         // Highlight syntax
         let highlighter = Box::<DiatomHighlighter>::default();
@@ -71,7 +71,12 @@ impl Console {
             let sig = line_editor.read_line(&prompt);
             match sig {
                 Ok(Signal::Success(buffer)) => {
-                    let result = self.interpreter.exec(buffer, self.color);
+                    let result = if inspect {
+                        self.interpreter
+                            .decompile(buffer, OsStr::new("<interactive>"), self.color)
+                    } else {
+                        self.interpreter.exec_repl(buffer, self.color)
+                    };
                     match result {
                         Ok(s) => print!("{s}"),
                         Err(s) => eprint!("{s}"),

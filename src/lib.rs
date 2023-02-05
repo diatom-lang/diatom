@@ -9,7 +9,7 @@
 //!
 //! ## How to use this interpreter
 //!
-//! See examples in [Parser].
+//! See examples in [Interpreter].
 //!
 //!
 mod diagnostic;
@@ -17,6 +17,8 @@ mod frontend;
 mod interpreter;
 mod vm;
 pub use interpreter::Interpreter;
+pub use vm::Reg as DiatomValue;
+pub use vm::State;
 /// The version of this build
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

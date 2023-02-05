@@ -1,34 +1,43 @@
 use std::{
-    cell::UnsafeCell,
+    cell::{RefCell, UnsafeCell},
     ops::{Index, IndexMut},
     rc::Rc,
 };
 
-use super::{
-    string_pool::{StringId, StringPool},
-    FuncId, Ip, Object,
-};
+use crate::State;
 
-pub type GcId = usize;
+use super::{string_pool::StringPool, FuncId, Ip, Object};
+
+/// Reference id of heap allocated object
+pub type RefId = usize;
 
 enum Mark {
     White,
 }
 
 pub enum GcObject {
-    Closure(FuncId, Vec<Rc<UnsafeCell<Reg>>>),
+    Closure {
+        func_id: FuncId,
+        parameters: usize,
+        reg_size: usize,
+        /// local id, shared reg
+        captured: Vec<(usize, Rc<UnsafeCell<Reg>>)>,
+    },
+    #[allow(clippy::type_complexity)]
+    NativeFunction(Rc<RefCell<dyn Fn(&mut State, &[Reg]) -> Result<Reg, String>>>),
     _Object(Object),
 }
 
-#[derive(Default)]
+/// Diatom's unboxed value type
+#[derive(Default, Clone)]
 pub enum Reg {
     #[default]
     Unit,
     Bool(bool),
     Int(i64),
     Float(f64),
-    Str(StringId),
-    Ref(GcId),
+    Str(usize),
+    Ref(RefId),
 }
 
 enum StackReg {
@@ -48,7 +57,7 @@ pub struct Gc {
     pool: Vec<(GcObject, Mark)>,
     free: Vec<usize>,
     call_stack: CallStack,
-    string_pool: UnsafeCell<StringPool>,
+    string_pool: StringPool,
 }
 
 impl Gc {
@@ -65,16 +74,25 @@ impl Gc {
                 },
                 write_back: None,
             },
-            string_pool: UnsafeCell::new(StringPool::new()),
+            string_pool: StringPool::new(),
         }
     }
 
-    pub fn alloc(&mut self, obj: GcObject) -> GcId {
+    pub fn alloc(&mut self, obj: GcObject) -> RefId {
         if self.free.is_empty() {
             self.pool.push((obj, Mark::White));
             self.pool.len() - 1
         } else {
             self.free.pop().unwrap()
+        }
+    }
+
+    pub fn alloc_reg_file(&mut self, n: usize) {
+        let stack = &mut self.call_stack;
+        if n >= stack.regs.len() {
+            (0..=n - stack.regs.len())
+                .into_iter()
+                .for_each(|_| stack.regs.push(StackReg::Reg(Reg::Unit)))
         }
     }
 
@@ -87,20 +105,17 @@ impl Gc {
         }
     }
 
-    pub fn clone_reg(&self, reg: &Reg) -> Reg {
-        match reg {
-            Reg::Unit => Reg::Unit,
-            Reg::Bool(b) => Reg::Bool(*b),
-            Reg::Int(i) => Reg::Int(*i),
-            Reg::Float(f) => Reg::Float(*f),
-            Reg::Str(sid) => Reg::Str(unsafe { (*(self.string_pool.get())).clone_str(sid) }),
-            Reg::Ref(r) => Reg::Ref(*r),
-        }
-    }
-
-    pub fn share_reg(&mut self, id: usize) -> Rc<UnsafeCell<Reg>> {
+    pub fn share_reg(&mut self, id: usize, depth: usize) -> Rc<UnsafeCell<Reg>> {
         debug_assert!(self.call_stack.regs.len() > id);
-        let shared_reg = unsafe { self.call_stack.regs.get_unchecked_mut(id) };
+        let mut call_stack = &mut self.call_stack;
+        debug_assert!(depth > 0);
+        // relative depth to capture and make_closure is 1
+        let depth = depth - 1;
+        for _ in 0..depth {
+            debug_assert!(call_stack.prev.is_some());
+            call_stack = unsafe { call_stack.prev.as_mut().unwrap_unchecked().as_mut() }
+        }
+        let shared_reg = unsafe { call_stack.regs.get_unchecked_mut(id) };
         let reg = std::mem::replace(shared_reg, StackReg::Reg(Reg::Unit));
         match reg {
             StackReg::Reg(reg) => {
@@ -115,23 +130,13 @@ impl Gc {
     /// Write reg to id
     ///
     /// Automatically extend reg file size if n > regs.len()
-    pub fn write_reg(&mut self, n: usize, mut reg: Reg) {
+    pub fn write_reg(&mut self, n: usize, reg: Reg) {
         let stack = &mut self.call_stack;
-        if n >= stack.regs.len() {
-            (0..=n - stack.regs.len())
-                .into_iter()
-                .for_each(|_| stack.regs.push(StackReg::Reg(Reg::Unit)))
-        }
-
         debug_assert!(stack.regs.len() > n);
         let prev = unsafe { stack.regs.get_unchecked_mut(n) };
-        let prev = match prev {
-            StackReg::Reg(prev) => prev,
-            StackReg::Shared(rc) => unsafe { &mut *rc.as_ref().get() },
-        };
-        std::mem::swap(prev, &mut reg);
-        if let Reg::Str(sid) = reg {
-            self.string_pool.get_mut().delete(sid);
+        match prev {
+            StackReg::Reg(r) => *r = reg,
+            StackReg::Shared(rc) => *unsafe { &mut *rc.as_ref().get() } = reg,
         }
     }
 
@@ -144,19 +149,7 @@ impl Gc {
         }
 
         debug_assert!(stack.regs.len() > n);
-        let prev = std::mem::replace(
-            unsafe { stack.regs.get_unchecked_mut(n) },
-            StackReg::Shared(reg),
-        );
-        let prev = match prev {
-            StackReg::Reg(prev) => prev,
-            // This operation is only used when function is initializing
-            // This can not be a shared reg
-            StackReg::Shared(_) => unreachable!(),
-        };
-        if let Reg::Str(sid) = prev {
-            self.string_pool.get_mut().delete(sid);
-        }
+        *unsafe { stack.regs.get_unchecked_mut(n) } = StackReg::Shared(reg)
     }
 
     pub fn alloc_call_stack(&mut self, return_addr: Ip, write_back: Option<usize>) {
@@ -181,19 +174,11 @@ impl Gc {
         };
 
         let CallStack {
-            regs,
+            regs: _,
             return_addr,
             write_back,
             prev: _,
         } = std::mem::replace(&mut self.call_stack, call_stack_prev);
-        regs.into_iter().for_each(|reg| {
-            // Delete string ref count
-            // Shared Reg must be referenced by at least one closure
-            // do not need to delete here
-            if let StackReg::Reg(Reg::Str(sid)) = reg {
-                self.string_pool.get_mut().delete(sid)
-            }
-        });
         Some((return_addr, write_back))
     }
 
@@ -203,25 +188,28 @@ impl Gc {
         }
     }
 
-    pub fn get_string_by_id(&self, sid: &StringId) -> &str {
-        unsafe { &(*self.string_pool.get())[sid] }
+    pub fn string_pool(&mut self) -> &mut StringPool {
+        &mut self.string_pool
     }
 
-    #[allow(clippy::mut_from_ref)]
-    pub fn string_pool(&self) -> &mut StringPool {
-        unsafe { &mut *self.string_pool.get() }
+    pub fn get_string_by_id_checked(&self, id: usize) -> Option<&str> {
+        self.string_pool.get(id)
+    }
+
+    pub fn get_string_by_id(&self, id: usize) -> &str {
+        &self.string_pool[id]
     }
 }
 
-impl Index<GcId> for Gc {
+impl Index<RefId> for Gc {
     type Output = GcObject;
-    fn index(&self, index: GcId) -> &Self::Output {
+    fn index(&self, index: RefId) -> &Self::Output {
         &self.pool[index].0
     }
 }
 
-impl IndexMut<GcId> for Gc {
-    fn index_mut(&mut self, index: GcId) -> &mut Self::Output {
+impl IndexMut<RefId> for Gc {
+    fn index_mut(&mut self, index: RefId) -> &mut Self::Output {
         &mut self.pool[index].0
     }
 }

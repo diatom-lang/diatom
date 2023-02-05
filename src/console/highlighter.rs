@@ -3,10 +3,9 @@ use nu_ansi_term::{Color, Style};
 use reedline::{Highlighter, StyledText};
 use regex::{self, Regex};
 
-const KEYWORDS: [&str; 25] = [
-    "where", "until", "end", "if", "then", "else", "elsif", "case", "of", "in", "for", "do",
-    "assert", "return", "break", "continue", "loop", "data", "def", "begin", "and", "or", "not",
-    "require", "fn",
+const KEYWORDS: [&str; 20] = [
+    "until", "end", "if", "then", "else", "elsif", "in", "for", "do", "return", "break",
+    "continue", "loop", "def", "begin", "and", "or", "not", "require", "fn",
 ];
 
 const KEY_VALUES: [&str; 3] = ["true", "false", "self"];
@@ -29,7 +28,7 @@ lazy_static! {
     static ref NUM_STYLE: Style = Style::new().fg(Color::Green);
     static ref STR_STYLE: Style = Style::new().fg(Color::LightMagenta);
     static ref DEFAULT_STYLE: Style = Style::default();
-    // Match valid integer or float point bumber
+    // Match valid integer or float point number
     static ref RE_NUM: Regex =
         Regex::new("^(([0][Xx][_0-9a-fA-F]+)|([0][Bb][_0-1]+)|([0][Oo][_0-7]+)|([0-9][_0-9]*(\\.[_0-9]+){0,1}([Ee][\\+\\-]{0,1}[0-9_]*){0, 1}))")
             .unwrap();

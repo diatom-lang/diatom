@@ -18,8 +18,6 @@ pub enum Keyword {
     False,
     /// do
     Do,
-    /// where
-    Where,
     /// until
     Until,
     /// end
@@ -32,16 +30,10 @@ pub enum Keyword {
     Else,
     /// elsif
     Elsif,
-    /// case
-    Case,
-    /// of
-    Of,
     /// in
     In,
     /// for
     For,
-    /// assert
-    Assert,
     /// return
     Return,
     /// break
@@ -50,8 +42,6 @@ pub enum Keyword {
     Continue,
     /// loop
     Loop,
-    /// data
-    Data,
     /// def
     Def,
     /// fn
@@ -154,27 +144,22 @@ impl Display for Keyword {
             Keyword::True => "true",
             Keyword::False => "false",
             Keyword::Do => "do",
-            Keyword::Where => "where",
             Keyword::Until => "until",
             Keyword::End => "end",
             Keyword::If => "if",
             Keyword::Then => "then",
             Keyword::Else => "else",
             Keyword::Elsif => "elsif",
-            Keyword::Case => "case",
             Keyword::In => "in",
             Keyword::For => "for",
-            Keyword::Assert => "assert",
             Keyword::Return => "return",
             Keyword::Break => "break",
             Keyword::Continue => "continue",
             Keyword::Loop => "loop",
-            Keyword::Data => "data",
             Keyword::Def => "def",
             Keyword::Begin => "begin",
             Keyword::Fn => "fn",
             Keyword::Require => "require",
-            Keyword::Of => "of",
         };
         write!(f, "{name}")
     }

@@ -13,10 +13,7 @@ use super::{
     Lexer,
 };
 use ahash::AHashMap;
-use ast::{
-    Ast, Const, ConstPattern, Expr, Expr_, OpInfix, OpPostfix, OpPrefix, Pattern, Pattern_, Stmt,
-    Stmt_,
-};
+use ast::{Ast, Const, Expr, OpInfix, OpPostfix, OpPrefix, Stmt};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::{
@@ -56,7 +53,6 @@ macro_rules! expr_start_pattern {
         Token::Key(
             Keyword::Fn
                 | Keyword::Require
-                | Keyword::Case
                 | Keyword::If
                 | Keyword::Begin
                 | Keyword::True
@@ -152,10 +148,7 @@ impl Parser {
             let s_split = s.split('.').map(|x| x.to_string()).collect::<Vec<_>>();
             if !RE.is_match(&s) || s_split.is_empty() || s.starts_with('.') | s.ends_with('.') {
                 ast.add_diagnostic(to_diagnostic(ErrorCode::InvalidModuleString, iter.loc()));
-                return Expr {
-                    loc: iter.loc(),
-                    val: Expr_::Error,
-                };
+                return Expr::Error;
             };
             s_split
         } else {
@@ -163,10 +156,7 @@ impl Parser {
                 ErrorCode::RequireWrongArgument,
                 iter.next_loc(),
             ));
-            return Expr {
-                loc: iter.loc(),
-                val: Expr_::Error,
-            };
+            return Expr::Error;
         };
         // search for file
         let mut search_path = self.search_path.clone();
@@ -218,9 +208,9 @@ impl Parser {
                 }
             }
 
-            return Expr {
+            return Expr::Module {
                 loc: start.start..iter.loc().end,
-                val: Expr_::Module(DisplayableOsString::new(path.as_os_str().to_os_string())),
+                path: DisplayableOsString::new(path.as_os_str().to_os_string()),
             };
         }
 
@@ -234,10 +224,7 @@ impl Parser {
             iter.loc(),
         ));
 
-        Expr {
-            loc: iter.loc(),
-            val: Expr_::Error,
-        }
+        Expr::Error
     }
 
     fn consume_stmt(
@@ -252,17 +239,11 @@ impl Parser {
         match iter.peek() {
             Some(Key(Break)) => {
                 iter.next();
-                Stmt {
-                    loc: start,
-                    val: Stmt_::Break,
-                }
+                Stmt::Break { loc: start }
             }
             Some(Key(Continue)) => {
                 iter.next();
-                Stmt {
-                    loc: start,
-                    val: Stmt_::Continue,
-                }
+                Stmt::Continue { loc: start }
             }
             Some(Key(Return)) => {
                 iter.next();
@@ -270,14 +251,14 @@ impl Parser {
                     Some(expr_start_pattern!()) => {
                         let expr = self.consume_expr(iter, ast, 0, not_take_on_error);
                         let end = iter.loc();
-                        Stmt {
+                        Stmt::Return {
                             loc: start.start..end.end,
-                            val: Stmt_::Return(Some(expr)),
+                            value: Some(expr),
                         }
                     }
-                    _ => Stmt {
+                    _ => Stmt::Return {
                         loc: start,
-                        val: Stmt_::Return(None),
+                        value: None,
                     },
                 }
             }
@@ -285,12 +266,11 @@ impl Parser {
             Some(expr_start_pattern!()) => {
                 let expr = self.consume_expr(iter, ast, 0, not_take_on_error);
                 let end = iter.loc();
-                Stmt {
+                Stmt::Expr {
                     loc: start.start..end.end,
-                    val: Stmt_::Expr(expr),
+                    expr,
                 }
             }
-            Some(Key(Data)) => self.consume_data(iter, ast),
             Some(Key(Loop | Until)) => self.consume_loop(iter, ast),
             Some(Key(For)) => self.consume_for(iter, ast),
             Some(token) => {
@@ -298,19 +278,13 @@ impl Parser {
                 iter.next();
                 ast.add_diagnostic(to_diagnostic(
                     ErrorCode::UnexpectedToken(Some(token), None, None),
-                    start.clone(),
+                    start,
                 ));
-                Stmt {
-                    loc: start,
-                    val: Stmt_::Error,
-                }
+                Stmt::Error
             }
             None => {
-                ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, start.clone()));
-                Stmt {
-                    loc: start,
-                    val: Stmt_::Error,
-                }
+                ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, start));
+                Stmt::Error
             }
         }
     }
@@ -318,6 +292,7 @@ impl Parser {
     /// Consume an iterator to an expected operator or EOF
     /// Errors are written to `self.diagnoser`
     /// Return true if eof met otherwise false
+    #[must_use]
     fn consume_to_op(
         &mut self,
         iter: &mut TokenIterator,
@@ -364,6 +339,7 @@ impl Parser {
     /// Consume an iterator to an expected keyword or EOF
     /// Errors are written to `self.diagnoser`
     /// Return true if eof met otherwise false
+    #[must_use]
     fn consume_to_key(
         &mut self,
         iter: &mut TokenIterator,
@@ -407,7 +383,7 @@ impl Parser {
         }
     }
 
-    fn consume_cond_then(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Option<Expr> {
+    fn consume_condition_then(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Option<Expr> {
         use Keyword::*;
         use Token::*;
         let start = iter.loc();
@@ -426,62 +402,44 @@ impl Parser {
         use Token::*;
         iter.next();
         let start = iter.loc();
-        let mut exprs: Vec<Expr> = vec![];
-        match self.consume_cond_then(iter, ast) {
-            Some(expr) => exprs.push(expr),
+        let mut conditional = vec![];
+        let mut condition;
+        match self.consume_condition_then(iter, ast) {
+            Some(expr) => condition = expr,
             None => {
-                let end = iter.loc();
-                return Expr {
-                    loc: start.start..end.end,
-                    val: Expr_::Error,
-                };
+                return Expr::Error;
             }
         }
         // match block
         let mut block: Vec<Stmt> = vec![];
-        let mut block_start = iter.next_loc();
         loop {
             match iter.peek() {
                 Some(Key(Elsif)) => {
-                    exprs.push(Expr {
-                        loc: block_start.start..iter.loc().end,
-                        val: Expr_::Block(block),
-                    });
-                    block = vec![];
                     iter.next();
-                    match self.consume_cond_then(iter, ast) {
+                    match self.consume_condition_then(iter, ast) {
                         Some(expr) => {
-                            exprs.push(expr);
+                            conditional.push((condition, block));
+                            condition = expr;
+                            block = vec![];
                         }
                         None => {
-                            let end = iter.loc();
-                            return Expr {
-                                loc: start.start..end.end,
-                                val: Expr_::Error,
-                            };
+                            return Expr::Error;
                         }
                     }
-                    block_start = iter.next_loc();
                 }
                 Some(Key(Else)) => {
-                    exprs.push(Expr {
-                        loc: block_start.start..iter.loc().end,
-                        val: Expr_::Block(block),
-                    });
+                    conditional.push((condition, block));
                     block = vec![];
                     iter.next();
                     loop {
                         match iter.peek() {
                             Some(Key(End)) => {
-                                exprs.push(Expr {
-                                    loc: block_start.start..iter.loc().end,
-                                    val: Expr_::Block(block),
-                                });
                                 iter.next();
                                 let end = iter.loc();
-                                return Expr {
+                                return Expr::If {
                                     loc: start.start..end.end,
-                                    val: Expr_::If(exprs),
+                                    conditional,
+                                    default: Some(block),
                                 };
                             }
                             Some(_) => {
@@ -491,24 +449,18 @@ impl Parser {
                             None => {
                                 let end = iter.loc();
                                 ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, end));
-                                return Expr {
-                                    loc: 0..0,
-                                    val: Expr_::Error,
-                                };
+                                return Expr::Error;
                             }
                         }
                     }
                 }
                 Some(Key(End)) => {
-                    exprs.push(Expr {
-                        loc: block_start.start..iter.loc().end,
-                        val: Expr_::Block(block),
-                    });
                     iter.next();
                     let end = iter.loc();
-                    return Expr {
+                    return Expr::If {
                         loc: start.start..end.end,
-                        val: Expr_::If(exprs),
+                        conditional,
+                        default: None,
                     };
                 }
                 Some(_) => {
@@ -521,10 +473,7 @@ impl Parser {
                         ErrorCode::UnexpectedToken(None, Some(Key(Else)), Some((Key(If), start))),
                         end,
                     ));
-                    return Expr {
-                        loc: 0..0,
-                        val: Expr_::Error,
-                    };
+                    return Expr::Error;
                 }
             }
         }
@@ -538,35 +487,28 @@ impl Parser {
         let vars = self.consume_expr(iter, ast, 0, Some(Key(In)));
         // Consume "in"
         if self.consume_to_key(iter, ast, In, Some((Key(For), start.clone()))) {
-            return Stmt {
-                loc: start.start..iter.loc().end,
-                val: Stmt_::Error,
-            };
+            return Stmt::Error;
         };
         let iterator = self.consume_expr(iter, ast, 0, Some(Key(Do)));
         if self.consume_to_key(iter, ast, Do, Some((Key(For), start.clone()))) {
-            return Stmt {
-                loc: start.start..iter.loc().end,
-                val: Stmt_::Error,
-            };
+            return Stmt::Error;
         };
-        let mut stmts = vec![];
+        let mut body = vec![];
         loop {
             match iter.peek() {
                 Some(Key(End)) => {
                     iter.next();
-                    return Stmt {
+                    return Stmt::For {
                         loc: start.start..iter.loc().end,
-                        val: Stmt_::For(Box::new(vars), Box::new(iterator), stmts),
+                        loop_variable: Box::new(vars),
+                        iterator: Box::new(iterator),
+                        body,
                     };
                 }
-                Some(_) => stmts.push(self.consume_stmt(iter, ast, Some(Key(End)))),
+                Some(_) => body.push(self.consume_stmt(iter, ast, Some(Key(End)))),
                 None => {
                     ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                    return Stmt {
-                        loc: start.start..iter.loc().end,
-                        val: Stmt_::Error,
-                    };
+                    return Stmt::Error;
                 }
             }
         }
@@ -577,226 +519,35 @@ impl Parser {
         use Token::*;
         let key = iter.next().cloned();
         let start = iter.loc();
-        let cond = match key {
+        let condition = match key {
             Some(Key(Loop)) => None,
             Some(Key(Until)) => {
                 let stmt = self.consume_expr(iter, ast, 0, None);
                 if matches!(iter.peek(), None) {
-                    return Stmt {
-                        loc: start.start..iter.loc().end,
-                        val: Stmt_::Error,
-                    };
+                    return Stmt::Error;
                 };
-                self.consume_to_key(iter, ast, Do, Some((Key(Until), start.clone())));
+                if self.consume_to_key(iter, ast, Do, Some((Key(Until), start.clone()))) {
+                    return Stmt::Error;
+                };
                 Some(stmt)
             }
             _ => unreachable!(),
         };
-        let mut stmts = vec![];
+        let mut body = vec![];
         loop {
             match iter.peek() {
                 Some(Key(End)) => {
                     iter.next();
-                    return Stmt {
+                    return Stmt::Loop {
                         loc: start.start..iter.loc().end,
-                        val: Stmt_::Loop(cond, stmts),
+                        condition,
+                        body,
                     };
                 }
-                Some(_) => stmts.push(self.consume_stmt(iter, ast, Some(Key(End)))),
+                Some(_) => body.push(self.consume_stmt(iter, ast, Some(Key(End)))),
                 None => {
                     ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                    return Stmt {
-                        loc: start.start..iter.loc().end,
-                        val: Stmt_::Error,
-                    };
-                }
-            }
-        }
-    }
-
-    fn consume_data(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Stmt {
-        use Keyword::*;
-        use Operator::*;
-        use Token::*;
-
-        iter.next();
-        let start = iter.loc();
-        let name = match iter.peek() {
-            Some(Id(name)) => {
-                let name = name.clone();
-                iter.next();
-                name
-            }
-            Some(Key(End)) => {
-                iter.next();
-                let end = iter.loc();
-                ast.add_diagnostic(to_diagnostic(
-                    ErrorCode::MissingStmt(start.clone()),
-                    end.clone(),
-                ));
-                return Stmt {
-                    loc: start.start..end.end,
-                    val: Stmt_::Error,
-                };
-            }
-            Some(token) => {
-                let token = token.clone();
-                iter.next();
-                let loc = iter.loc();
-                ast.add_diagnostic(to_diagnostic(
-                    ErrorCode::UnexpectedToken(
-                        Some(token),
-                        Some(Id("<name of this data type>".to_string())),
-                        Some((Key(Keyword::Data), start.clone())),
-                    ),
-                    loc,
-                ));
-                "Error".to_string()
-            }
-            None => {
-                ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                let end = iter.loc();
-                return Stmt {
-                    loc: start.start..end.end,
-                    val: Stmt_::Error,
-                };
-            }
-        };
-
-        self.consume_to_op(iter, ast, Assign, Some((Key(Data), start.clone())));
-
-        let mut subtypes = vec![];
-        let mut current_subtype: Option<(String, Vec<_>)> = None;
-
-        loop {
-            match iter.peek() {
-                Some(Id(name)) => {
-                    if let Some(subtype) = &mut current_subtype {
-                        subtype.1.push(name.clone());
-                    } else {
-                        current_subtype = Some((name.clone(), vec![]));
-                    }
-                    iter.next();
-                }
-                Some(Op(BitOr)) => {
-                    iter.next();
-                    if let Some(subtype) = current_subtype {
-                        subtypes.push(subtype);
-                        current_subtype = None;
-                    } else {
-                        ast.add_diagnostic(to_diagnostic(
-                            ErrorCode::MissingConstructor,
-                            iter.loc(),
-                        ));
-                    }
-                }
-                Some(Key(Def | End)) => {
-                    break;
-                }
-                Some(token) => {
-                    let token = token.clone();
-                    iter.next();
-                    let loc = iter.loc();
-                    ast.add_diagnostic(to_diagnostic(
-                        ErrorCode::UnexpectedToken(
-                            Some(token),
-                            None,
-                            Some((Key(Data), start.clone())),
-                        ),
-                        loc,
-                    ));
-                    iter.next();
-                }
-                None => {
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                    let end = iter.loc();
-                    return Stmt {
-                        loc: start.start..end.end,
-                        val: Stmt_::Error,
-                    };
-                }
-            }
-        }
-
-        if let Some(subtype) = current_subtype {
-            subtypes.push(subtype);
-        } else {
-            ast.add_diagnostic(to_diagnostic(ErrorCode::MissingConstructor, iter.loc()));
-        }
-
-        let mut associated_funcs = vec![];
-        loop {
-            match iter.peek() {
-                Some(Key(Def)) => {
-                    let stmt = self.consume_def(iter, ast);
-                    associated_funcs.push(stmt);
-                }
-                Some(Key(End)) => {
-                    iter.next();
-                    return Stmt {
-                        loc: start.start..iter.loc().end,
-                        val: Stmt_::Data(name, subtypes, associated_funcs),
-                    };
-                }
-                Some(token) => {
-                    let token = token.clone();
-                    iter.next();
-                    ast.add_diagnostic(to_diagnostic(
-                        ErrorCode::UnexpectedToken(
-                            Some(token),
-                            Some(Key(Def)),
-                            Some((Key(Data), start.clone())),
-                        ),
-                        iter.loc(),
-                    ));
-                }
-                None => {
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                    return Stmt {
-                        loc: start.start..iter.loc().end,
-                        val: Stmt_::Error,
-                    };
-                }
-            }
-        }
-    }
-
-    fn consume_case(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Expr {
-        use Keyword::*;
-        use Operator::*;
-        use Token::*;
-        iter.next();
-        let start = iter.loc();
-        let match_expr = self.consume_expr(iter, ast, 0, Some(Key(Of)));
-        self.consume_to_key(iter, ast, Of, Some((Key(Case), start.clone())));
-        let mut arms = vec![];
-        loop {
-            match iter.peek() {
-                Some(Key(End)) => {
-                    iter.next();
-                    return Expr {
-                        loc: start.start..iter.loc().end,
-                        val: Expr_::Case(Box::new(match_expr), arms),
-                    };
-                }
-                Some(_) => {
-                    let pattern = self.consume_pattern(iter, ast, 0);
-                    let guard = if let Some(Key(If)) = iter.peek() {
-                        iter.next();
-                        Some(self.consume_expr(iter, ast, 0, Some(Op(Arm))))
-                    } else {
-                        None
-                    };
-                    self.consume_to_op(iter, ast, Arm, None);
-                    let stmt = self.consume_stmt(iter, ast, None);
-                    arms.push((pattern, guard, stmt));
-                }
-                None => {
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                    return Expr {
-                        loc: start.start..iter.loc().end,
-                        val: Expr_::Error,
-                    };
+                    return Stmt::Error;
                 }
             }
         }
@@ -812,7 +563,7 @@ impl Parser {
         loop {
             match iter.peek() {
                 Some(Id(name)) => {
-                    parameters.push(name.clone());
+                    parameters.push((name.clone(), iter.next_loc()));
                     iter.next();
                 }
                 Some(Op(Assign)) => {
@@ -832,17 +583,15 @@ impl Parser {
                 }
                 None => {
                     ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                    return Expr {
-                        loc: start.start..iter.loc().end,
-                        val: Expr_::Error,
-                    };
+                    return Expr::Error;
                 }
             }
         }
         let expr = self.consume_expr(iter, ast, 0, None);
-        Expr {
+        Expr::Fn {
             loc: start.start..iter.loc().end,
-            val: Expr_::Fn(parameters, Box::new(expr)),
+            parameters,
+            body: Box::new(expr),
         }
     }
 
@@ -871,30 +620,26 @@ impl Parser {
             }
             None => {
                 ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                return Stmt {
-                    loc: start.start..iter.loc().end,
-                    val: Stmt_::Error,
-                };
+                return Stmt::Error;
             }
         };
         let eof = self.consume_to_op(iter, ast, LPar, Some((Key(Def), start.clone())));
         if eof {
-            return Stmt {
-                loc: start.start..iter.loc().end,
-                val: Stmt_::Error,
-            };
+            return Stmt::Error;
         }
-        let mut decl = vec![];
+        let mut parameters = vec![];
         loop {
             match iter.peek() {
                 Some(Id(name)) => {
                     let name = name.clone();
                     iter.next();
-                    decl.push(name);
+                    parameters.push(name);
                 }
                 Some(Op(RPar)) => {
                     iter.next();
-                    self.consume_to_op(iter, ast, Assign, Some((Key(Def), start.clone())));
+                    if self.consume_to_op(iter, ast, Assign, Some((Key(Def), start.clone()))) {
+                        return Stmt::Error;
+                    };
                     break;
                 }
                 Some(token) => {
@@ -905,84 +650,30 @@ impl Parser {
                 }
                 None => {
                     ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                    return Stmt {
-                        loc: start.start..iter.loc().end,
-                        val: Stmt_::Error,
-                    };
+                    return Stmt::Error;
                 }
             }
         }
-        let mut stmts = vec![];
-        let mut binds = vec![];
+        let mut body = vec![];
         loop {
             match iter.peek() {
                 Some(Key(End)) => {
                     iter.next();
                     return if let Some(name) = name {
-                        Stmt {
+                        Stmt::Def {
                             loc: start.start..iter.loc().end,
-                            val: Stmt_::Def(name, decl, stmts, binds),
+                            name,
+                            parameters,
+                            body,
                         }
                     } else {
-                        Stmt {
-                            loc: start.start..iter.loc().end,
-                            val: Stmt_::Error,
-                        }
+                        Stmt::Error
                     };
                 }
-                Some(Key(Where)) => {
-                    iter.next();
-                    loop {
-                        match iter.peek2() {
-                            (Some(Id(name)), Some(Op(Assign))) => {
-                                let name = name.clone();
-                                iter.next();
-                                iter.next();
-                                let expr = self.consume_expr(iter, ast, 0, Some(Key(End)));
-                                binds.push((name.clone(), expr));
-                            }
-                            (Some(Key(End)), _) => {
-                                iter.next();
-                                return if let Some(name) = name {
-                                    Stmt {
-                                        loc: start.start..iter.loc().end,
-                                        val: Stmt_::Def(name, decl, stmts, binds),
-                                    }
-                                } else {
-                                    Stmt {
-                                        loc: start.start..iter.loc().end,
-                                        val: Stmt_::Error,
-                                    }
-                                };
-                            }
-                            (Some(token), _) => {
-                                let token = token.clone();
-                                iter.next();
-                                ast.add_diagnostic(to_diagnostic(
-                                    ErrorCode::UnexpectedToken(Some(token), None, None),
-                                    iter.loc(),
-                                ));
-                            }
-                            (None, _) => {
-                                ast.add_diagnostic(to_diagnostic(
-                                    ErrorCode::UnexpectedEof,
-                                    iter.loc(),
-                                ));
-                                return Stmt {
-                                    loc: start.start..iter.loc().end,
-                                    val: Stmt_::Error,
-                                };
-                            }
-                        }
-                    }
-                }
-                Some(_) => stmts.push(self.consume_stmt(iter, ast, Some(Token::Key(Keyword::End)))),
+                Some(_) => body.push(self.consume_stmt(iter, ast, Some(Token::Key(Keyword::End)))),
                 None => {
                     ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                    return Stmt {
-                        loc: start.start..iter.loc().end,
-                        val: Stmt_::Error,
-                    };
+                    return Stmt::Error;
                 }
             }
         }
@@ -991,93 +682,62 @@ impl Parser {
     fn consume_block(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Expr {
         iter.next();
         let start = iter.loc();
-        let mut stmts: Vec<Stmt> = vec![];
+        let mut body: Vec<Stmt> = vec![];
         loop {
             match iter.peek() {
                 Some(Token::Key(Keyword::End)) => {
                     iter.next();
                     let end = iter.loc();
-                    return Expr {
+                    return Expr::Block {
                         loc: start.start..end.end,
-                        val: Expr_::Block(stmts),
+                        body,
                     };
                 }
                 Some(_) => {
                     let stmt = self.consume_stmt(iter, ast, Some(Token::Key(Keyword::End)));
-                    stmts.push(stmt);
+                    body.push(stmt);
                 }
                 None => {
                     let end = iter.loc();
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, end.clone()));
-                    return Expr {
-                        loc: start.start..end.end,
-                        val: Expr_::Block(stmts),
-                    };
+                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, end));
+                    return Expr::Error;
                 }
             }
         }
     }
 
-    fn consume_set_or_dict(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Expr {
+    fn consume_table(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Expr {
         use Operator::*;
         use Token::*;
         iter.next();
         let start = iter.loc();
-        let mut keys = vec![];
-        let mut vals = vec![];
-        let next2 = iter.peek2();
-        if let (Some(Op(Colon)), Some(Op(RBrc))) = next2 {
-            iter.next();
-            iter.next();
-            return Expr {
-                loc: start.start..iter.loc().end,
-                val: Expr_::Const(Const::Dict(vec![], vec![])),
-            };
-        };
+        let mut key_vals = vec![];
         loop {
             match iter.peek() {
                 Some(Op(RBrc)) => {
                     iter.next();
-                    return if vals.is_empty() {
-                        Expr {
-                            loc: start.start..iter.loc().end,
-                            val: Expr_::Const(Const::Set(keys)),
-                        }
-                    } else {
-                        Expr {
-                            loc: start.start..iter.loc().end,
-                            val: Expr_::Const(Const::Dict(keys, vals)),
-                        }
+                    return Expr::Const {
+                        loc: start.start..iter.loc().end,
+                        value: Const::Table(key_vals),
                     };
                 }
                 Some(_) => {
-                    let key = self.consume_expr(iter, ast, 0, Some(Op(RBrc)));
-                    match (keys.len(), vals.len(), iter.peek()) {
-                        (x, y, Some(Op(Colon))) if x == y => {
-                            iter.next();
-                            let val = self.consume_expr(iter, ast, 0, Some(Op(RBrc)));
-                            keys.push(key);
-                            vals.push(val);
-                        }
-                        (0, 0, _) => {
-                            keys.push(key);
-                        }
-                        (x, y, _) if x == y => {
-                            ast.add_diagnostic(to_diagnostic(
-                                ErrorCode::MissingMapValue,
-                                iter.loc(),
-                            ));
-                        }
-                        _ => {
-                            keys.push(key);
-                        }
+                    if let Some(Token::Id(id)) = iter.peek() {
+                        let key = id.clone();
+                        iter.next();
+                        if self.consume_to_op(iter, ast, Assign, None) {
+                            return Expr::Error;
+                        };
+                        let value = self.consume_expr(iter, ast, 0, Some(Op(RBrc)));
+                        key_vals.push((key, value));
+                    } else {
+                        let loc = iter.next_loc();
+                        ast.add_diagnostic(to_diagnostic(ErrorCode::InvalidTableKey, loc));
+                        iter.next();
                     }
                 }
                 None => {
-                    return Expr {
-                        loc: start.start..iter.loc().end,
-                        val: Expr_::Error,
-                    };
+                    return Expr::Error;
                 }
             }
         }
@@ -1103,58 +763,60 @@ impl Parser {
             Some(Id(s)) => {
                 let s = s.clone();
                 iter.next();
-                Expr {
+                Expr::Id {
                     loc: start.clone(),
-                    val: Expr_::Id(s),
+                    name: s,
                 }
             }
             Some(Key(Fn)) => self.consume_fn(iter, ast),
             Some(Str(s)) => {
                 let s = s.clone();
                 iter.next();
-                Expr {
+                Expr::Const {
                     loc: start.clone(),
-                    val: Expr_::Const(Const::Str(s)),
+                    value: Const::Str(s),
                 }
             }
             Some(Float(f)) => {
                 let f = *f;
                 iter.next();
-                Expr {
+                Expr::Const {
                     loc: start.clone(),
-                    val: Expr_::Const(Const::Float(f)),
+                    value: Const::Float(f),
                 }
             }
             Some(Integer(i)) => {
                 let i = *i;
                 iter.next();
-                Expr {
+                Expr::Const {
                     loc: start.clone(),
-                    val: Expr_::Const(Const::Int(i)),
+                    value: Const::Int(i),
                 }
             }
             Some(Key(val @ (True | False))) => {
                 let val = matches!(val, Keyword::True);
                 iter.next();
-                Expr {
+                Expr::Const {
                     loc: start.clone(),
-                    val: Expr_::Const(Const::Bool(val)),
+                    value: Const::Bool(val),
                 }
             }
             Some(Op(LPar)) => {
                 iter.next();
                 if matches!(iter.peek(), Some(Op(RPar))) {
                     iter.next();
-                    Expr {
-                        loc: start.start..iter.loc().end,
-                        val: Expr_::Const(Const::Unit),
+                    Expr::Const {
+                        loc: start.clone(),
+                        value: Const::Unit,
                     }
                 } else {
                     let lhs = self.consume_expr(iter, ast, 0, Some(Op(RPar)));
-                    self.consume_to_op(iter, ast, RPar, Some((Op(LPar), start.clone())));
-                    Expr {
-                        loc: start.start..iter.loc().end,
-                        val: Expr_::Parentheses(Box::new(lhs)),
+                    if self.consume_to_op(iter, ast, RPar, Some((Op(LPar), start.clone()))) {
+                        return Expr::Error;
+                    };
+                    Expr::Parentheses {
+                        loc: start.clone(),
+                        content: Box::new(lhs),
                     }
                 }
             }
@@ -1168,13 +830,13 @@ impl Parser {
                 let rhs =
                     self.consume_expr(iter, ast, precedence_prefix(), not_take_on_error.clone());
                 let end = iter.loc();
-                Expr {
+                Expr::Prefix {
                     loc: start.start..end.end,
-                    val: Expr_::Prefix(op, Box::new(rhs)),
+                    op,
+                    rhs: Box::new(rhs),
                 }
             }
             Some(Key(If)) => self.consume_if(iter, ast),
-            Some(Key(Case)) => self.consume_case(iter, ast),
             Some(Key(Begin)) => self.consume_block(iter, ast),
             Some(Key(Require)) => self.consume_require(iter, ast),
             Some(Op(LBrk)) => {
@@ -1184,23 +846,20 @@ impl Parser {
                     match iter.peek() {
                         Some(Op(RBrk)) => {
                             iter.next();
-                            break Expr {
+                            break Expr::Const {
                                 loc: start.start..iter.loc().end,
-                                val: Expr_::Const(Const::List(exprs)),
+                                value: Const::List(exprs),
                             };
                         }
                         Some(_) => exprs.push(self.consume_expr(iter, ast, 0, Some(Op(RBrk)))),
                         None => {
                             ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                            break Expr {
-                                loc: start.start..iter.loc().end,
-                                val: Expr_::Error,
-                            };
+                            break Expr::Error;
                         }
                     }
                 }
             }
-            Some(Op(LBrc)) => self.consume_set_or_dict(iter, ast),
+            Some(Op(LBrc)) => self.consume_table(iter, ast),
             Some(token) => {
                 let should_not_consume = if let Some(t_avoid) = not_take_on_error {
                     match (token, t_avoid) {
@@ -1217,29 +876,20 @@ impl Parser {
                 };
                 if should_not_consume {
                     // Note that `start` is actually the location of this token
-                    ast.add_diagnostic(to_diagnostic(
-                        ErrorCode::MissingExpr(iter.loc()),
-                        start.clone(),
-                    ));
+                    ast.add_diagnostic(to_diagnostic(ErrorCode::MissingExpr(iter.loc()), start));
                 } else {
                     let token = token.clone();
                     iter.next();
                     ast.add_diagnostic(to_diagnostic(
                         ErrorCode::UnexpectedToken(Some(token), None, None),
-                        start.clone(),
+                        start,
                     ));
                 }
-                return Expr {
-                    loc: start,
-                    val: Expr_::Error,
-                };
+                return Expr::Error;
             }
             None => {
-                ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, start.clone()));
-                return Expr {
-                    loc: start,
-                    val: Expr_::Error,
-                };
+                ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, start));
+                return Expr::Error;
             }
         };
 
@@ -1249,7 +899,6 @@ impl Parser {
                     let op = match op {
                         Some(Op(LPar)) => OpPostfix::Call,
                         Some(Op(LBrk)) => OpPostfix::Index,
-                        Some(Op(LBrc)) => OpPostfix::Construct,
                         Some(token) => {
                             let token = token.clone();
                             iter.next();
@@ -1301,9 +950,10 @@ impl Parser {
                                         }
                                     }
                                 }
-                                lhs = Expr {
+                                lhs = Expr::Call {
                                     loc: start.start..iter.loc().end,
-                                    val: Expr_::Call(Box::new(lhs), exprs),
+                                    lhs: Box::new(lhs),
+                                    parameters: exprs,
                                 };
                                 continue;
                             }
@@ -1312,19 +962,14 @@ impl Parser {
                                 iter.next();
                                 let match_loc = iter.loc();
                                 let expr = self.consume_expr(iter, ast, 0, Some(Op(RBrk)));
-                                self.consume_to_op(iter, ast, RBrk, Some((Op(LBrk), match_loc)));
-                                lhs = Expr {
-                                    loc: start.start..iter.loc().end,
-                                    val: Expr_::Index(Box::new(lhs), Box::new(expr)),
+                                if self.consume_to_op(iter, ast, RBrk, Some((Op(LBrk), match_loc)))
+                                {
+                                    return Expr::Error;
                                 };
-                                continue;
-                            }
-                            OpPostfix::Construct => {
-                                iter.next();
-                                let init = self.consume_set_or_dict(iter, ast);
-                                lhs = Expr {
+                                lhs = Expr::Index {
                                     loc: start.start..iter.loc().end,
-                                    val: Expr_::Construct(Box::new(lhs), Box::new(init)),
+                                    lhs: Box::new(lhs),
+                                    rhs: Box::new(expr),
                                 };
                                 continue;
                             }
@@ -1367,144 +1012,15 @@ impl Parser {
 
             let rhs = self.consume_expr(iter, ast, precedence.1, not_take_on_error.clone());
 
-            lhs = Expr {
+            lhs = Expr::Infix {
                 loc: start.start..iter.loc().end,
-                val: Expr_::Infix(op, Box::new(lhs), Box::new(rhs)),
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
             };
         }
 
         lhs
-    }
-
-    /// Consume a pattern
-    ///
-    /// Precedence: "|" => 0 "," => 1
-    fn consume_pattern(
-        &mut self,
-        iter: &mut TokenIterator,
-        ast: &mut Ast,
-        min_precedence: u16,
-    ) -> Pattern {
-        use Keyword::*;
-        use Operator::*;
-        use Token::*;
-        let start = iter.next_loc();
-
-        let mut lhs = match iter.peek() {
-            Some(Id(name)) => {
-                let mut id = vec![name.clone()];
-                iter.next();
-                if let Some(Op(At)) = iter.peek() {
-                    iter.next();
-                    let bind = self.consume_pattern(iter, ast, 2);
-                    Pattern::new(
-                        start.start..iter.loc().end,
-                        Pattern_::Bind(
-                            id.into_iter().next().expect("This must have an item here"),
-                            Box::new(bind),
-                        ),
-                    )
-                } else {
-                    while let (Some(Op(Member)), Some(Id(name))) = iter.peek2() {
-                        id.push(name.clone());
-                        iter.next();
-                        iter.next();
-                    }
-                    if let (Some(Op(Call)), Some(Op(LBrc))) = iter.peek2() {
-                        iter.next();
-                        iter.next();
-                        let mut inners = vec![];
-                        loop {
-                            match iter.peek() {
-                                Some(Op(RBrc)) => {
-                                    iter.next();
-                                    break;
-                                }
-                                Some(_) => inners.push(self.consume_pattern(iter, ast, 0)),
-                                None => {
-                                    ast.add_diagnostic(to_diagnostic(
-                                        ErrorCode::UnexpectedEof,
-                                        iter.loc(),
-                                    ));
-                                    return Pattern::new(
-                                        start.start..iter.loc().end,
-                                        Pattern_::Error,
-                                    );
-                                }
-                            }
-                        }
-                        Pattern::new(start.start..iter.loc().end, Pattern_::Inner(id, inners))
-                    } else {
-                        Pattern::new(start.start..iter.loc().end, Pattern_::Id(id))
-                    }
-                }
-            }
-            Some(Integer(i)) => {
-                let i = *i;
-                iter.next();
-                Pattern::new(start.clone(), Pattern_::Const(ConstPattern::Int(i)))
-            }
-            Some(Float(f)) => {
-                let f = *f;
-                iter.next();
-                Pattern::new(start.clone(), Pattern_::Const(ConstPattern::Float(f)))
-            }
-            Some(Str(s)) => {
-                let s = s.clone();
-                iter.next();
-                Pattern::new(start.clone(), Pattern_::Const(ConstPattern::Str(s)))
-            }
-            Some(Key(key @ (True | False))) => {
-                let val = matches!(key, True);
-                iter.next();
-                Pattern::new(start.clone(), Pattern_::Const(ConstPattern::Bool(val)))
-            }
-            Some(Op(LPar)) => {
-                iter.next();
-                let prev_loc = iter.loc();
-                let pattern = self.consume_pattern(iter, ast, 0);
-                self.consume_to_op(iter, ast, RPar, Some((Op(LPar), prev_loc)));
-                Pattern::new(
-                    start.start..iter.loc().end,
-                    Pattern_::Parentheses(Box::new(pattern)),
-                )
-            }
-            Some(token) => {
-                let token = token.clone();
-                iter.next();
-                ast.add_diagnostic(to_diagnostic(
-                    ErrorCode::UnexpectedToken(Some(token), None, None),
-                    iter.loc(),
-                ));
-                return Pattern::new(start.start..iter.loc().end, Pattern_::Error);
-            }
-            None => {
-                ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                return Pattern::new(start, Pattern_::Error);
-            }
-        };
-
-        loop {
-            match iter.peek() {
-                Some(Op(Comma)) if min_precedence <= 1 => {
-                    iter.next();
-                    let rhs = self.consume_pattern(iter, ast, 1);
-                    lhs = Pattern::new(
-                        start.start..iter.loc().end,
-                        Pattern_::And(Box::new(lhs), Box::new(rhs)),
-                    );
-                }
-                Some(Op(BitOr)) if min_precedence == 0 => {
-                    iter.next();
-                    let rhs = self.consume_pattern(iter, ast, 0);
-                    lhs = Pattern::new(
-                        start.start..iter.loc().end,
-                        Pattern_::Or(Box::new(lhs), Box::new(rhs)),
-                    );
-                }
-                _ => return lhs,
-            }
-        }
     }
 }
 
