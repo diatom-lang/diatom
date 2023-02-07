@@ -104,3 +104,20 @@ fn test_closure() {
         ""
     );
 }
+
+#[test]
+fn test_if() {
+    test_ok!(
+        r#"
+    x = 0
+    if x > 0 then
+        1
+    elsif x < 0 then
+        2
+    else 
+        3
+    end
+    "#,
+        "3"
+    );
+}

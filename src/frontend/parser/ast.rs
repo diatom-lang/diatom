@@ -40,6 +40,36 @@ pub enum Stmt {
     Error,
 }
 
+impl Stmt {
+    pub fn get_loc(&self) -> Loc {
+        match self {
+            Stmt::Expr { loc, expr: _ } => loc,
+            Stmt::Continue { loc } => loc,
+            Stmt::Break { loc } => loc,
+            Stmt::Return { loc, value: _ } => loc,
+            Stmt::Loop {
+                loc,
+                condition: _,
+                body: _,
+            } => loc,
+            Stmt::For {
+                loc,
+                loop_variable: _,
+                iterator: _,
+                body: _,
+            } => loc,
+            Stmt::Def {
+                loc,
+                name: _,
+                parameters: _,
+                body: _,
+            } => loc,
+            Stmt::Error => unreachable!(),
+        }
+        .clone()
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum OpInfix {
     Assign,

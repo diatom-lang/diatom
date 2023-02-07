@@ -313,7 +313,7 @@ impl Instruction for OpLoadConstant {
             Reg::Bool(b) => b.to_string(),
             Reg::Int(i) => i.to_string(),
             Reg::Float(f) => f.to_string(),
-            Reg::Str(sid) => gc.get_string_by_id(*sid).to_string(),
+            Reg::Str(sid) => format!("'{}'", gc.get_string_by_id(*sid)),
             Reg::Ref(_) => unreachable!(),
         };
         writeln!(
@@ -1133,13 +1133,13 @@ impl Instruction for OpMove {
     }
 }
 
-pub struct OpBranch {
+pub struct OpBranchTrue {
     pub loc: Loc,
     pub condition: usize,
     pub offset: i64,
 }
 
-impl Instruction for OpBranch {
+impl Instruction for OpBranchTrue {
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1169,7 +1169,49 @@ impl Instruction for OpBranch {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} => {:+}",
-            "branch", self.condition, self.offset
+            "bt", self.condition, self.offset
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpBranchFalse {
+    pub loc: Loc,
+    pub condition: usize,
+    pub offset: i64,
+}
+
+impl Instruction for OpBranchFalse {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let condition = gc.read_reg(self.condition);
+        if let Reg::Bool(b) = condition {
+            Ok(if !*b {
+                Ip {
+                    func_id: ip.func_id,
+                    inst: (ip.inst as i64 + self.offset) as usize,
+                }
+            } else {
+                Ip {
+                    func_id: ip.func_id,
+                    inst: ip.inst + 1,
+                }
+            })
+        } else {
+            let t = get_type(condition, gc);
+            Err(VmError::InvalidCondition(self.loc.clone(), t))
+        }
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} => {:+}",
+            "bf", self.condition, self.offset
         )
         .unwrap()
     }

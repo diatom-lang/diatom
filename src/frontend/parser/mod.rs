@@ -455,6 +455,7 @@ impl Parser {
                     }
                 }
                 Some(Key(End)) => {
+                    conditional.push((condition, block));
                     iter.next();
                     let end = iter.loc();
                     return Expr::If {

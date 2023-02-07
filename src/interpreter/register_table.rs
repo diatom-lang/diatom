@@ -67,6 +67,15 @@ impl RegisterTable {
         id
     }
 
+    /// Declare a captured variable
+    ///
+    /// This function alloc a new register instead of recycle old one
+    pub fn declare_captured_variable(&mut self, name: impl AsRef<str>, loc: Option<Loc>) -> usize {
+        let id = self.assigned;
+        self.assigned += 1;
+        self.variables.insert(name.as_ref().to_string(), (id, loc));
+        id
+    }
     /// (reg_id, depth, loc)
     fn lookup_variable_(&self, name: &str, depth: usize) -> Option<(usize, usize, Option<Loc>)> {
         let var = self.variables.get(name);
