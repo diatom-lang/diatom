@@ -1,34 +1,31 @@
-use std::fmt::Write;
+use std::io::Write;
 
-use crate::{DiatomValue, Interpreter, State};
+use crate::{DiatomValue, Interpreter};
 
-pub fn impl_prelude(interpreter: &mut Interpreter) {
-    let print = |state: &mut State, parameters: &[DiatomValue]| {
-        let mut output = String::new();
+pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
+    interpreter.add_extern_function("print".to_string(), |state, parameters, out| {
+        let mut flag = true;
         for parameter in parameters {
-            match parameter {
-                DiatomValue::Unit => write!(output, "()").unwrap(),
-                DiatomValue::Bool(b) => write!(output, "{b}").unwrap(),
-                DiatomValue::Int(i) => write!(output, "{i}").unwrap(),
-                DiatomValue::Float(f) => write!(output, "{f}").unwrap(),
-                DiatomValue::Str(sid) => {
-                    write!(output, "{}", state.get_string_by_id(*sid).unwrap()).unwrap()
-                }
-                DiatomValue::Ref(rid) => write!(output, "Object@<{rid}>").unwrap(),
+            if flag {
+                flag = false
+            } else {
+                write!(out, ", ").map_err(|err| format!("IoError: {err}"))?;
             }
-            write!(output, ", ").unwrap();
+            match parameter {
+                DiatomValue::Unit => write!(out, "()"),
+                DiatomValue::Bool(b) => write!(out, "{b}"),
+                DiatomValue::Int(i) => write!(out, "{i}"),
+                DiatomValue::Float(f) => write!(out, "{f}"),
+                DiatomValue::Str(sid) => write!(out, "{}", state.get_string_by_id(*sid).unwrap()),
+                DiatomValue::Ref(rid) => write!(out, "Object@<{rid}>"),
+            }
+            .map_err(|err| format!("IoError: {err}"))?;
         }
-        if output.len() >= 2 {
-            output.pop();
-            output.pop();
-        }
-        output.push('\n');
-        state.print(&output);
+        writeln!(out).map_err(|err| format!("IoError: {err}"))?;
         Ok(DiatomValue::Unit)
-    };
-    interpreter.add_extern_function("print".to_string(), print);
+    });
 
-    let assert = |_state: &mut State, parameters: &[DiatomValue]| {
+    interpreter.add_extern_function("assert".to_string(), |_state, parameters, _out| {
         if parameters.len() != 1 {
             return Err(format!(
                 "Assert expected 1 parameter while {} is provided",
@@ -45,10 +42,9 @@ pub fn impl_prelude(interpreter: &mut Interpreter) {
             }
             _ => Err("Assert on an invalid type that is not bool".to_string()),
         }
-    };
-    interpreter.add_extern_function("assert".to_string(), assert);
+    });
 
-    let panic = |state: &mut State, parameters: &[DiatomValue]| {
+    interpreter.add_extern_function("panic".to_string(), |state, parameters, _out| {
         if parameters.len() > 1 {
             return Err(format!(
                 "Assert expected 1 or 0 parameter while {} is provided",
@@ -67,6 +63,5 @@ pub fn impl_prelude(interpreter: &mut Interpreter) {
                 "Panic triggered with invalid type(Can not show non-string parameter)".to_string(),
             ),
         }
-    };
-    interpreter.add_extern_function("panic".to_string(), panic);
+    });
 }

@@ -1,4 +1,6 @@
 a = 1
-b = 2
-a
-b
+begin
+    b = false
+    a = b
+end
+assert$(a == false)

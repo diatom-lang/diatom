@@ -1,4 +1,8 @@
-use std::{env, ffi::OsStr};
+use std::{
+    env,
+    ffi::OsStr,
+    io::{self, Stdout},
+};
 
 use crate::Interpreter;
 
@@ -10,14 +14,14 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// An interactive console for Diatom
 pub struct Console {
-    interpreter: Interpreter,
+    interpreter: Interpreter<Stdout>,
     color: bool,
 }
 
 impl Console {
     pub fn new(color: bool) -> Self {
         Self {
-            interpreter: Interpreter::new(),
+            interpreter: Interpreter::new(io::stdout()),
             color,
         }
     }
@@ -71,16 +75,18 @@ impl Console {
             let sig = line_editor.read_line(&prompt);
             match sig {
                 Ok(Signal::Success(buffer)) => {
-                    let result = if inspect {
-                        self.interpreter
-                            .decompile(buffer, OsStr::new("<interactive>"), self.color)
-                    } else {
-                        self.interpreter.exec_repl(buffer, self.color)
+                    if inspect {
+                        match self.interpreter.decompile(
+                            buffer,
+                            OsStr::new("<interactive>"),
+                            self.color,
+                        ) {
+                            Ok(s) => print!("{s}"),
+                            Err(s) => eprint!("{s}"),
+                        }
+                    } else if let Err(e) = self.interpreter.exec_repl(buffer, self.color) {
+                        eprint!("{e}")
                     };
-                    match result {
-                        Ok(s) => print!("{s}"),
-                        Err(s) => eprint!("{s}"),
-                    }
                 }
                 Ok(Signal::CtrlC) => {
                     line_editor.run_edit_commands(&[EditCommand::Clear]);

@@ -2,10 +2,13 @@ use super::*;
 
 macro_rules! test_ok {
     ($code: literal, $output_expected: literal) => {
-        let mut interpreter = Interpreter::new();
-        let mut output = interpreter
+        let mut interpreter = Interpreter::new(Vec::<u8>::new());
+        interpreter
             .exec_repl($code, false)
             .expect("Execution failed!");
+
+        let output = interpreter.replace_buffer(Vec::<u8>::new());
+        let mut output = String::from_utf8(output).unwrap();
         // pop newline
         output.pop();
         assert_eq!(output, $output_expected)
@@ -14,7 +17,7 @@ macro_rules! test_ok {
 
 macro_rules! test_err {
     ($code: literal) => {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Interpreter::new(Vec::<u8>::new());
         let _ = interpreter
             .exec($code, OsStr::new("<test>"), false)
             .expect_err("Execution failed!");

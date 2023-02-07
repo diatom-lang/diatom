@@ -1,12 +1,16 @@
-use crate::{diagnostic::Loc, interpreter::Capture, State};
+use crate::{
+    diagnostic::Loc,
+    interpreter::{
+        gc::{Gc, GcObject, Reg},
+        Capture,
+    },
+    IoWrite, State,
+};
 use std::fmt::Write;
 
-use super::{
-    gc::{Gc, GcObject, Reg},
-    FuncId, Instruction, Ip, Vm, VmError,
-};
+use super::{Instruction, Ip, VmError};
 
-fn get_type(reg: &Reg, gc: &Gc) -> String {
+fn get_type<Buffer: IoWrite>(reg: &Reg, gc: &Gc<Buffer>) -> String {
     match reg {
         Reg::Unit => "()".to_string(),
         Reg::Bool(_) => "Bool".to_string(),
@@ -36,15 +40,20 @@ pub struct OpAllocReg {
 }
 
 impl Instruction for OpAllocReg {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        context.gc.alloc_reg_file(self.n_reg);
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        gc.alloc_reg_file(self.n_reg);
         Ok(Ip {
             func_id: ip.func_id,
             inst: ip.inst + 1,
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    N_REG#{}",
@@ -62,9 +71,12 @@ pub struct OpCallClosure {
 }
 
 impl Instruction for OpCallClosure {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
-
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         // get closure
         let obj = gc.read_reg(self.reg_id);
         let (func_id, parameters, capture, reg_size) = match obj {
@@ -85,15 +97,15 @@ impl Instruction for OpCallClosure {
                             let reg = gc.read_reg(*para).clone();
                             parameters.push(reg);
                         }
-                        let mut state = State { vm: context };
-                        let ret = f(&mut state, &parameters).map_err(|s| VmError::Panic {
+                        let mut state = State { gc };
+                        let ret = f(&mut state, &parameters, out).map_err(|s| VmError::Panic {
                             loc: self.loc.clone(),
                             reason: s,
                             notes: vec![],
                         })?;
                         match ret {
                             Reg::Str(id) => {
-                                if context.gc.get_string_by_id_checked(id).is_none() {
+                                if gc.get_string_by_id_checked(id).is_none() {
                                     return Err(VmError::InvalidRef {
                                         loc: self.loc.clone(),
                                         t: "Str",
@@ -105,7 +117,7 @@ impl Instruction for OpCallClosure {
                             _ => (),
                         }
                         if let Some(write_back) = self.write_back {
-                            context.gc.write_reg(write_back, ret)
+                            gc.write_reg(write_back, ret)
                         }
                         return Ok(Ip {
                             func_id: ip.func_id,
@@ -160,7 +172,7 @@ impl Instruction for OpCallClosure {
         Ok(Ip { func_id, inst: 0 })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         let parameters = self.parameters.iter().fold(String::new(), |mut s, x| {
             s.push_str(&format!("{x}, "));
             s
@@ -185,8 +197,12 @@ pub struct OpRet {
 }
 
 impl Instruction for OpRet {
-    fn exec(&self, _: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        _: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let reg = gc.read_reg(self.return_reg).clone();
 
         // clean call stack
@@ -200,7 +216,7 @@ impl Instruction for OpRet {
         Ok(ip)
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{}",
@@ -213,7 +229,7 @@ impl Instruction for OpRet {
 pub struct OpMakeClosure {
     pub loc: Loc,
     /// closure function id
-    pub func_id: FuncId,
+    pub func_id: usize,
     /// parameter len
     pub parameters: usize,
     /// write closure to target
@@ -223,8 +239,12 @@ pub struct OpMakeClosure {
 }
 
 impl Instruction for OpMakeClosure {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let mut captured_regs = vec![];
 
         for Capture { rd, rs, depth } in self.capture.iter() {
@@ -246,7 +266,7 @@ impl Instruction for OpMakeClosure {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Func@{} -> Reg#{}",
@@ -271,8 +291,12 @@ pub struct OpLoadConstant {
 }
 
 impl Instruction for OpLoadConstant {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let reg = self.constant.clone();
         gc.write_reg(self.rd, reg);
         Ok(Ip {
@@ -281,13 +305,13 @@ impl Instruction for OpLoadConstant {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, gc: &Gc<Buffer>) {
         let content = match &self.constant {
             Reg::Unit => "()".to_string(),
             Reg::Bool(b) => b.to_string(),
             Reg::Int(i) => i.to_string(),
             Reg::Float(f) => f.to_string(),
-            Reg::Str(sid) => context.gc.get_string_by_id(*sid).to_string(),
+            Reg::Str(sid) => gc.get_string_by_id(*sid).to_string(),
             Reg::Ref(_) => unreachable!(),
         };
         writeln!(
@@ -306,8 +330,12 @@ pub struct OpNot {
 }
 
 impl Instruction for OpNot {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let reg = match lhs {
             Reg::Bool(b) => Reg::Bool(!b),
@@ -323,7 +351,7 @@ impl Instruction for OpNot {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} -> Reg#{}",
@@ -340,8 +368,12 @@ pub struct OpNeg {
 }
 
 impl Instruction for OpNeg {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let reg = match lhs {
             Reg::Int(i) => Reg::Int(-i),
@@ -358,7 +390,7 @@ impl Instruction for OpNeg {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, __context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, __gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} -> Reg#{}",
@@ -376,8 +408,12 @@ pub struct OpAdd {
 }
 
 impl Instruction for OpAdd {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
@@ -406,7 +442,7 @@ impl Instruction for OpAdd {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
@@ -424,8 +460,12 @@ pub struct OpSub {
 }
 
 impl Instruction for OpSub {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
@@ -446,7 +486,7 @@ impl Instruction for OpSub {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
@@ -464,8 +504,12 @@ pub struct OpMul {
 }
 
 impl Instruction for OpMul {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
@@ -496,7 +540,7 @@ impl Instruction for OpMul {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
@@ -514,8 +558,12 @@ pub struct OpDiv {
 }
 
 impl Instruction for OpDiv {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
@@ -536,7 +584,7 @@ impl Instruction for OpDiv {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
@@ -554,8 +602,12 @@ pub struct OpIDiv {
 }
 
 impl Instruction for OpIDiv {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let result = match (lhs, rhs) {
@@ -577,7 +629,7 @@ impl Instruction for OpIDiv {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
@@ -595,8 +647,12 @@ pub struct OpRem {
 }
 
 impl Instruction for OpRem {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
@@ -614,7 +670,7 @@ impl Instruction for OpRem {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
@@ -632,8 +688,12 @@ pub struct OpPow {
 }
 
 impl Instruction for OpPow {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
@@ -654,7 +714,7 @@ impl Instruction for OpPow {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
@@ -672,8 +732,12 @@ pub struct OpEq {
 }
 
 impl Instruction for OpEq {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
@@ -698,7 +762,7 @@ impl Instruction for OpEq {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
@@ -716,8 +780,12 @@ pub struct OpGt {
 }
 
 impl Instruction for OpGt {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
@@ -745,7 +813,7 @@ impl Instruction for OpGt {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
@@ -763,8 +831,12 @@ pub struct OpAnd {
 }
 
 impl Instruction for OpAnd {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
@@ -782,7 +854,7 @@ impl Instruction for OpAnd {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
@@ -800,8 +872,12 @@ pub struct OpOr {
 }
 
 impl Instruction for OpOr {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
@@ -819,7 +895,7 @@ impl Instruction for OpOr {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
@@ -836,8 +912,12 @@ pub struct OpMove {
 }
 
 impl Instruction for OpMove {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let rs = gc.read_reg(self.rs).clone();
         gc.write_reg(self.rd, rs);
         Ok(Ip {
@@ -846,7 +926,7 @@ impl Instruction for OpMove {
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} -> Reg#{}",
@@ -863,8 +943,12 @@ pub struct OpBranch {
 }
 
 impl Instruction for OpBranch {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        let gc = &mut context.gc;
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         let condition = gc.read_reg(self.condition);
         if let Reg::Bool(b) = condition {
             Ok(if *b {
@@ -884,7 +968,7 @@ impl Instruction for OpBranch {
         }
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} => {:+}",
@@ -900,14 +984,19 @@ pub struct OpJump {
 }
 
 impl Instruction for OpJump {
-    fn exec(&self, ip: Ip, _context: &mut Vm) -> Result<Ip, VmError> {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        _gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         Ok(Ip {
             func_id: ip.func_id,
             inst: (ip.inst as i64 + self.offset) as usize,
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(decompiled, "{: >FORMAT_PAD$}    {}", "jump", self.offset).unwrap()
     }
 }
@@ -915,14 +1004,19 @@ impl Instruction for OpJump {
 pub struct OpDummy;
 
 impl Instruction for OpDummy {
-    fn exec(&self, ip: Ip, _context: &mut Vm) -> Result<Ip, VmError> {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        _gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
         Ok(Ip {
             func_id: ip.func_id,
             inst: ip.inst + 1,
         })
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(decompiled, "{: >FORMAT_PAD$}   ", "dummy").unwrap()
     }
 }
@@ -933,31 +1027,16 @@ pub struct OpYield {
 }
 
 impl Instruction for OpYield {
-    fn exec(&self, _ip: Ip, context: &mut Vm) -> Result<Ip, VmError> {
-        if !context.is_repl {
-            return Err(VmError::Yield);
-        }
-        if let Some(id) = self.show_id {
-            let gc = &context.gc;
-            let reg = gc.read_reg(id);
-            let mut output = match reg {
-                // omit unit output in repl
-                Reg::Unit => String::new(),
-                Reg::Bool(b) => format!("{b}"),
-                Reg::Int(i) => format!("{i}"),
-                Reg::Float(f) => format!("{f}"),
-                Reg::Str(sid) => gc.get_string_by_id(*sid).to_string(),
-                Reg::Ref(r) => format!("Object@<{r}>"),
-            };
-            if !output.is_empty() {
-                output.push('\n')
-            };
-            context.output.push_str(&output)
-        }
-        Err(VmError::Yield)
+    fn exec<Buffer: IoWrite>(
+        &self,
+        _ip: Ip,
+        _gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        Err(VmError::Yield(self.show_id))
     }
 
-    fn decompile(&self, decompiled: &mut String, _context: &Vm) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    {}",

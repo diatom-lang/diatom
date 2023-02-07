@@ -1,19 +1,13 @@
-use crate::interpreter::Func;
+use crate::{
+    interpreter::{Func, Gc},
+    IoWrite,
+};
 
-use self::{error::VmError, gc::Gc, op::*};
-
-use ahash::AHashMap;
+use self::{error::VmError, op::*};
 
 pub mod error;
-mod gc;
 pub mod op;
-mod state;
-mod string_pool;
 use enum_dispatch::enum_dispatch;
-pub use gc::{GcObject, Reg};
-pub use state::State;
-
-type FuncId = usize;
 
 #[derive(Clone, Copy)]
 pub struct Ip {
@@ -23,8 +17,13 @@ pub struct Ip {
 
 #[enum_dispatch(VmInst)]
 pub trait Instruction {
-    fn exec(&self, ip: Ip, context: &mut Vm) -> Result<Ip, VmError>;
-    fn decompile(&self, decompiled: &mut String, context: &Vm);
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        context: &mut Gc<Buffer>,
+        out: &mut Buffer,
+    ) -> Result<Ip, VmError>;
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, context: &Gc<Buffer>);
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -55,42 +54,35 @@ pub enum VmInst {
     OpYield,
 }
 
-pub struct Object {
-    _attributes: AHashMap<String, Reg>,
-}
-
 pub struct Vm {
-    gc: Gc,
     ip: Ip,
-    output: String,
-    is_repl: bool,
 }
 
 impl Vm {
     pub fn new() -> Self {
         Self {
-            gc: Gc::new(),
             ip: Ip {
                 func_id: 0,
                 inst: 0,
             },
-            output: String::new(),
-            is_repl: false,
         }
     }
 
-    pub fn exec(&mut self, byte_code: &[Func], is_repl: bool) -> VmError {
-        self.output.clear();
-        self.is_repl = is_repl;
+    pub fn exec<Buffer: IoWrite>(
+        &mut self,
+        byte_code: &[Func],
+        gc: &mut Gc<Buffer>,
+        out: &mut Buffer,
+    ) -> VmError {
         loop {
             let Ip { func_id, inst } = self.ip;
             debug_assert!(byte_code.len() > func_id);
             let func = unsafe { byte_code.get_unchecked(func_id) };
             debug_assert!(func.insts.len() > inst);
             self.ip = match unsafe { func.insts.get_unchecked(inst) }
-                .exec(self.ip, self)
+                .exec(self.ip, gc, out)
                 .map_err(|err| {
-                    self.gc.clean_call_stack();
+                    gc.clean_call_stack();
                     err
                 }) {
                 Ok(ip) => ip,
@@ -99,15 +91,7 @@ impl Vm {
         }
     }
 
-    pub fn take_output(&mut self) -> String {
-        std::mem::take(&mut self.output)
-    }
-
     pub fn set_ip(&mut self, ip: Ip) {
         self.ip = ip
-    }
-
-    pub fn gc_mut(&mut self) -> &mut Gc {
-        &mut self.gc
     }
 }

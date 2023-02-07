@@ -4,7 +4,7 @@ use crate::diagnostic::{Diagnostic, Loc};
 
 pub enum VmError {
     /// Yield control back to host
-    Yield,
+    Yield(Option<usize>),
     /// E3001 Binary Operator can not be applied
     OpBinNotApplicable(Loc, &'static str, String, String),
     /// E3002 Prefix Operator can not be applied
@@ -31,12 +31,17 @@ pub enum VmError {
         t: &'static str,
         id: usize,
     },
+    /// E3008 Io Error
+    IoError {
+        loc: Option<Loc>,
+        error: std::io::Error,
+    },
 }
 
 impl From<VmError> for Diagnostic {
     fn from(value: VmError) -> Self {
         match value {
-            VmError::Yield => unreachable!(),
+            VmError::Yield(_) => unreachable!(),
             VmError::OpBinNotApplicable(loc, op, t1, t2) => Diagnostic::error()
                 .with_code("E3001")
                 .with_message(format!(
@@ -72,6 +77,15 @@ impl From<VmError> for Diagnostic {
                     "External function returns an invalid reference to {t}@{id}"
                 ))
                 .with_labels(vec![Label::primary((), loc)]),
+            VmError::IoError { loc, error } => {
+                let mut error = Diagnostic::error()
+                    .with_code("E3008")
+                    .with_message(format!("Io Error: {error}"));
+                if let Some(loc) = loc {
+                    error = error.with_labels(vec![Label::primary((), loc)]);
+                }
+                error
+            }
         }
     }
 }

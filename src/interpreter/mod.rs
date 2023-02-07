@@ -5,9 +5,11 @@ use std::{ffi::OsStr, rc::Rc};
 use ahash::{AHashMap, AHashSet};
 
 mod error;
+pub mod gc;
 mod prelude;
+mod string_pool;
 
-use crate::State;
+mod state;
 use crate::{
     diagnostic::{Diagnostic, Loc},
     frontend::{
@@ -21,12 +23,15 @@ use crate::{
             OpJump, OpLoadConstant, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot, OpOr, OpPow, OpRem,
             OpRet, OpSub, OpYield,
         },
-        GcObject, Instruction, Ip, Reg, Vm, VmInst,
+        Instruction, Ip, Vm, VmInst,
     },
-    DiatomValue,
+    DiatomValue, IoWrite,
 };
+pub use gc::{GcObject, Reg};
+pub use state::State;
 
 use self::error::ErrorCode;
+pub use self::gc::Gc;
 use self::prelude::impl_prelude;
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -160,14 +165,12 @@ pub struct Func {
 /// use diatom::Interpreter;
 ///
 /// // Create a new instance of interpreter
-/// let mut interpreter = Interpreter::new();
+/// let mut interpreter = Interpreter::new(std::io::stdout());
 /// // Execute source code
 /// let output = interpreter.exec(
 ///     "print$('Hello, world!')",
 ///     Default::default(),
 ///     false).unwrap();
-/// // print the output
-/// println!("{output}");
 /// ```
 ///
 /// ## 2. Add call back to the interpreter
@@ -179,9 +182,9 @@ pub struct Func {
 /// let value = Rc::new(Cell::new(0));
 /// let value_capture = value.clone();
 ///
-/// let mut interpreter = Interpreter::new();
+/// let mut interpreter = Interpreter::new(std::io::stdout());
 /// // add a callback named "set_value"
-/// interpreter.add_extern_function("set_value".to_string(), move |_state, parameters| {
+/// interpreter.add_extern_function("set_value".to_string(), move |_state, parameters, _out| {
 ///     if parameters.len() != 1 {
 ///         return Err("Expected 1 parameter!".to_string());
 ///     }
@@ -198,16 +201,18 @@ pub struct Func {
 /// interpreter.exec("set_value$(5)", Default::default(), false).unwrap();
 /// assert_eq!(value.get(), 5);
 /// ```
-pub struct Interpreter {
+pub struct Interpreter<Buffer: IoWrite> {
     registers: RegisterTable,
     scopes: Vec<AHashSet<String>>,
     byte_code: Vec<Func>,
     vm: Vm,
+    gc: Gc<Buffer>,
+    out: Buffer,
 }
 
-impl Interpreter {
+impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// Create a new interpreter instance
-    pub fn new() -> Self {
+    pub fn new(buffer: Buffer) -> Self {
         let main = Func {
             name: "main".to_string(),
             parameters: 0,
@@ -218,6 +223,8 @@ impl Interpreter {
             scopes: vec![AHashSet::new()],
             byte_code: vec![main],
             vm: Vm::new(),
+            gc: Gc::new(),
+            out: buffer,
         };
         impl_prelude(&mut interpreter);
         interpreter
@@ -233,6 +240,7 @@ impl Interpreter {
     /// * `State` - Access state and heap memory of the virtual machine.
     /// * `[DiatomValue]` - Parameters passed. The function is expected to check type and the
     /// number of parameters it received.
+    /// * `Buffer` - Output buffer
     ///
     /// # External function return value:
     /// * Return a single unboxed value as return value. If the function does not intended to
@@ -244,34 +252,39 @@ impl Interpreter {
     ///
     /// # Examples:
     /// ```
+    /// use std::io::Write;
     /// use diatom::{Interpreter, DiatomValue};
     ///
-    /// let mut interpreter = Interpreter::new();
+    /// let buffer = Vec::<u8>::new();
+    /// let mut interpreter = Interpreter::new(buffer);
     /// interpreter.add_extern_function(
     ///     "hello_world".to_string(),
-    ///     |state, parameters| {
+    ///     |state, parameters, out| {
     ///         if !parameters.is_empty(){
     ///             Err("Too many parameters!".to_string())
     ///         }else{
-    ///             state.print("Hello, world!");
+    ///             write!(out, "Hello, world!");
     ///             Ok(DiatomValue::Unit)
     ///         }
     ///     }
     /// );
     ///
-    /// let output = interpreter.exec("hello_world$()", Default::default(), false).unwrap();
+    /// interpreter.exec("hello_world$()", Default::default(), false).unwrap();
+    /// let output = interpreter.replace_buffer(Vec::<u8>::new());
+    /// let output = String::from_utf8(output).unwrap();
     /// assert_eq!(output, "Hello, world!")
     /// ```
     pub fn add_extern_function<F>(&mut self, name: String, f: F)
     where
-        F: Fn(&mut State, &[DiatomValue]) -> Result<DiatomValue, String> + 'static,
+        F: Fn(&mut State<Buffer>, &[DiatomValue], &mut Buffer) -> Result<DiatomValue, String>
+            + 'static,
     {
         let f = GcObject::NativeFunction(Rc::new(RefCell::new(f)));
-        let gc_id = self.vm.gc_mut().alloc(f);
+        let gc_id = self.gc.alloc(f);
         let reg = Reg::Ref(gc_id);
         let reg_id = self.registers.declare_variable(name, None);
-        self.vm.gc_mut().alloc_reg_file(reg_id + 1);
-        self.vm.gc_mut().write_reg(reg_id, reg);
+        self.gc.alloc_reg_file(reg_id + 1);
+        self.gc.write_reg(reg_id, reg);
     }
 
     /// Check if input is completeness
@@ -305,11 +318,16 @@ impl Interpreter {
             let pad = insts.len().ilog10() as usize + 1;
             for (n, inst) in insts.iter().enumerate() {
                 write!(decompiled, "    {n: <pad$} ").unwrap();
-                inst.decompile(&mut decompiled, &self.vm);
+                inst.decompile(&mut decompiled, &self.gc);
             }
             writeln!(decompiled).unwrap();
         }
         Ok(decompiled)
+    }
+
+    /// Replace output buffer and get the old one
+    pub fn replace_buffer(&mut self, buffer: Buffer) -> Buffer {
+        std::mem::replace(&mut self.out, buffer)
     }
 
     fn compile(
@@ -371,10 +389,10 @@ impl Interpreter {
         code: impl AsRef<str>,
         source: &OsStr,
         color: bool,
-    ) -> Result<String, String> {
+    ) -> Result<(), String> {
         let mut ast = self.compile(code, source, color)?;
-        match self.vm.exec(&self.byte_code, false) {
-            VmError::Yield => Ok(self.vm.take_output()),
+        match self.vm.exec(&self.byte_code, &mut self.gc, &mut self.out) {
+            VmError::Yield(_) => Ok(()),
             error_code => {
                 let diagnostic = Diagnostic::from(error_code);
                 ast.diagnoser.push(diagnostic);
@@ -383,14 +401,31 @@ impl Interpreter {
         }
     }
 
-    pub(crate) fn exec_repl(
-        &mut self,
-        code: impl AsRef<str>,
-        color: bool,
-    ) -> Result<String, String> {
+    pub(crate) fn exec_repl(&mut self, code: impl AsRef<str>, color: bool) -> Result<(), String> {
         let mut ast = self.compile(code, OsStr::new("<interactive>"), color)?;
-        match self.vm.exec(&self.byte_code, true) {
-            VmError::Yield => Ok(self.vm.take_output()),
+        match self.vm.exec(&self.byte_code, &mut self.gc, &mut self.out) {
+            VmError::Yield(None) => Ok(()),
+            VmError::Yield(Some(reg_id)) => {
+                let reg = self.gc.read_reg(reg_id);
+                match reg {
+                    // omit unit output in repl
+                    Reg::Unit => Ok(()),
+                    Reg::Bool(b) => writeln!(self.out, "{b}"),
+                    Reg::Int(i) => writeln!(self.out, "{i}"),
+                    Reg::Float(f) => writeln!(self.out, "{f}"),
+                    Reg::Str(sid) => writeln!(self.out, "{}", self.gc.get_string_by_id(*sid)),
+                    Reg::Ref(r) => writeln!(self.out, "Object@<{r}>"),
+                }
+                .map_err(|err| {
+                    let error_code = VmError::IoError {
+                        loc: None,
+                        error: err,
+                    };
+                    let diagnostic = Diagnostic::from(error_code);
+                    ast.diagnoser.push(diagnostic);
+                    ast.diagnoser.render(color)
+                })
+            }
             error_code => {
                 let diagnostic = Diagnostic::from(error_code);
                 ast.diagnoser.push(diagnostic);
@@ -709,7 +744,7 @@ impl Interpreter {
                 .registers
                 .get_or_alloc_constant(ConstantValue::Str(s.clone()))
                 .map_err(|reg| {
-                    let sid = self.vm.gc_mut().string_pool().alloc(s.clone());
+                    let sid = self.gc.string_pool().alloc(s.clone());
                     (reg, Reg::Str(sid))
                 }),
             Const::Bool(b) => self
@@ -976,12 +1011,6 @@ impl Interpreter {
         for name in scope.into_iter() {
             self.registers.variables.remove(&name);
         }
-    }
-}
-
-impl Default for Interpreter {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
