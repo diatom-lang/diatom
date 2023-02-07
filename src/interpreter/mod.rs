@@ -2,11 +2,12 @@ use std::cell::RefCell;
 use std::fmt::Write;
 use std::{ffi::OsStr, rc::Rc};
 
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashSet;
 
 mod error;
 pub mod gc;
 mod prelude;
+mod register_table;
 mod string_pool;
 
 mod state;
@@ -31,119 +32,59 @@ use crate::{
 pub use gc::{GcObject, Reg};
 pub use state::State;
 
-use self::error::ErrorCode;
-pub use self::gc::Gc;
-use self::prelude::impl_prelude;
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-enum ConstantValue {
-    Unit,
-    Bool(bool),
-    Int(i64),
-    // Float must be transmuted in order to compare
-    Float(u64),
-    Str(String),
-}
+use error::ErrorCode;
+pub use gc::Gc;
+use prelude::impl_prelude;
+pub use register_table::Capture;
+use register_table::{ConstantValue, Loop, RegisterTable};
 
 #[derive(Clone)]
-pub struct Capture {
-    pub rd: usize,
-    pub rs: usize,
-    pub depth: usize,
+pub struct FutureJump {
+    previous_insert_offset: usize,
+    condition_reg: Option<usize>,
+    previous_inst_offset: usize,
+    loc: Loc,
 }
 
-#[derive(Clone)]
-struct RegisterTable {
-    prev: Option<Box<RegisterTable>>,
-    variables: AHashMap<String, (usize, Option<Loc>)>,
-    free: Vec<usize>,
-    assigned: usize,
-    func_id: usize,
-    constant_table: AHashMap<ConstantValue, usize>,
-    /// Location to insert load constant
-    current_start_loc: usize,
-    /// Count how many load constant inserted
-    insert_offset: usize,
-    /// captured variables
-    capture: Vec<Capture>,
-}
-
-impl RegisterTable {
-    fn new(func_id: usize) -> Self {
-        Self {
-            prev: None,
-            variables: AHashMap::default(),
-            free: vec![],
-            assigned: 0,
-            func_id,
-            constant_table: AHashMap::default(),
-            current_start_loc: 0,
-            insert_offset: 0,
-            capture: vec![],
-        }
+impl FutureJump {
+    /// Insert jump from current loc to previous
+    pub fn patch_backward(self, func: &mut Func, current_insert_offset: usize) {
+        let inserted = current_insert_offset - self.previous_insert_offset;
+        let inst_offset = self.previous_inst_offset + inserted;
+        let jump_offset = inst_offset as i64 - func.insts.len() as i64;
+        let op = if let Some(reg) = self.condition_reg {
+            VmInst::OpBranch(OpBranch {
+                loc: self.loc,
+                condition: reg,
+                offset: jump_offset,
+            })
+        } else {
+            VmInst::OpJump(OpJump {
+                loc: self.loc,
+                offset: jump_offset,
+            })
+        };
+        func.insts.push(op);
     }
 
-    fn declare_variable(&mut self, name: impl AsRef<str>, loc: Option<Loc>) -> usize {
-        let id = self.declare_intermediate();
-        self.variables.insert(name.as_ref().to_string(), (id, loc));
-        id
-    }
-
-    /// (reg_id, depth, loc)
-    fn lookup_variable_(&self, name: &str, depth: usize) -> Option<(usize, usize, Option<Loc>)> {
-        let var = self.variables.get(name);
-        match var {
-            Some((id, loc)) => Some((*id, depth, loc.clone())),
-            None => match &self.prev {
-                Some(prev) => prev.lookup_variable_(name, depth + 1),
-                None => None,
-            },
-        }
-    }
-
-    /// Return (reg_id, depth, loc)
-    pub fn lookup_variable(&self, name: impl AsRef<str>) -> Option<(usize, usize, Option<Loc>)> {
-        self.lookup_variable_(name.as_ref(), 0)
-    }
-
-    fn declare_intermediate(&mut self) -> usize {
-        self.free.pop().unwrap_or_else(|| {
-            self.assigned += 1;
-            self.assigned - 1
-        })
-    }
-
-    fn free_intermediate(&mut self, id: usize) {
-        if self.assigned >= id {
-            self.free.push(id)
-        }
-    }
-
-    /// Return ok is constant is in table, otherwise alloc a new register for this constant
-    fn get_or_alloc_constant(&mut self, constant: ConstantValue) -> Result<usize, usize> {
-        match self.constant_table.get(&constant) {
-            Some(id) => Ok(*id),
-            None => {
-                // must alloc new register to prevent
-                // already compiled Instruction
-                // overwrite constant value
-                let id = self.assigned;
-                self.assigned += 1;
-                self.constant_table.insert(constant, id);
-                Err(id)
-            }
-        }
-    }
-
-    fn enter_function(&mut self, func_id: usize) {
-        let old = std::mem::replace(self, RegisterTable::new(func_id));
-        self.prev = Some(Box::new(old));
-    }
-
-    fn leave_function(&mut self) -> Vec<Capture> {
-        let prev = *std::mem::take(&mut self.prev).unwrap();
-        let pop = std::mem::replace(self, prev);
-        pop.capture
+    /// Insert jump from previous to current
+    pub fn patch_forward(self, func: &mut Func, current_insert_offset: usize) {
+        let inserted = current_insert_offset - self.previous_insert_offset;
+        let inst_offset = self.previous_inst_offset + inserted;
+        let jump_offset = func.insts.len() as i64 - inst_offset as i64;
+        let op = if let Some(reg) = self.condition_reg {
+            VmInst::OpBranch(OpBranch {
+                loc: self.loc,
+                condition: reg,
+                offset: jump_offset,
+            })
+        } else {
+            VmInst::OpJump(OpJump {
+                loc: self.loc,
+                offset: jump_offset,
+            })
+        };
+        func.insts[inst_offset] = op;
     }
 }
 
@@ -185,7 +126,7 @@ pub struct Func {
 ///
 /// let mut interpreter = Interpreter::new(std::io::stdout());
 /// // add a callback named "set_value"
-/// interpreter.add_extern_function("set_value".to_string(), move |_state, parameters, _out| {
+/// interpreter.add_extern_function("set_value", move |_state, parameters, _out| {
 ///     if parameters.len() != 1 {
 ///         return Err("Expected 1 parameter!".to_string());
 ///     }
@@ -259,7 +200,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// let buffer = Vec::<u8>::new();
     /// let mut interpreter = Interpreter::new(buffer);
     /// interpreter.add_extern_function(
-    ///     "hello_world".to_string(),
+    ///     "hello_world",
     ///     |state, parameters, out| {
     ///         if !parameters.is_empty(){
     ///             Err("Too many parameters!".to_string())
@@ -275,7 +216,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// let output = String::from_utf8(output).unwrap();
     /// assert_eq!(output, "Hello, world!")
     /// ```
-    pub fn add_extern_function<F>(&mut self, name: String, f: F)
+    pub fn add_extern_function<F>(&mut self, name: impl Into<String>, f: F)
     where
         F: Fn(&mut State<Buffer>, &[DiatomValue], &mut Buffer) -> Result<DiatomValue, String>
             + 'static,
@@ -283,7 +224,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         let f = GcObject::NativeFunction(Rc::new(RefCell::new(f)));
         let gc_id = self.gc.alloc(f);
         let reg = Reg::Ref(gc_id);
-        let reg_id = self.registers.declare_variable(name, None);
+        let reg_id = self.registers.declare_variable(name.into(), None);
         self.gc.alloc_reg_file(reg_id + 1);
         self.gc.write_reg(reg_id, reg);
     }
@@ -484,55 +425,94 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 condition,
                 body,
             } => {
-                let start_label = self.get_current_func().insts.len();
-                let before_test_inserted = self.registers.insert_offset;
+                let jump_to_start = FutureJump {
+                    previous_insert_offset: self.registers.insert_offset,
+                    condition_reg: None,
+                    previous_inst_offset: self.get_current_func().insts.len(),
+                    loc: loc.clone(),
+                };
                 let branch_inst = if let Some(condition) = condition {
                     let (condition_reg, tmp) = self.compile_expr(condition, false)?;
                     if tmp {
                         self.registers.free_intermediate(condition_reg);
                     }
                     self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
-                    Some((
-                        self.get_current_func().insts.len() - 1,
-                        condition_reg,
-                        condition.get_loc(),
-                    ))
+                    Some(FutureJump {
+                        previous_insert_offset: self.registers.insert_offset,
+                        condition_reg: Some(condition_reg),
+                        previous_inst_offset: self.get_current_func().insts.len() - 1,
+                        loc: condition.get_loc(),
+                    })
                 } else {
                     None
                 };
-                let after_test_inserted = self.registers.insert_offset;
                 self.enter_block();
+                let current_inst = self.get_current_func().insts.len();
+                self.registers.loops.push(Loop {
+                    start_inst_offset: current_inst,
+                    start_insert_offset: self.registers.insert_offset,
+                    breaks: vec![],
+                });
                 for stmt in body.iter() {
                     self.compile_stmt(stmt, true).map_err(|err| {
                         self.leave_block();
                         err
                     })?;
                 }
+                let breaks = self.registers.loops.pop().unwrap().breaks;
                 self.leave_block();
 
-                // number of load const inserted after compile block
-                let inserted = self.registers.insert_offset - before_test_inserted;
-                let jump_loc = self.get_current_func().insts.len();
+                // patch jump to loop start
+                let current_insert_offset = self.registers.insert_offset;
+                jump_to_start.patch_backward(self.get_current_func(), current_insert_offset);
 
-                self.get_current_func().insts.push(VmInst::OpJump(OpJump {
-                    loc: loc.clone(),
-                    offset: start_label as i64 + inserted as i64 - jump_loc as i64,
-                }));
+                // patch breaks
+                breaks.into_iter().for_each(|jump| {
+                    let current_insert_offset = self.registers.insert_offset;
+                    jump.patch_forward(self.get_current_func(), current_insert_offset);
+                });
 
-                // jump out of loop
-                let inserted = self.registers.insert_offset - after_test_inserted;
-                if let Some((inst, reg, loc)) = branch_inst {
-                    self.get_current_func().insts[inst + inserted] = VmInst::OpBranch(OpBranch {
-                        condition: reg,
-                        loc,
-                        offset: self.get_current_func().insts.len() as i64
-                            - inst as i64
-                            - inserted as i64,
-                    })
+                // patch branch out of loop
+                if let Some(jump) = branch_inst {
+                    let current_insert_offset = self.registers.insert_offset;
+                    jump.patch_forward(self.get_current_func(), current_insert_offset);
                 };
             }
-            Stmt::Continue { loc: _ } => todo!(),
-            Stmt::Break { loc: _ } => todo!(),
+            Stmt::Continue { loc } => {
+                let Loop {
+                    start_inst_offset,
+                    start_insert_offset,
+                    breaks: _,
+                } = self
+                    .registers
+                    .loops
+                    .last()
+                    .ok_or(ErrorCode::ContinueOutsideLoop(loc.clone()))?;
+                let jump = FutureJump {
+                    previous_insert_offset: *start_insert_offset,
+                    condition_reg: None,
+                    previous_inst_offset: *start_inst_offset,
+                    loc: loc.clone(),
+                };
+                let current_insert_offset = self.registers.insert_offset;
+                jump.patch_backward(self.get_current_func(), current_insert_offset)
+            }
+            Stmt::Break { loc } => {
+                self.registers
+                    .loops
+                    .last()
+                    .ok_or(ErrorCode::BreakOutsideLoop(loc.clone()))?;
+                let insert_offset = self.registers.insert_offset;
+                let inst_offset = self.get_current_func().insts.len();
+                let jump = FutureJump {
+                    previous_insert_offset: insert_offset,
+                    condition_reg: None,
+                    previous_inst_offset: inst_offset,
+                    loc: loc.clone(),
+                };
+                self.registers.loops.last_mut().unwrap().breaks.push(jump);
+                self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
+            }
             Stmt::Return { loc: _, value: _ } => todo!(),
             Stmt::For {
                 loc: _,

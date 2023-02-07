@@ -20,6 +20,10 @@ pub enum ErrorCode {
         parameter: Loc,
         name: String,
     },
+    /// E2004 Break outside loop
+    BreakOutsideLoop(Loc),
+    /// E2005 Continue outside loop
+    ContinueOutsideLoop(Loc),
 }
 
 impl From<ErrorCode> for Diagnostic {
@@ -57,6 +61,14 @@ impl From<ErrorCode> for Diagnostic {
                 };
                 error.with_labels(labels)
             }
+            ErrorCode::BreakOutsideLoop(loc) => Diagnostic::error()
+                .with_code("E2004")
+                .with_message("Can not break outside a loop")
+                .with_labels(vec![Label::primary((), loc)]),
+            ErrorCode::ContinueOutsideLoop(loc) => Diagnostic::error()
+                .with_code("E2005")
+                .with_message("Can not continue outside a loop")
+                .with_labels(vec![Label::primary((), loc)]),
         }
     }
 }

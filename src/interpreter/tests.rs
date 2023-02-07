@@ -53,6 +53,9 @@ fn test_assignment() {
 #[test]
 fn test_loop() {
     test_ok!("a = 0 until a > 100 do a = a + 1 end a", "101");
+    test_ok!("a = 0 until false do a = 5 break end a", "5");
+    test_err!("break");
+    test_err!("continue");
 }
 
 #[test]

@@ -173,10 +173,12 @@ impl Instruction for OpCallClosure {
     }
 
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
-        let parameters = self.parameters.iter().fold(String::new(), |mut s, x| {
+        let mut parameters = self.parameters.iter().fold(String::new(), |mut s, x| {
             s.push_str(&format!("{x}, "));
             s
         });
+        parameters.pop();
+        parameters.pop();
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} $ Reg#{{{}}} -> {}",
@@ -1201,14 +1203,12 @@ pub struct OpDummy;
 impl Instruction for OpDummy {
     fn exec<Buffer: IoWrite>(
         &self,
-        ip: Ip,
+        _ip: Ip,
         _gc: &mut Gc<Buffer>,
         _out: &mut Buffer,
     ) -> Result<Ip, VmError> {
-        Ok(Ip {
-            func_id: ip.func_id,
-            inst: ip.inst + 1,
-        })
+        // This instruction will never be executed
+        unreachable!()
     }
 
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
