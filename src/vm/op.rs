@@ -772,14 +772,14 @@ impl Instruction for OpEq {
     }
 }
 
-pub struct OpGt {
+pub struct OpNe {
     pub loc: Loc,
     pub lhs: usize,
     pub rhs: usize,
     pub rd: usize,
 }
 
-impl Instruction for OpGt {
+impl Instruction for OpNe {
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -789,17 +789,65 @@ impl Instruction for OpGt {
         let lhs = gc.read_reg(self.lhs);
         let rhs = gc.read_reg(self.rhs);
         let reg = match (lhs, rhs) {
-            (Reg::Unit, Reg::Unit) => Reg::Bool(false),
-            (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 > *i2),
-            (Reg::Int(i1), Reg::Float(f2)) => Reg::Bool((*i1 as f64) > *f2),
-            (Reg::Float(f1), Reg::Int(i2)) => Reg::Bool(*f1 > *i2 as f64),
-            (Reg::Float(f1), Reg::Float(f2)) => Reg::Bool(*f1 > *f2),
-            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::gt(b1, b2)),
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 != *i2),
             (Reg::Str(s1), Reg::Str(s2)) => {
                 let s1 = gc.get_string_by_id(*s1);
                 let s2 = gc.get_string_by_id(*s2);
-                Reg::Bool(s1 > s2)
+                Reg::Bool(s1 != s2)
             }
+            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(*b1 != *b2),
+            (Reg::Unit, Reg::Unit) => Reg::Bool(false),
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "<>", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "ne", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpLt {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpLt {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 < *i2),
+            (Reg::Int(i1), Reg::Float(f2)) => Reg::Bool((*i1 as f64) < *f2),
+            (Reg::Float(f1), Reg::Int(i2)) => Reg::Bool(*f1 < *i2 as f64),
+            (Reg::Float(f1), Reg::Float(f2)) => Reg::Bool(*f1 < *f2),
+            (Reg::Str(s1), Reg::Str(s2)) => {
+                let s1 = gc.get_string_by_id(*s1);
+                let s2 = gc.get_string_by_id(*s2);
+                Reg::Bool(s1 < s2)
+            }
+            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::lt(b1, b2)),
+            (Reg::Unit, Reg::Unit) => Reg::Bool(false),
             _ => {
                 let t1 = get_type(lhs, gc);
                 let t2 = get_type(rhs, gc);
@@ -817,7 +865,154 @@ impl Instruction for OpGt {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "lt", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpLe {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpLe {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 <= *i2),
+            (Reg::Str(s1), Reg::Str(s2)) => {
+                let s1 = gc.get_string_by_id(*s1);
+                let s2 = gc.get_string_by_id(*s2);
+                Reg::Bool(s1 <= s2)
+            }
+            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::le(b1, b2)),
+            (Reg::Unit, Reg::Unit) => Reg::Bool(true),
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "<=", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "le", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpGt {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpGt {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 > *i2),
+            (Reg::Int(i1), Reg::Float(f2)) => Reg::Bool((*i1 as f64) > *f2),
+            (Reg::Float(f1), Reg::Int(i2)) => Reg::Bool(*f1 > *i2 as f64),
+            (Reg::Float(f1), Reg::Float(f2)) => Reg::Bool(*f1 > *f2),
+            (Reg::Str(s1), Reg::Str(s2)) => {
+                let s1 = gc.get_string_by_id(*s1);
+                let s2 = gc.get_string_by_id(*s2);
+                Reg::Bool(s1 > s2)
+            }
+            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::gt(b1, b2)),
+            (Reg::Unit, Reg::Unit) => Reg::Bool(false),
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), ">", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
             "gt", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpGe {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpGe {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 >= *i2),
+            (Reg::Str(s1), Reg::Str(s2)) => {
+                let s1 = gc.get_string_by_id(*s1);
+                let s2 = gc.get_string_by_id(*s2);
+                Reg::Bool(s1 >= s2)
+            }
+            (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::ge(b1, b2)),
+            (Reg::Unit, Reg::Unit) => Reg::Bool(true),
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), ">=", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "ge", self.lhs, self.rhs, self.rd
         )
         .unwrap()
     }

@@ -1,18 +1,18 @@
 #![allow(unused)]
 
-use std::ffi::OsStr;
+use std::{ffi::OsStr, io};
 
 use diatom::Interpreter;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn loop_1million() {
-    let mut interpreter = Interpreter::new();
+    let mut interpreter = Interpreter::new(io::stdout());
     interpreter
         .exec(
             r#"
             a = 0
-            until a > 1_000_000 do 
+            until a >= 1_000_000 do 
                 a = a + 1
             end
         "#,

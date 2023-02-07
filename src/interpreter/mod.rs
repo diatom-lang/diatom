@@ -10,6 +10,7 @@ mod prelude;
 mod string_pool;
 
 mod state;
+use crate::vm::op::{OpGe, OpLe, OpLt, OpNe};
 use crate::{
     diagnostic::{Diagnostic, Loc},
     frontend::{
@@ -799,41 +800,16 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             }
             OpInfix::Ne => {
                 let rd = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(VmInst::OpEq(OpEq {
-                    loc: loc.clone(),
-                    lhs,
-                    rhs,
-                    rd,
-                }));
                 self.get_current_func()
                     .insts
-                    .push(VmInst::OpNot(OpNot { loc, lhs: rd, rd }));
+                    .push(VmInst::OpNe(OpNe { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Ge => {
-                let rd1 = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(VmInst::OpGt(OpGt {
-                    loc: loc.clone(),
-                    lhs,
-                    rhs,
-                    rd: rd1,
-                }));
-                let rd2 = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(VmInst::OpEq(OpEq {
-                    loc: loc.clone(),
-                    lhs,
-                    rhs,
-                    rd: rd2,
-                }));
-                self.registers.free_intermediate(rd1);
-                self.registers.free_intermediate(rd2);
                 let rd = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(VmInst::OpOr(OpOr {
-                    loc,
-                    lhs: rd1,
-                    rhs: rd2,
-                    rd,
-                }));
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpGe(OpGe { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Gt => {
@@ -844,45 +820,17 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 (rd, true)
             }
             OpInfix::Lt => {
-                let rd1 = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(VmInst::OpGt(OpGt {
-                    loc: loc.clone(),
-                    lhs,
-                    rhs,
-                    rd: rd1,
-                }));
-                let rd2 = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(VmInst::OpEq(OpEq {
-                    loc: loc.clone(),
-                    lhs,
-                    rhs,
-                    rd: rd2,
-                }));
-                self.registers.free_intermediate(rd1);
-                self.registers.free_intermediate(rd2);
                 let rd = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(VmInst::OpOr(OpOr {
-                    loc: loc.clone(),
-                    lhs: rd1,
-                    rhs: rd2,
-                    rd,
-                }));
                 self.get_current_func()
                     .insts
-                    .push(VmInst::OpNot(OpNot { loc, lhs: rd, rd }));
+                    .push(VmInst::OpLt(OpLt { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Le => {
                 let rd = self.registers.declare_intermediate();
-                self.get_current_func().insts.push(VmInst::OpGt(OpGt {
-                    loc: loc.clone(),
-                    lhs,
-                    rhs,
-                    rd,
-                }));
                 self.get_current_func()
                     .insts
-                    .push(VmInst::OpNot(OpNot { loc, lhs: rd, rd }));
+                    .push(VmInst::OpLe(OpLe { loc, lhs, rhs, rd }));
                 (rd, true)
             }
             OpInfix::Plus => {
