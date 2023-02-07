@@ -17,8 +17,9 @@ mod frontend;
 mod interpreter;
 mod vm;
 pub use interpreter::Interpreter;
-pub use vm::Reg as DiatomValue;
-pub use vm::State;
+pub use interpreter::Reg as DiatomValue;
+pub use interpreter::State;
+pub use std::io::Write as IoWrite;
 /// The version of this build
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

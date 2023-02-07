@@ -1,5 +1,5 @@
 use diatom::{Console, Interpreter};
-use std::{fs, path::PathBuf};
+use std::{fs, io, path::PathBuf};
 
 use clap::Parser;
 
@@ -34,15 +34,15 @@ fn main() {
         }
         (Some(path), false) => {
             let code = fs::read_to_string(path).expect("Error: File can not be read!");
-            let mut interpreter = Interpreter::new();
-            let result = match interpreter.exec(code, path.as_os_str(), !args.no_color) {
-                Ok(s) | Err(s) => s,
+            let mut interpreter = Interpreter::new(io::stdout());
+            match interpreter.exec(code, path.as_os_str(), !args.no_color) {
+                Ok(_) => (),
+                Err(s) => print!("{s}"),
             };
-            print!("{result}");
         }
         (Some(path), true) => {
             let code = fs::read_to_string(path).expect("Error: File can not be read!");
-            let mut interpreter = Interpreter::new();
+            let mut interpreter = Interpreter::new(io::stdout());
             let result = match interpreter.decompile(code, path.as_os_str(), !args.no_color) {
                 Ok(s) | Err(s) => s,
             };

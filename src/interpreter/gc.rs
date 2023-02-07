@@ -1,12 +1,15 @@
 use std::{
     cell::{RefCell, UnsafeCell},
+    io::Write,
     ops::{Index, IndexMut},
     rc::Rc,
 };
 
+use ahash::AHashMap;
+
 use crate::State;
 
-use super::{string_pool::StringPool, FuncId, Ip, Object};
+use super::{string_pool::StringPool, Ip};
 
 /// Reference id of heap allocated object
 pub type RefId = usize;
@@ -15,16 +18,22 @@ enum Mark {
     White,
 }
 
-pub enum GcObject {
+pub struct Object {
+    _attributes: AHashMap<String, Reg>,
+}
+
+pub enum GcObject<Buffer: Write> {
     Closure {
-        func_id: FuncId,
+        func_id: usize,
         parameters: usize,
         reg_size: usize,
         /// local id, shared reg
         captured: Vec<(usize, Rc<UnsafeCell<Reg>>)>,
     },
     #[allow(clippy::type_complexity)]
-    NativeFunction(Rc<RefCell<dyn Fn(&mut State, &[Reg]) -> Result<Reg, String>>>),
+    NativeFunction(
+        Rc<RefCell<dyn Fn(&mut State<Buffer>, &[Reg], &mut Buffer) -> Result<Reg, String>>>,
+    ),
     _Object(Object),
 }
 
@@ -53,14 +62,14 @@ struct CallStack {
 }
 
 /// Garbage Collector
-pub struct Gc {
-    pool: Vec<(GcObject, Mark)>,
+pub struct Gc<Buffer: Write> {
+    pool: Vec<(GcObject<Buffer>, Mark)>,
     free: Vec<usize>,
     call_stack: CallStack,
     string_pool: StringPool,
 }
 
-impl Gc {
+impl<Buffer: Write> Gc<Buffer> {
     pub fn new() -> Self {
         Self {
             pool: vec![],
@@ -78,7 +87,7 @@ impl Gc {
         }
     }
 
-    pub fn alloc(&mut self, obj: GcObject) -> RefId {
+    pub fn alloc(&mut self, obj: GcObject<Buffer>) -> RefId {
         if self.free.is_empty() {
             self.pool.push((obj, Mark::White));
             self.pool.len() - 1
@@ -201,14 +210,14 @@ impl Gc {
     }
 }
 
-impl Index<RefId> for Gc {
-    type Output = GcObject;
+impl<Buffer: Write> Index<RefId> for Gc<Buffer> {
+    type Output = GcObject<Buffer>;
     fn index(&self, index: RefId) -> &Self::Output {
         &self.pool[index].0
     }
 }
 
-impl IndexMut<RefId> for Gc {
+impl<Buffer: Write> IndexMut<RefId> for Gc<Buffer> {
     fn index_mut(&mut self, index: RefId) -> &mut Self::Output {
         &mut self.pool[index].0
     }
