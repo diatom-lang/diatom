@@ -624,10 +624,6 @@ impl Parser {
                 return Stmt::Error;
             }
         };
-        let eof = self.consume_to_op(iter, ast, LPar, Some((Key(Def), start.clone())));
-        if eof {
-            return Stmt::Error;
-        }
         let mut parameters = vec![];
         loop {
             match iter.peek() {
@@ -637,11 +633,8 @@ impl Parser {
                     let loc = iter.loc();
                     parameters.push((name, loc));
                 }
-                Some(Op(RPar)) => {
+                Some(Op(Assign)) => {
                     iter.next();
-                    if self.consume_to_op(iter, ast, Assign, Some((Key(Def), start.clone()))) {
-                        return Stmt::Error;
-                    };
                     break;
                 }
                 Some(token) => {
@@ -649,6 +642,7 @@ impl Parser {
                         ErrorCode::UnexpectedToken(Some(token.clone()), None, None),
                         iter.loc(),
                     ));
+                    iter.next();
                 }
                 None => {
                     ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
@@ -843,22 +837,38 @@ impl Parser {
             Some(Key(Require)) => self.consume_require(iter, ast),
             Some(Op(LBrk)) => {
                 iter.next();
+                let previous_loc = iter.loc();
                 let mut exprs = vec![];
-                loop {
-                    match iter.peek() {
-                        Some(Op(RBrk)) => {
-                            iter.next();
-                            break Expr::Const {
-                                loc: start.start..iter.loc().end,
-                                value: Const::List(exprs),
-                            };
-                        }
-                        Some(_) => exprs.push(self.consume_expr(iter, ast, 0, Some(Op(RBrk)))),
-                        None => {
-                            ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                            break Expr::Error;
+                if let Some(Op(RBrk)) = iter.peek() {
+                    iter.next();
+                } else {
+                    let mut parameters = self.consume_expr(iter, ast, 0, Some(Op(RBrk)));
+                    loop {
+                        match parameters {
+                            Expr::Infix {
+                                loc: _,
+                                op: OpInfix::Comma,
+                                lhs,
+                                rhs,
+                            } => {
+                                exprs.push(*rhs);
+                                parameters = *lhs;
+                            }
+                            expr => {
+                                exprs.push(expr);
+                                break;
+                            }
                         }
                     }
+                    // reverse to normal order
+                    exprs.reverse();
+                    if self.consume_to_op(iter, ast, RBrk, Some((Op(LBrk), previous_loc))) {
+                        return Expr::Error;
+                    };
+                }
+                Expr::Const {
+                    loc: start.start..iter.loc().end,
+                    value: Const::List(exprs),
                 }
             }
             Some(Op(LBrc)) => self.consume_table(iter, ast),
@@ -930,27 +940,40 @@ impl Parser {
                             OpPostfix::Call => {
                                 iter.next();
                                 iter.next();
+                                let previous_loc = iter.loc();
                                 let mut exprs = vec![];
-                                loop {
-                                    match iter.peek() {
-                                        Some(Op(RPar)) => {
-                                            iter.next();
-                                            break;
-                                        }
-                                        Some(_) => exprs.push(self.consume_expr(
-                                            iter,
-                                            ast,
-                                            0,
-                                            Some(Op(RBrk)),
-                                        )),
-                                        None => {
-                                            ast.add_diagnostic(to_diagnostic(
-                                                ErrorCode::UnexpectedEof,
-                                                iter.loc(),
-                                            ));
-                                            break;
+                                if let Some(Op(RPar)) = iter.peek() {
+                                    iter.next();
+                                } else {
+                                    let mut parameters =
+                                        self.consume_expr(iter, ast, 0, Some(Op(RPar)));
+                                    loop {
+                                        match parameters {
+                                            Expr::Infix {
+                                                loc: _,
+                                                op: OpInfix::Comma,
+                                                lhs,
+                                                rhs,
+                                            } => {
+                                                exprs.push(*rhs);
+                                                parameters = *lhs;
+                                            }
+                                            expr => {
+                                                exprs.push(expr);
+                                                break;
+                                            }
                                         }
                                     }
+                                    // reverse to normal order
+                                    exprs.reverse();
+                                    if self.consume_to_op(
+                                        iter,
+                                        ast,
+                                        RPar,
+                                        Some((Op(LPar), previous_loc)),
+                                    ) {
+                                        return Expr::Error;
+                                    };
                                 }
                                 lhs = Expr::Call {
                                     loc: start.start..iter.loc().end,
