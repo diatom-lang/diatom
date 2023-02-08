@@ -34,7 +34,7 @@ pub enum Stmt {
     Def {
         loc: Loc,
         name: String,
-        parameters: Vec<String>,
+        parameters: Vec<(String, Loc)>,
         body: Vec<Stmt>,
     },
     Error,

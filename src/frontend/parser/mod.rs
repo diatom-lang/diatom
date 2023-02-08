@@ -634,7 +634,8 @@ impl Parser {
                 Some(Id(name)) => {
                     let name = name.clone();
                     iter.next();
-                    parameters.push(name);
+                    let loc = iter.loc();
+                    parameters.push((name, loc));
                 }
                 Some(Op(RPar)) => {
                     iter.next();

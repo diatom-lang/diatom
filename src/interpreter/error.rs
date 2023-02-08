@@ -24,6 +24,8 @@ pub enum ErrorCode {
     BreakOutsideLoop(Loc),
     /// E2005 Continue outside loop
     ContinueOutsideLoop(Loc),
+    /// E2006 Return outside function
+    ReturnOutsideFunction(Loc),
 }
 
 impl From<ErrorCode> for Diagnostic {
@@ -68,6 +70,10 @@ impl From<ErrorCode> for Diagnostic {
             ErrorCode::ContinueOutsideLoop(loc) => Diagnostic::error()
                 .with_code("E2005")
                 .with_message("Can not continue outside a loop")
+                .with_labels(vec![Label::primary((), loc)]),
+            ErrorCode::ReturnOutsideFunction(loc) => Diagnostic::error()
+                .with_code("E2006")
+                .with_message("Can not return outside a function")
                 .with_labels(vec![Label::primary((), loc)]),
         }
     }

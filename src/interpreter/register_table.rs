@@ -30,7 +30,7 @@ pub struct Loop {
 
 #[derive(Clone)]
 pub struct RegisterTable {
-    prev: Option<Box<RegisterTable>>,
+    pub prev: Option<Box<RegisterTable>>,
     pub variables: AHashMap<String, (usize, Option<Loc>)>,
     free: Vec<usize>,
     pub assigned: usize,

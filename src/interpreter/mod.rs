@@ -3,6 +3,7 @@ use std::fmt::Write;
 use std::{ffi::OsStr, rc::Rc};
 
 use ahash::AHashSet;
+use either::Either;
 
 mod error;
 pub mod gc;
@@ -529,7 +530,25 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 self.registers.loops.last_mut().unwrap().breaks.push(jump);
                 self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
             }
-            Stmt::Return { loc: _, value: _ } => todo!(),
+            Stmt::Return { loc, value } => {
+                if self.registers.prev.is_none() {
+                    return Err(ErrorCode::ReturnOutsideFunction(loc.clone()));
+                }
+                let return_reg = if let Some(expr) = value {
+                    let (reg, tmp) = self.compile_expr(expr, false)?;
+                    if tmp {
+                        self.registers.free_intermediate(reg);
+                    }
+                    reg
+                } else {
+                    let (reg, _) = self.compile_constant(&Const::Unit, loc.clone());
+                    reg
+                };
+                self.get_current_func().insts.push(VmInst::OpRet(OpRet {
+                    return_reg,
+                    loc: loc.clone(),
+                }))
+            }
             Stmt::For {
                 loc: _,
                 loop_variable: _,
@@ -537,11 +556,51 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 body: _,
             } => todo!(),
             Stmt::Def {
-                loc: _,
-                name: _,
-                parameters: _,
-                body: _,
-            } => todo!(),
+                loc,
+                name,
+                parameters,
+                body,
+            } => {
+                let (func_id, parameters, capture, reg_size) =
+                    self.compile_closure(parameters, either::Right(body), loc.clone())?;
+                let reg_f_id = self.registers.declare_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpMakeClosure(OpMakeClosure {
+                        loc: loc.clone(),
+                        func_id,
+                        parameters,
+                        rd: reg_f_id,
+                        capture,
+                        reg_size,
+                    }));
+
+                // declare variable
+                let id = if let Some((id, depth, loc)) = self.registers.lookup_variable(name) {
+                    // variable is captured
+                    // make a local copy and register capture info
+                    if depth > 0 {
+                        let local_id = self.registers.declare_variable(name, loc);
+                        self.registers.capture.push(Capture {
+                            rd: local_id,
+                            rs: id,
+                            depth,
+                        });
+                        local_id
+                    } else {
+                        id
+                    }
+                } else {
+                    self.scopes.last_mut().unwrap().insert(name.clone());
+                    self.registers.declare_variable(name, Some(loc.clone()))
+                };
+                self.registers.free_intermediate(reg_f_id);
+                self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                    loc: loc.clone(),
+                    rs: reg_f_id,
+                    rd: id,
+                }));
+            }
             Stmt::Error => unreachable!(),
         }
         Ok(return_value)
@@ -803,7 +862,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 body,
             } => {
                 let (func_id, parameters, capture, reg_size) =
-                    self.compile_closure(parameters, body, loc.clone())?;
+                    self.compile_closure(parameters, either::Left(body), loc.clone())?;
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
@@ -823,8 +882,6 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
 
     fn compile_assignment(&mut self, lhs: &Expr, rhs: &Expr, loc: Loc) -> Result<(), ErrorCode> {
         if let Expr::Id { loc: id_loc, name } = lhs {
-            // register to local block
-            if self.registers.lookup_variable(name).is_none() {}
             // declare variable
             let id = if let Some((id, depth, loc)) = self.registers.lookup_variable(name) {
                 // variable is captured
@@ -1042,7 +1099,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     fn compile_closure(
         &mut self,
         parameters: &[(String, Loc)],
-        body: &Expr,
+        body: Either<&Expr, &[Stmt]>,
         loc: Loc,
     ) -> std::result::Result<(usize, usize, Vec<Capture>, usize), ErrorCode> {
         let func_id = self.byte_code.len();
@@ -1063,10 +1120,37 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 self.registers.declare_variable(para, Some(loc.clone()));
             }
         }
-        let result = self.compile_expr(body, false).map_err(|err| {
-            self.registers.leave_function();
-            err
-        })?;
+        let result = match body {
+            Either::Left(body) => self.compile_expr(body, false).map_err(|err| {
+                self.registers.leave_function();
+                err
+            })?,
+            Either::Right(body) => {
+                let mut ret = None;
+                if body.is_empty() {
+                    // load a unit value
+                    let (reg, _) = self.compile_constant(&Const::Unit, loc.clone());
+                    ret = Some((reg, false));
+                }
+
+                for (i, stmt) in body.iter().enumerate() {
+                    if i == body.len() - 1 {
+                        let ret_this = self.compile_stmt(stmt, false)?;
+                        // move return value to return reg
+                        if let Some(ret_this) = ret_this {
+                            ret = Some(ret_this);
+                        } else {
+                            // load a unit value
+                            let (reg, _) = self.compile_constant(&Const::Unit, stmt.get_loc());
+                            ret = Some((reg, false));
+                        }
+                    } else {
+                        self.compile_stmt(stmt, true)?;
+                    }
+                }
+                ret.unwrap()
+            }
+        };
         // return expression value
         self.get_current_func().insts.push(VmInst::OpRet(OpRet {
             return_reg: result.0,
