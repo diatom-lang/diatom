@@ -716,7 +716,7 @@ impl Parser {
                 value: Const::Table(vec![]),
             };
         }
-        let mut key_vals = vec![];
+        let mut key_vals: Vec<(String, Expr, std::ops::Range<usize>)> = vec![];
         let mut content = self.consume_expr(iter, ast, 0, Some(Op(RBrc)));
         if self.consume_to_op(iter, ast, RBrc, Some((Op(LBrc), start.clone()))) {
             return Expr::Error;
@@ -731,8 +731,8 @@ impl Parser {
                     rhs,
                 } => {
                     let lhs = *lhs;
-                    let name = match lhs {
-                        Expr::Id { loc: _, name } => name,
+                    let (name, name_loc) = match lhs {
+                        Expr::Id { loc, name } => (name, loc),
                         _ => {
                             ast.add_diagnostic(to_diagnostic(
                                 ErrorCode::InvalidTableKey,
@@ -741,6 +741,15 @@ impl Parser {
                             return Expr::Error;
                         }
                     };
+                    if let Some((name, _, prev_loc)) =
+                        key_vals.iter().find(|(prev, _, _)| prev == &name)
+                    {
+                        ast.add_diagnostic(to_diagnostic(
+                            ErrorCode::DuplicateKey(prev_loc.clone(), name.clone()),
+                            name_loc,
+                        ));
+                        return Expr::Error;
+                    }
                     key_vals.push((name, *rhs, loc));
                     break;
                 }
@@ -758,8 +767,8 @@ impl Parser {
                             rhs,
                         } => {
                             let lhs = *lhs;
-                            let name = match lhs {
-                                Expr::Id { loc: _, name } => name,
+                            let (name, name_loc) = match lhs {
+                                Expr::Id { loc, name } => (name, loc),
                                 _ => {
                                     ast.add_diagnostic(to_diagnostic(
                                         ErrorCode::InvalidTableKey,
@@ -768,6 +777,15 @@ impl Parser {
                                     return Expr::Error;
                                 }
                             };
+                            if let Some((name, _, prev_loc)) =
+                                key_vals.iter().find(|(prev, _, _)| prev == &name)
+                            {
+                                ast.add_diagnostic(to_diagnostic(
+                                    ErrorCode::DuplicateKey(prev_loc.clone(), name.clone()),
+                                    name_loc,
+                                ));
+                                return Expr::Error;
+                            }
                             key_vals.push((name, *rhs, loc));
                         }
                         _ => {

@@ -30,8 +30,10 @@ pub enum ErrorCode {
     ModuleNotFound(String),
     /// E1007 Invalid Module, Can Not Parse
     InvalidModule,
-    /// Invalid Table Format
+    /// E1008 Invalid Table Format
     InvalidTableFormat,
+    /// E1009 Duplicate Key
+    DuplicateKey(Loc, String),
 }
 
 pub fn to_diagnostic(error: ErrorCode, loc: Loc) -> (Diagnostic, bool) {
@@ -102,6 +104,10 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc) -> (Diagnostic, bool) {
             .with_message("Invalid syntax in table")
             .with_labels(vec![Label::primary((), loc)])
             .with_notes(vec!["Table should look like `{<identifier>=<expression>, <identifier>=<expression>, ...}`".to_string()]),
+        ErrorCode::DuplicateKey(prev_loc, name) => Diagnostic::error()
+            .with_code("E1007")
+            .with_message(format!("Duplicate table key `{name}`"))
+            .with_labels(vec![Label::primary((), loc), Label::secondary((), prev_loc).with_message("Also defined here")]),
     };
     (diag, eof)
 }
