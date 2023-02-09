@@ -12,7 +12,7 @@ mod register_table;
 mod string_pool;
 
 mod state;
-use crate::vm::op::{OpGe, OpLe, OpLt, OpNe};
+use crate::vm::op::{OpGe, OpLe, OpLt, OpMakeTable, OpNe, OpSetAttr};
 use crate::{
     diagnostic::{Diagnostic, Loc},
     frontend::{
@@ -373,7 +373,41 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     Reg::Int(i) => writeln!(self.out, "{i}"),
                     Reg::Float(f) => writeln!(self.out, "{f}"),
                     Reg::Str(sid) => writeln!(self.out, "{}", self.gc.get_string_by_id(*sid)),
-                    Reg::Ref(r) => writeln!(self.out, "Object@<{r}>"),
+                    Reg::Ref(r) => match &self.gc[*r] {
+                        GcObject::Closure {
+                            func_id,
+                            parameters: _,
+                            reg_size: _,
+                            captured: _,
+                        } => {
+                            writeln!(self.out, "Closure[{func_id}]")
+                        }
+                        GcObject::NativeFunction(f) => {
+                            write!(self.out, "External function@{:p}", f.as_ptr())
+                        }
+                        GcObject::Table(t) => {
+                            let mut table = "{".to_string();
+                            for (i, (k, v)) in t.attributes.iter().enumerate() {
+                                let content = match v {
+                                    Reg::Unit => "()".to_string(),
+                                    Reg::Bool(b) => format!("{b}"),
+                                    Reg::Int(i) => format!("{i}"),
+                                    Reg::Float(f) => format!("{f}"),
+                                    Reg::Str(sid) => {
+                                        format!("'{}'", self.gc.get_string_by_id(*sid))
+                                    }
+                                    Reg::Ref(r) => format!("Ref@<{r}>"),
+                                };
+                                if i == t.attributes.len() - 1 {
+                                    write!(table, "{k} = {content}").unwrap();
+                                } else {
+                                    write!(table, "{k} = {content}, ").unwrap();
+                                }
+                            }
+                            write!(table, "}}").unwrap();
+                            writeln!(self.out, "{table}")
+                        }
+                    },
                 }
                 .map_err(|err| {
                     let error_code = VmError::IoError {
@@ -541,7 +575,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     }
                     reg
                 } else {
-                    let (reg, _) = self.compile_constant(&Const::Unit, loc.clone());
+                    let (reg, _) = self.compile_constant(&Const::Unit, loc.clone())?;
                     reg
                 };
                 self.get_current_func().insts.push(VmInst::OpRet(OpRet {
@@ -652,7 +686,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 None => Err(ErrorCode::NameNotDefined(loc.clone(), name.clone())),
             },
             Expr::Parentheses { loc: _, content } => self.compile_expr(content, discard),
-            Expr::Const { loc, value } => Ok(self.compile_constant(value, loc.clone())),
+            Expr::Const { loc, value } => Ok(self.compile_constant(value, loc.clone()))?,
             Expr::Error => unreachable!(),
             Expr::Block { loc, body } => {
                 self.enter_block();
@@ -671,7 +705,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     (_, true) => Ok((usize::MAX, true)),
                     (Some(ret), false) => Ok(ret),
                     (None, false) => {
-                        let rd = self.compile_constant(&Const::Unit, loc.clone());
+                        let rd = self.compile_constant(&Const::Unit, loc.clone())?;
                         Ok(rd)
                     }
                 }
@@ -715,7 +749,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     // return unit for empty body
                     if body.is_empty() && !discard {
                         // load a unit value
-                        let (reg, _) = self.compile_constant(&Const::Unit, loc.clone());
+                        let (reg, _) = self.compile_constant(&Const::Unit, loc.clone())?;
                         // move unit value
                         self.get_current_func().insts.push(VmInst::OpMove(OpMove {
                             loc: loc.clone(),
@@ -738,7 +772,8 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                                 }))
                             } else {
                                 // load a unit value
-                                let (reg, _) = self.compile_constant(&Const::Unit, stmt.get_loc());
+                                let (reg, _) =
+                                    self.compile_constant(&Const::Unit, stmt.get_loc())?;
                                 // move unit value
                                 self.get_current_func().insts.push(VmInst::OpMove(OpMove {
                                     loc: stmt.get_loc(),
@@ -772,7 +807,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     self.enter_block();
                     if body.is_empty() && !discard {
                         // load a unit value
-                        let (reg, _) = self.compile_constant(&Const::Unit, loc.clone());
+                        let (reg, _) = self.compile_constant(&Const::Unit, loc.clone())?;
                         // move unit value
                         self.get_current_func().insts.push(VmInst::OpMove(OpMove {
                             loc: loc.clone(),
@@ -795,7 +830,8 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                                 }))
                             } else {
                                 // load a unit value
-                                let (reg, _) = self.compile_constant(&Const::Unit, stmt.get_loc());
+                                let (reg, _) =
+                                    self.compile_constant(&Const::Unit, stmt.get_loc())?;
                                 // move unit value
                                 self.get_current_func().insts.push(VmInst::OpMove(OpMove {
                                     loc: stmt.get_loc(),
@@ -916,7 +952,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         }
     }
 
-    fn compile_constant(&mut self, constant: &Const, loc: Loc) -> (usize, bool) {
+    fn compile_constant(&mut self, constant: &Const, loc: Loc) -> Result<(usize, bool), ErrorCode> {
         let constant = match constant {
             Const::Unit => self
                 .registers
@@ -942,9 +978,29 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 .get_or_alloc_constant(ConstantValue::Bool(*b))
                 .map_err(|reg| (reg, Reg::Bool(*b))),
             Const::List(_) => todo!(),
-            Const::Table(_) => todo!(),
+            Const::Table(pairs) => {
+                let reg_id = self.registers.declare_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpMakeTable(OpMakeTable { rd: reg_id }));
+                for (name, expr, loc) in pairs.iter() {
+                    let (value, tmp) = self.compile_expr(expr, false)?;
+                    if tmp {
+                        self.registers.free_intermediate(value);
+                    }
+                    self.get_current_func()
+                        .insts
+                        .push(VmInst::OpSetAttr(OpSetAttr {
+                            loc: loc.clone(),
+                            rs: value,
+                            rd: reg_id,
+                            attrs: vec![name.clone()],
+                        }));
+                }
+                return Ok((reg_id, true));
+            }
         };
-        match constant {
+        Ok(match constant {
             Ok(reg_id) => (reg_id, false),
             Err((reg_id, reg)) => {
                 let insert_loc = self.registers.current_start_loc;
@@ -959,7 +1015,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 );
                 (reg_id, false)
             }
-        }
+        })
     }
 
     fn compile_infix(&mut self, op: &OpInfix, lhs: usize, rhs: usize, loc: Loc) -> (usize, bool) {
@@ -1129,7 +1185,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 let mut ret = None;
                 if body.is_empty() {
                     // load a unit value
-                    let (reg, _) = self.compile_constant(&Const::Unit, loc.clone());
+                    let (reg, _) = self.compile_constant(&Const::Unit, loc.clone())?;
                     ret = Some((reg, false));
                 }
 
@@ -1141,7 +1197,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                             ret = Some(ret_this);
                         } else {
                             // load a unit value
-                            let (reg, _) = self.compile_constant(&Const::Unit, stmt.get_loc());
+                            let (reg, _) = self.compile_constant(&Const::Unit, stmt.get_loc())?;
                             ret = Some((reg, false));
                         }
                     } else {

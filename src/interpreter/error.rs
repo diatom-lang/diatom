@@ -37,7 +37,7 @@ impl From<ErrorCode> for Diagnostic {
                 .with_labels(vec![Label::primary((), loc)]),
             ErrorCode::NameNotDefined(loc, name) => Diagnostic::error()
                 .with_code("E2001")
-                .with_message(format!("Name `{name}` is not defined"))
+                .with_message(format!("Name `{name}` is not defined in current scope"))
                 .with_labels(vec![Label::primary((), loc)]),
             ErrorCode::InvalidAssignment(loc) => Diagnostic::error()
                 .with_code("E2002")

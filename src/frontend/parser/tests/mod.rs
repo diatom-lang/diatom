@@ -41,6 +41,7 @@ fn test_invalid() {
     test_str("a$[]", true);
     test_str("[1 2,]", true);
     test_str("[1 2]", true);
+    test_str("a$([1 2], [])", true);
 }
 
 #[test]
@@ -106,7 +107,7 @@ fn test_loop() {
 #[test]
 fn test_table() {
     test_str("{}", false);
-    test_str("{ a = 1 b= 3 c= 'abc'}", false);
+    test_str("{ a = 1, b= 3, c= 'abc'}", false);
     test_str("{loop = 1}", true);
 }
 

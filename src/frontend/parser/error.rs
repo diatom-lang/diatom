@@ -30,6 +30,8 @@ pub enum ErrorCode {
     ModuleNotFound(String),
     /// E1007 Invalid Module, Can Not Parse
     InvalidModule,
+    /// Invalid Table Format
+    InvalidTableFormat,
 }
 
 pub fn to_diagnostic(error: ErrorCode, loc: Loc) -> (Diagnostic, bool) {
@@ -95,6 +97,11 @@ pub fn to_diagnostic(error: ErrorCode, loc: Loc) -> (Diagnostic, bool) {
             .with_code("E1007")
             .with_message("Error encountered while parsing module")
             .with_labels(vec![Label::primary((), loc)]),
+        ErrorCode::InvalidTableFormat => Diagnostic::error()
+            .with_code("E1008")
+            .with_message("Invalid syntax in table")
+            .with_labels(vec![Label::primary((), loc)])
+            .with_notes(vec!["Table should look like `{<identifier>=<expression>, <identifier>=<expression>, ...}`".to_string()]),
     };
     (diag, eof)
 }

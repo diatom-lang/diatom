@@ -208,7 +208,7 @@ pub enum Const {
     Str(String),
     Bool(bool),
     List(Vec<Expr>),
-    Table(Vec<(String, Expr)>),
+    Table(Vec<(String, Expr, Loc)>),
 }
 
 /// Abstract syntax tree on a given file

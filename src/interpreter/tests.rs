@@ -121,3 +121,9 @@ fn test_if() {
         "3"
     );
 }
+
+#[test]
+fn test_table() {
+    test_ok!("{}", "{}");
+    test_ok!("{a = 1, b=2}", "{a = 1, b = 2}");
+}

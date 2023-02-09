@@ -26,8 +26,8 @@ use std::{
 const fn precedence_infix(op: OpInfix) -> (u16, u16) {
     use OpInfix::*;
     match op {
-        Assign => (2, 1),
-        Comma => (3, 4),
+        Comma => (1, 2),
+        Assign => (4, 3),
         Range => (5, 6),
         Or => (7, 8),
         And => (9, 10),
@@ -707,35 +707,92 @@ impl Parser {
         use Token::*;
         iter.next();
         let start = iter.loc();
+
+        if let Some(Op(RBrc)) = iter.peek() {
+            iter.next();
+            let end = iter.loc();
+            return Expr::Const {
+                loc: start.start..end.end,
+                value: Const::Table(vec![]),
+            };
+        }
         let mut key_vals = vec![];
+        let mut content = self.consume_expr(iter, ast, 0, Some(Op(RBrc)));
+        if self.consume_to_op(iter, ast, RBrc, Some((Op(LBrc), start.clone()))) {
+            return Expr::Error;
+        };
+
         loop {
-            match iter.peek() {
-                Some(Op(RBrc)) => {
-                    iter.next();
-                    return Expr::Const {
-                        loc: start.start..iter.loc().end,
-                        value: Const::Table(key_vals),
-                    };
-                }
-                Some(_) => {
-                    if let Some(Token::Id(id)) = iter.peek() {
-                        let key = id.clone();
-                        iter.next();
-                        if self.consume_to_op(iter, ast, Assign, None) {
+            match content {
+                Expr::Infix {
+                    loc,
+                    op: OpInfix::Assign,
+                    lhs,
+                    rhs,
+                } => {
+                    let lhs = *lhs;
+                    let name = match lhs {
+                        Expr::Id { loc: _, name } => name,
+                        _ => {
+                            ast.add_diagnostic(to_diagnostic(
+                                ErrorCode::InvalidTableKey,
+                                lhs.get_loc(),
+                            ));
                             return Expr::Error;
-                        };
-                        let value = self.consume_expr(iter, ast, 0, Some(Op(RBrc)));
-                        key_vals.push((key, value));
-                    } else {
-                        let loc = iter.next_loc();
-                        ast.add_diagnostic(to_diagnostic(ErrorCode::InvalidTableKey, loc));
-                        iter.next();
-                    }
+                        }
+                    };
+                    key_vals.push((name, *rhs, loc));
+                    break;
                 }
-                None => {
+                Expr::Infix {
+                    loc,
+                    op: OpInfix::Comma,
+                    lhs,
+                    rhs,
+                } => {
+                    match *rhs {
+                        Expr::Infix {
+                            loc,
+                            op: OpInfix::Assign,
+                            lhs,
+                            rhs,
+                        } => {
+                            let lhs = *lhs;
+                            let name = match lhs {
+                                Expr::Id { loc: _, name } => name,
+                                _ => {
+                                    ast.add_diagnostic(to_diagnostic(
+                                        ErrorCode::InvalidTableKey,
+                                        lhs.get_loc(),
+                                    ));
+                                    return Expr::Error;
+                                }
+                            };
+                            key_vals.push((name, *rhs, loc));
+                        }
+                        _ => {
+                            ast.add_diagnostic(to_diagnostic(ErrorCode::InvalidTableFormat, loc));
+                            return Expr::Error;
+                        }
+                    }
+                    content = *lhs;
+                }
+                Expr::Error => return content,
+                _ => {
+                    ast.add_diagnostic(to_diagnostic(
+                        ErrorCode::InvalidTableFormat,
+                        content.get_loc(),
+                    ));
                     return Expr::Error;
                 }
             }
+        }
+
+        let end = iter.loc();
+        key_vals.reverse();
+        Expr::Const {
+            loc: start.start..end.end,
+            value: Const::Table(key_vals),
         }
     }
 

@@ -1,7 +1,9 @@
+use ahash::AHashMap;
+
 use crate::{
     diagnostic::Loc,
     interpreter::{
-        gc::{Gc, GcObject, Reg},
+        gc::{Gc, GcObject, Reg, Table},
         Capture,
     },
     IoWrite, State,
@@ -27,7 +29,7 @@ fn get_type<Buffer: IoWrite>(reg: &Reg, gc: &Gc<Buffer>) -> String {
                     reg_size: _,
                 } => "Closure".to_string(),
                 GcObject::NativeFunction(_) => "Extern_Function".to_string(),
-                GcObject::_Object(_) => "Table".to_string(),
+                GcObject::Table(_) => "Table".to_string(),
             }
         }
     }
@@ -1258,7 +1260,7 @@ impl Instruction for OpDummy {
     }
 }
 
-/// Print register to output and stop execution
+/// Pause execution and yield control
 pub struct OpYield {
     pub show_id: Option<usize>,
 }
@@ -1283,6 +1285,106 @@ impl Instruction for OpYield {
             } else {
                 String::new()
             }
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpSetAttr {
+    pub loc: Loc,
+    pub rs: usize,
+    pub rd: usize,
+    pub attrs: Vec<String>,
+}
+
+impl Instruction for OpSetAttr {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let target = gc.read_reg(self.rs).clone();
+        debug_assert!(!self.attrs.is_empty());
+        let mut table = gc.read_reg(self.rd).clone();
+        for (i, attr) in self.attrs.iter().enumerate() {
+            match table {
+                Reg::Ref(r) => match &mut gc[r] {
+                    GcObject::Table(t) => {
+                        if i == self.attrs.len() - 1 {
+                            t.attributes.insert(attr.clone(), target.clone());
+                        } else {
+                            table = t
+                                .attributes
+                                .get(attr)
+                                .ok_or_else(|| VmError::NoSuchKey {
+                                    loc: self.loc.clone(),
+                                    attr: attr.clone(),
+                                })?
+                                .clone();
+                        }
+                        Ok(())
+                    }
+                    _ => Err(()),
+                },
+                _ => Err(()),
+            }
+            .map_err(|_| {
+                let reg = gc.read_reg(self.rd);
+                let t = get_type(reg, gc);
+                VmError::CanNotSetAttr {
+                    loc: self.loc.clone(),
+                    t,
+                }
+            })?;
+        }
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        let attr = self.attrs.iter().fold(String::new(), |mut acc, s| {
+            write!(acc, ".{s}").unwrap();
+            acc
+        });
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}   Reg#{} -> Reg#{}{}",
+            "set_attr", self.rs, self.rd, attr
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpMakeTable {
+    pub rd: usize,
+}
+
+impl Instruction for OpMakeTable {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let table = gc.alloc(GcObject::Table(Table {
+            attributes: AHashMap::new(),
+        }));
+        let table = Reg::Ref(table);
+        gc.write_reg(self.rd, table);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}   Reg#{}",
+            "make_table", self.rd
         )
         .unwrap()
     }

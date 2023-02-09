@@ -1,5 +1,6 @@
 use std::{
     cell::{RefCell, UnsafeCell},
+    collections::BTreeSet,
     io::Write,
     ops::{Index, IndexMut},
     rc::Rc,
@@ -18,8 +19,8 @@ enum Mark {
     White,
 }
 
-pub struct Object {
-    _attributes: AHashMap<String, Reg>,
+pub struct Table {
+    pub attributes: AHashMap<String, Reg>,
 }
 
 pub enum GcObject<Buffer: Write> {
@@ -34,7 +35,7 @@ pub enum GcObject<Buffer: Write> {
     NativeFunction(
         Rc<RefCell<dyn Fn(&mut State<Buffer>, &[Reg], &mut Buffer) -> Result<Reg, String>>>,
     ),
-    _Object(Object),
+    Table(Table),
 }
 
 /// Diatom's unboxed value type
@@ -64,7 +65,7 @@ struct CallStack {
 /// Garbage Collector
 pub struct Gc<Buffer: Write> {
     pool: Vec<(GcObject<Buffer>, Mark)>,
-    free: Vec<usize>,
+    free: BTreeSet<usize>,
     call_stack: CallStack,
     string_pool: StringPool,
 }
@@ -73,7 +74,7 @@ impl<Buffer: Write> Gc<Buffer> {
     pub fn new() -> Self {
         Self {
             pool: vec![],
-            free: vec![],
+            free: BTreeSet::new(),
             call_stack: CallStack {
                 prev: None,
                 regs: vec![],
@@ -92,7 +93,7 @@ impl<Buffer: Write> Gc<Buffer> {
             self.pool.push((obj, Mark::White));
             self.pool.len() - 1
         } else {
-            self.free.pop().unwrap()
+            self.free.pop_last().unwrap()
         }
     }
 
@@ -207,6 +208,13 @@ impl<Buffer: Write> Gc<Buffer> {
 
     pub fn get_string_by_id(&self, id: usize) -> &str {
         &self.string_pool[id]
+    }
+
+    pub fn get_obj_by_ref(&mut self, ref_id: usize) -> Option<&mut GcObject<Buffer>> {
+        if self.free.get(&ref_id).is_some() {
+            return None;
+        }
+        self.pool.get_mut(ref_id).map(|obj| &mut obj.0)
     }
 }
 
