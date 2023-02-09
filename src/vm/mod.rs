@@ -98,7 +98,10 @@ impl Vm {
         }
     }
 
-    pub fn set_ip(&mut self, ip: Ip) {
-        self.ip = ip
+    pub fn reset_ip(&mut self) {
+        self.ip = Ip {
+            func_id: 0,
+            inst: 0,
+        }
     }
 }

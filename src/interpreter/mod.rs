@@ -302,12 +302,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         }
 
         let registers_prev = self.registers.clone();
-        self.vm.set_ip(Ip {
-            func_id: 0,
-            inst: self.byte_code[0].insts.len(),
-        });
-
-        self.registers.current_start_loc = self.byte_code[0].insts.len();
+        // clear all executed code
+        self.byte_code[0].insts.clear();
+        self.vm.reset_ip();
         self.registers.insert_offset = 0;
 
         let return_value = self.compile_ast(&mut ast).map_err(|_| {
@@ -323,11 +320,13 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
 
         //
         self.byte_code[0].insts.insert(
-            self.registers.current_start_loc,
+            0,
             VmInst::OpAllocReg(OpAllocReg {
                 n_reg: self.registers.assigned,
             }),
         );
+
+        self.registers.invalidate_define();
         Ok(ast)
     }
 
@@ -610,7 +609,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     }));
 
                 // declare variable
-                let id = if let Some((id, depth, loc)) = self.registers.lookup_variable(name) {
+                let id = if let Some((id, depth, loc, _)) = self.registers.lookup_variable(name) {
                     // variable is captured
                     // make a local copy and register capture info
                     if depth > 0 {
@@ -668,7 +667,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 Ok(ret)
             }
             Expr::Id { loc, name } => match self.registers.lookup_variable(name) {
-                Some((id, depth, loc)) => {
+                Some((id, depth, loc, _)) => {
                     // variable is captured
                     // make a local copy and register capture info
                     if depth > 0 {
@@ -919,7 +918,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     fn compile_assignment(&mut self, lhs: &Expr, rhs: &Expr, loc: Loc) -> Result<(), ErrorCode> {
         if let Expr::Id { loc: id_loc, name } = lhs {
             // declare variable
-            let id = if let Some((id, depth, loc)) = self.registers.lookup_variable(name) {
+            let id = if let Some((id, depth, loc, _)) = self.registers.lookup_variable(name) {
                 // variable is captured
                 // make a local copy and register capture info
                 if depth > 0 {
@@ -1003,10 +1002,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         Ok(match constant {
             Ok(reg_id) => (reg_id, false),
             Err((reg_id, reg)) => {
-                let insert_loc = self.registers.current_start_loc;
                 self.registers.insert_offset += 1;
                 self.get_current_func().insts.insert(
-                    insert_loc,
+                    0,
                     VmInst::OpLoadConstant(OpLoadConstant {
                         constant: reg,
                         rd: reg_id,
@@ -1166,9 +1164,11 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         });
         self.registers.enter_function(func_id);
         for (para, loc) in parameters.iter() {
-            if let Some((_, _, loc_prev)) = self.registers.lookup_variable(para) {
+            if let Some((_, _, loc_prev, define_in_scope)) = self.registers.lookup_variable(para) {
+                let is_extern = loc_prev.is_none();
                 return Err(ErrorCode::ParameterShadowing {
-                    previous: loc_prev,
+                    previous: if define_in_scope { loc_prev } else { None },
+                    is_extern,
                     parameter: loc.clone(),
                     name: para.clone(),
                 });

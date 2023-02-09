@@ -17,6 +17,7 @@ pub enum ErrorCode {
         // if previously defined by external function
         // it does not have a location
         previous: Option<Loc>,
+        is_extern: bool,
         parameter: Loc,
         name: String,
     },
@@ -45,6 +46,7 @@ impl From<ErrorCode> for Diagnostic {
                 .with_labels(vec![Label::primary((), loc)]),
             ErrorCode::ParameterShadowing {
                 previous,
+                is_extern,
                 parameter,
                 name,
             } => {
@@ -56,7 +58,7 @@ impl From<ErrorCode> for Diagnostic {
                     labels.push(
                         Label::secondary((), previous).with_message("Name previously defined here"),
                     )
-                } else {
+                } else if is_extern {
                     error = error.with_notes(vec![format!(
                         "`{name}` is an external function defined by host"
                     )])
