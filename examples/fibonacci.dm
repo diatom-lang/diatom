@@ -6,4 +6,4 @@ def fib n =
     end
 end
 
-print$(fib$(32))
+print$(fib$(35))

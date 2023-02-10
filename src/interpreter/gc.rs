@@ -55,11 +55,15 @@ enum StackReg {
     Shared(Rc<UnsafeCell<Reg>>),
 }
 
-struct CallStack {
-    prev: Option<Box<CallStack>>,
-    regs: Vec<StackReg>,
+struct Frame {
+    ptr: usize,
     return_addr: Ip,
     write_back: Option<usize>,
+}
+
+struct CallStack {
+    frames: Vec<Frame>,
+    regs: Vec<StackReg>,
 }
 
 /// Garbage Collector
@@ -76,13 +80,15 @@ impl<Buffer: Write> Gc<Buffer> {
             pool: vec![],
             free: BTreeSet::new(),
             call_stack: CallStack {
-                prev: None,
+                frames: vec![Frame {
+                    ptr: 0,
+                    return_addr: Ip {
+                        func_id: usize::MAX,
+                        inst: usize::MAX,
+                    },
+                    write_back: None,
+                }],
                 regs: vec![],
-                return_addr: Ip {
-                    func_id: usize::MAX,
-                    inst: usize::MAX,
-                },
-                write_back: None,
             },
             string_pool: StringPool::new(),
         }
@@ -99,15 +105,18 @@ impl<Buffer: Write> Gc<Buffer> {
 
     pub fn alloc_reg_file(&mut self, n: usize) {
         let stack = &mut self.call_stack;
-        if n >= stack.regs.len() {
-            (0..=n - stack.regs.len())
-                .into_iter()
-                .for_each(|_| stack.regs.push(StackReg::Reg(Reg::Unit)))
-        }
+        debug_assert!(!stack.frames.is_empty());
+        let frame = unsafe { stack.frames.last().unwrap_unchecked().ptr };
+        (stack.regs.len()..frame + n)
+            .into_iter()
+            .for_each(|_| stack.regs.push(StackReg::Reg(Reg::Unit)))
     }
 
     pub fn read_reg(&self, n: usize) -> &Reg {
-        debug_assert!(self.call_stack.regs.len() > n);
+        let stack = &self.call_stack;
+        debug_assert!(!stack.frames.is_empty());
+        let n = unsafe { stack.frames.last().unwrap_unchecked().ptr } + n;
+        debug_assert!(stack.regs.len() > n);
         let reg = unsafe { self.call_stack.regs.get_unchecked(n) };
         match reg {
             StackReg::Reg(reg) => reg,
@@ -115,17 +124,22 @@ impl<Buffer: Write> Gc<Buffer> {
         }
     }
 
-    pub fn share_reg(&mut self, id: usize, depth: usize) -> Rc<UnsafeCell<Reg>> {
-        debug_assert!(self.call_stack.regs.len() > id);
-        let mut call_stack = &mut self.call_stack;
-        debug_assert!(depth > 0);
-        // relative depth to capture and make_closure is 1
-        let depth = depth - 1;
-        for _ in 0..depth {
-            debug_assert!(call_stack.prev.is_some());
-            call_stack = unsafe { call_stack.prev.as_mut().unwrap_unchecked().as_mut() }
+    pub fn read_reg_prev(&self, n: usize) -> &Reg {
+        let stack = &self.call_stack;
+        debug_assert!(stack.frames.len() >= 2);
+        let frame_len = stack.frames.len();
+        let n = unsafe { stack.frames.get_unchecked(frame_len - 2).ptr } + n;
+        debug_assert!(stack.regs.len() > n);
+        let reg = unsafe { self.call_stack.regs.get_unchecked(n) };
+        match reg {
+            StackReg::Reg(reg) => reg,
+            StackReg::Shared(rc) => unsafe { &*rc.as_ref().get() },
         }
-        let shared_reg = unsafe { call_stack.regs.get_unchecked_mut(id) };
+    }
+    pub fn share_reg(&mut self, id: usize, depth: usize) -> Rc<UnsafeCell<Reg>> {
+        let stack = &mut self.call_stack;
+        let frame = stack.frames[stack.frames.len() - depth].ptr;
+        let shared_reg = &mut self.call_stack.regs[frame + id];
         let reg = std::mem::replace(shared_reg, StackReg::Reg(Reg::Unit));
         match reg {
             StackReg::Reg(reg) => {
@@ -142,6 +156,8 @@ impl<Buffer: Write> Gc<Buffer> {
     /// Automatically extend reg file size if n > regs.len()
     pub fn write_reg(&mut self, n: usize, reg: Reg) {
         let stack = &mut self.call_stack;
+        debug_assert!(!stack.frames.is_empty());
+        let n = unsafe { stack.frames.last().unwrap_unchecked().ptr } + n;
         debug_assert!(stack.regs.len() > n);
         let prev = unsafe { stack.regs.get_unchecked_mut(n) };
         match prev {
@@ -152,50 +168,34 @@ impl<Buffer: Write> Gc<Buffer> {
 
     pub fn write_shared_reg(&mut self, n: usize, reg: Rc<UnsafeCell<Reg>>) {
         let stack = &mut self.call_stack;
-        if n > stack.regs.len() {
-            (0..=n - stack.regs.len())
-                .into_iter()
-                .for_each(|_| stack.regs.push(StackReg::Reg(Reg::Unit)))
-        }
-
+        debug_assert!(!stack.frames.is_empty());
+        let n = unsafe { stack.frames.last().unwrap_unchecked().ptr } + n;
         debug_assert!(stack.regs.len() > n);
         *unsafe { stack.regs.get_unchecked_mut(n) } = StackReg::Shared(reg)
     }
 
     pub fn alloc_call_stack(&mut self, return_addr: Ip, write_back: Option<usize>) {
-        let call_stack_prev = std::mem::replace(
-            &mut self.call_stack,
-            CallStack {
-                prev: None,
-                regs: vec![],
-                return_addr,
-                write_back,
-            },
-        );
-        self.call_stack.prev = Some(Box::new(call_stack_prev));
+        let ptr = self.call_stack.regs.len();
+        self.call_stack.frames.push(Frame {
+            ptr,
+            return_addr,
+            write_back,
+        })
     }
 
     /// None if there is no more call stack
     pub fn pop_call_stack(&mut self) -> Option<(Ip, Option<usize>)> {
-        let call_stack_prev = std::mem::replace(&mut self.call_stack.prev, None);
-        let call_stack_prev = match call_stack_prev {
-            Some(call_stack) => *call_stack,
-            None => return None,
-        };
-
-        let CallStack {
-            regs: _,
-            return_addr,
-            write_back,
-            prev: _,
-        } = std::mem::replace(&mut self.call_stack, call_stack_prev);
-        Some((return_addr, write_back))
+        self.call_stack.frames.pop().map(
+            |Frame {
+                 ptr: _,
+                 return_addr,
+                 write_back,
+             }| (return_addr, write_back),
+        )
     }
 
     pub fn clean_call_stack(&mut self) {
-        while self.call_stack.prev.is_some() {
-            self.pop_call_stack();
-        }
+        self.call_stack.frames.truncate(1);
     }
 
     pub fn string_pool(&mut self) -> &mut StringPool {

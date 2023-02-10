@@ -22,9 +22,9 @@ use crate::{
     vm::{
         error::VmError,
         op::{
-            OpAdd, OpAllocReg, OpAnd, OpBranchFalse, OpBranchTrue, OpCallClosure, OpDiv, OpDummy,
-            OpEq, OpGt, OpIDiv, OpJump, OpLoadConstant, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot,
-            OpOr, OpPow, OpRem, OpRet, OpSub, OpYield,
+            OpAdd, OpAllocReg, OpAnd, OpBranchFalse, OpBranchTrue, OpCall, OpDiv, OpDummy, OpEq,
+            OpGt, OpIDiv, OpJump, OpLoadConstant, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot, OpOr,
+            OpPow, OpRem, OpRet, OpSub, OpYield,
         },
         Instruction, Ip, Vm, VmInst,
     },
@@ -899,14 +899,12 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 } else {
                     Some(self.registers.declare_intermediate())
                 };
-                self.get_current_func()
-                    .insts
-                    .push(VmInst::OpCallClosure(OpCallClosure {
-                        reg_id: lhs,
-                        parameters: para_regs.iter().map(|(reg, _)| *reg).collect(),
-                        write_back: rd,
-                        loc: loc.clone(),
-                    }));
+                self.get_current_func().insts.push(VmInst::OpCall(OpCall {
+                    reg_id: lhs,
+                    parameters: para_regs.iter().map(|(reg, _)| *reg).collect(),
+                    write_back: rd,
+                    loc: loc.clone(),
+                }));
                 para_regs.into_iter().for_each(|(reg, tmp)| {
                     if tmp {
                         self.registers.free_intermediate(reg)

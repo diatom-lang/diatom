@@ -8,7 +8,7 @@ use crate::{
     },
     IoWrite, State,
 };
-use std::fmt::Write;
+use std::{cell::UnsafeCell, fmt::Write, rc::Rc};
 
 use super::{Instruction, Ip, VmError};
 
@@ -65,14 +65,14 @@ impl Instruction for OpAllocReg {
     }
 }
 
-pub struct OpCallClosure {
+pub struct OpCall {
     pub reg_id: usize,
     pub parameters: Vec<usize>,
     pub write_back: Option<usize>,
     pub loc: Loc,
 }
 
-impl Instruction for OpCallClosure {
+impl Instruction for OpCall {
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -80,17 +80,59 @@ impl Instruction for OpCallClosure {
         out: &mut Buffer,
     ) -> Result<Ip, VmError> {
         // get closure
-        let obj = gc.read_reg(self.reg_id);
-        let (func_id, parameters, capture, reg_size) = match obj {
+        let obj = gc.read_reg(self.reg_id).clone();
+        match obj {
             Reg::Ref(r) => {
-                let obj = &gc[*r];
+                let obj = &gc[r];
                 match obj {
                     GcObject::Closure {
                         func_id,
                         parameters,
                         captured,
                         reg_size,
-                    } => Ok((*func_id, *parameters, captured.to_vec(), *reg_size)),
+                    } => {
+                        let func_id = *func_id;
+                        let parameters = *parameters;
+                        let captured = captured as *const Vec<(usize, Rc<UnsafeCell<Reg>>)>;
+                        let reg_size = *reg_size;
+                        if parameters != self.parameters.len() {
+                            return Err(VmError::ParameterLengthNotMatch {
+                                loc: self.loc.clone(),
+                                expected: parameters,
+                                got: self.parameters.len(),
+                            });
+                        }
+
+                        // allocate call stack
+                        gc.alloc_call_stack(
+                            Ip {
+                                func_id: ip.func_id,
+                                inst: ip.inst + 1,
+                            },
+                            self.write_back,
+                        );
+
+                        // alloc reg file
+                        gc.alloc_reg_file(reg_size);
+
+                        // write parameters to call stack
+                        self.parameters
+                            .iter()
+                            .enumerate()
+                            .for_each(|(i, reg_prev)| {
+                                let reg = gc.read_reg_prev(*reg_prev).clone();
+                                gc.write_reg(i, reg);
+                            });
+
+                        // write capture values to stack
+                        // This operation violets borrow rules but since closure can not be modified or garbaged
+                        // collected here. It is safe to dereference the pointer here.
+                        unsafe { &*captured }
+                            .iter()
+                            .for_each(|(rd, reg)| gc.write_shared_reg(*rd, reg.clone()));
+
+                        Ok(Ip { func_id, inst: 0 })
+                    }
                     GcObject::NativeFunction(f) => {
                         let f = f.clone();
                         let f = f.borrow();
@@ -121,57 +163,17 @@ impl Instruction for OpCallClosure {
                         if let Some(write_back) = self.write_back {
                             gc.write_reg(write_back, ret)
                         }
-                        return Ok(Ip {
+                        Ok(Ip {
                             func_id: ip.func_id,
                             inst: ip.inst + 1,
-                        });
+                        })
                     }
                     _ => Err(()),
                 }
             }
             _ => Err(()),
         }
-        .map_err(|_| VmError::NotCallable(self.loc.clone(), get_type(obj, gc)))?;
-
-        if parameters != self.parameters.len() {
-            return Err(VmError::ParameterLengthNotMatch {
-                loc: self.loc.clone(),
-                expected: parameters,
-                got: self.parameters.len(),
-            });
-        }
-
-        // clone parameters
-        let mut parameters = vec![];
-        for para in self.parameters.iter() {
-            let reg = gc.read_reg(*para).clone();
-            parameters.push(reg);
-        }
-
-        // allocate call stack
-        gc.alloc_call_stack(
-            Ip {
-                func_id: ip.func_id,
-                inst: ip.inst + 1,
-            },
-            self.write_back,
-        );
-
-        // alloc reg file
-        gc.alloc_reg_file(reg_size);
-
-        // write parameters to call stack
-        parameters
-            .into_iter()
-            .enumerate()
-            .for_each(|(i, reg)| gc.write_reg(i, reg));
-
-        // write capture values to stack
-        capture
-            .into_iter()
-            .for_each(|(rd, reg)| gc.write_shared_reg(rd, reg));
-
-        Ok(Ip { func_id, inst: 0 })
+        .map_err(|_| VmError::NotCallable(self.loc.clone(), get_type(&obj, gc)))
     }
 
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
