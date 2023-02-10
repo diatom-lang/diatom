@@ -594,20 +594,6 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 parameters,
                 body,
             } => {
-                let (func_id, parameters, capture, reg_size) =
-                    self.compile_closure(parameters, either::Right(body), loc.clone())?;
-                let reg_f_id = self.registers.declare_intermediate();
-                self.get_current_func()
-                    .insts
-                    .push(VmInst::OpMakeClosure(OpMakeClosure {
-                        loc: loc.clone(),
-                        func_id,
-                        parameters,
-                        rd: reg_f_id,
-                        capture,
-                        reg_size,
-                    }));
-
                 // declare variable
                 let id = if let Some((id, depth, loc, _)) = self.registers.lookup_variable(name) {
                     // variable is captured
@@ -627,6 +613,21 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     self.scopes.last_mut().unwrap().insert(name.clone());
                     self.registers.declare_variable(name, Some(loc.clone()))
                 };
+
+                let (func_id, parameters, capture, reg_size) =
+                    self.compile_closure(parameters, either::Right(body), loc.clone())?;
+                let reg_f_id = self.registers.declare_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpMakeClosure(OpMakeClosure {
+                        loc: loc.clone(),
+                        func_id,
+                        parameters,
+                        rd: reg_f_id,
+                        capture,
+                        reg_size,
+                    }));
+
                 self.registers.free_intermediate(reg_f_id);
                 self.get_current_func().insts.push(VmInst::OpMove(OpMove {
                     loc: loc.clone(),
