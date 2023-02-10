@@ -2,15 +2,17 @@ use std::cell::RefCell;
 use std::fmt::Write;
 use std::{ffi::OsStr, rc::Rc};
 
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashSet;
+use either::Either;
 
 mod error;
 pub mod gc;
 mod prelude;
+mod register_table;
 mod string_pool;
 
 mod state;
-use crate::vm::op::{OpGe, OpLe, OpLt, OpNe};
+use crate::vm::op::{OpGe, OpGetAttr, OpLe, OpLt, OpMakeTable, OpNe, OpSetAttr};
 use crate::{
     diagnostic::{Diagnostic, Loc},
     frontend::{
@@ -20,9 +22,9 @@ use crate::{
     vm::{
         error::VmError,
         op::{
-            OpAdd, OpAllocReg, OpAnd, OpBranch, OpCallClosure, OpDiv, OpDummy, OpEq, OpGt, OpIDiv,
-            OpJump, OpLoadConstant, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot, OpOr, OpPow, OpRem,
-            OpRet, OpSub, OpYield,
+            OpAdd, OpAllocReg, OpAnd, OpBranchFalse, OpBranchTrue, OpCallClosure, OpDiv, OpDummy,
+            OpEq, OpGt, OpIDiv, OpJump, OpLoadConstant, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot,
+            OpOr, OpPow, OpRem, OpRet, OpSub, OpYield,
         },
         Instruction, Ip, Vm, VmInst,
     },
@@ -31,119 +33,75 @@ use crate::{
 pub use gc::{GcObject, Reg};
 pub use state::State;
 
-use self::error::ErrorCode;
-pub use self::gc::Gc;
-use self::prelude::impl_prelude;
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-enum ConstantValue {
-    Unit,
-    Bool(bool),
-    Int(i64),
-    // Float must be transmuted in order to compare
-    Float(u64),
-    Str(String),
-}
+use error::ErrorCode;
+pub use gc::Gc;
+use prelude::impl_prelude;
+pub use register_table::Capture;
+use register_table::{ConstantValue, Loop, RegisterTable};
 
 #[derive(Clone)]
-pub struct Capture {
-    pub rd: usize,
-    pub rs: usize,
-    pub depth: usize,
+pub struct FutureJump {
+    previous_insert_offset: usize,
+    condition_reg: Option<(usize, bool)>,
+    previous_inst_offset: usize,
+    loc: Loc,
 }
 
-#[derive(Clone)]
-struct RegisterTable {
-    prev: Option<Box<RegisterTable>>,
-    variables: AHashMap<String, (usize, Option<Loc>)>,
-    free: Vec<usize>,
-    assigned: usize,
-    func_id: usize,
-    constant_table: AHashMap<ConstantValue, usize>,
-    /// Location to insert load constant
-    current_start_loc: usize,
-    /// Count how many load constant inserted
-    insert_offset: usize,
-    /// captured variables
-    capture: Vec<Capture>,
-}
-
-impl RegisterTable {
-    fn new(func_id: usize) -> Self {
-        Self {
-            prev: None,
-            variables: AHashMap::default(),
-            free: vec![],
-            assigned: 0,
-            func_id,
-            constant_table: AHashMap::default(),
-            current_start_loc: 0,
-            insert_offset: 0,
-            capture: vec![],
-        }
-    }
-
-    fn declare_variable(&mut self, name: impl AsRef<str>, loc: Option<Loc>) -> usize {
-        let id = self.declare_intermediate();
-        self.variables.insert(name.as_ref().to_string(), (id, loc));
-        id
-    }
-
-    /// (reg_id, depth, loc)
-    fn lookup_variable_(&self, name: &str, depth: usize) -> Option<(usize, usize, Option<Loc>)> {
-        let var = self.variables.get(name);
-        match var {
-            Some((id, loc)) => Some((*id, depth, loc.clone())),
-            None => match &self.prev {
-                Some(prev) => prev.lookup_variable_(name, depth + 1),
-                None => None,
-            },
-        }
-    }
-
-    /// Return (reg_id, depth, loc)
-    pub fn lookup_variable(&self, name: impl AsRef<str>) -> Option<(usize, usize, Option<Loc>)> {
-        self.lookup_variable_(name.as_ref(), 0)
-    }
-
-    fn declare_intermediate(&mut self) -> usize {
-        self.free.pop().unwrap_or_else(|| {
-            self.assigned += 1;
-            self.assigned - 1
-        })
-    }
-
-    fn free_intermediate(&mut self, id: usize) {
-        if self.assigned >= id {
-            self.free.push(id)
-        }
-    }
-
-    /// Return ok is constant is in table, otherwise alloc a new register for this constant
-    fn get_or_alloc_constant(&mut self, constant: ConstantValue) -> Result<usize, usize> {
-        match self.constant_table.get(&constant) {
-            Some(id) => Ok(*id),
-            None => {
-                // must alloc new register to prevent
-                // already compiled Instruction
-                // overwrite constant value
-                let id = self.assigned;
-                self.assigned += 1;
-                self.constant_table.insert(constant, id);
-                Err(id)
+impl FutureJump {
+    /// Insert jump from current loc to previous
+    pub fn patch_backward(self, func: &mut Func, current_insert_offset: usize) {
+        let inserted = current_insert_offset - self.previous_insert_offset;
+        let inst_offset = self.previous_inst_offset + inserted;
+        let jump_offset = inst_offset as i64 - func.insts.len() as i64;
+        let op = if let Some((reg, on_false)) = self.condition_reg {
+            if on_false {
+                VmInst::OpBranchFalse(OpBranchFalse {
+                    loc: self.loc,
+                    condition: reg,
+                    offset: jump_offset,
+                })
+            } else {
+                VmInst::OpBranchTrue(OpBranchTrue {
+                    loc: self.loc,
+                    condition: reg,
+                    offset: jump_offset,
+                })
             }
-        }
+        } else {
+            VmInst::OpJump(OpJump {
+                loc: self.loc,
+                offset: jump_offset,
+            })
+        };
+        func.insts.push(op);
     }
 
-    fn enter_function(&mut self, func_id: usize) {
-        let old = std::mem::replace(self, RegisterTable::new(func_id));
-        self.prev = Some(Box::new(old));
-    }
-
-    fn leave_function(&mut self) -> Vec<Capture> {
-        let prev = *std::mem::take(&mut self.prev).unwrap();
-        let pop = std::mem::replace(self, prev);
-        pop.capture
+    /// Insert jump from previous to current
+    pub fn patch_forward(self, func: &mut Func, current_insert_offset: usize) {
+        let inserted = current_insert_offset - self.previous_insert_offset;
+        let inst_offset = self.previous_inst_offset + inserted;
+        let jump_offset = func.insts.len() as i64 - inst_offset as i64;
+        let op = if let Some((reg, on_false)) = self.condition_reg {
+            if on_false {
+                VmInst::OpBranchFalse(OpBranchFalse {
+                    loc: self.loc,
+                    condition: reg,
+                    offset: jump_offset,
+                })
+            } else {
+                VmInst::OpBranchTrue(OpBranchTrue {
+                    loc: self.loc,
+                    condition: reg,
+                    offset: jump_offset,
+                })
+            }
+        } else {
+            VmInst::OpJump(OpJump {
+                loc: self.loc,
+                offset: jump_offset,
+            })
+        };
+        func.insts[inst_offset] = op;
     }
 }
 
@@ -185,7 +143,7 @@ pub struct Func {
 ///
 /// let mut interpreter = Interpreter::new(std::io::stdout());
 /// // add a callback named "set_value"
-/// interpreter.add_extern_function("set_value".to_string(), move |_state, parameters, _out| {
+/// interpreter.add_extern_function("set_value", move |_state, parameters, _out| {
 ///     if parameters.len() != 1 {
 ///         return Err("Expected 1 parameter!".to_string());
 ///     }
@@ -259,7 +217,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// let buffer = Vec::<u8>::new();
     /// let mut interpreter = Interpreter::new(buffer);
     /// interpreter.add_extern_function(
-    ///     "hello_world".to_string(),
+    ///     "hello_world",
     ///     |state, parameters, out| {
     ///         if !parameters.is_empty(){
     ///             Err("Too many parameters!".to_string())
@@ -275,7 +233,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// let output = String::from_utf8(output).unwrap();
     /// assert_eq!(output, "Hello, world!")
     /// ```
-    pub fn add_extern_function<F>(&mut self, name: String, f: F)
+    pub fn add_extern_function<F>(&mut self, name: impl Into<String>, f: F)
     where
         F: Fn(&mut State<Buffer>, &[DiatomValue], &mut Buffer) -> Result<DiatomValue, String>
             + 'static,
@@ -283,7 +241,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         let f = GcObject::NativeFunction(Rc::new(RefCell::new(f)));
         let gc_id = self.gc.alloc(f);
         let reg = Reg::Ref(gc_id);
-        let reg_id = self.registers.declare_variable(name, None);
+        let reg_id = self.registers.declare_variable(name.into(), None);
         self.gc.alloc_reg_file(reg_id + 1);
         self.gc.write_reg(reg_id, reg);
     }
@@ -344,12 +302,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         }
 
         let registers_prev = self.registers.clone();
-        self.vm.set_ip(Ip {
-            func_id: 0,
-            inst: self.byte_code[0].insts.len(),
-        });
-
-        self.registers.current_start_loc = self.byte_code[0].insts.len();
+        // clear all executed code
+        self.byte_code[0].insts.clear();
+        self.vm.reset_ip();
         self.registers.insert_offset = 0;
 
         let return_value = self.compile_ast(&mut ast).map_err(|_| {
@@ -365,11 +320,13 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
 
         //
         self.byte_code[0].insts.insert(
-            self.registers.current_start_loc,
+            0,
             VmInst::OpAllocReg(OpAllocReg {
                 n_reg: self.registers.assigned,
             }),
         );
+
+        self.registers.invalidate_define();
         Ok(ast)
     }
 
@@ -415,7 +372,41 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     Reg::Int(i) => writeln!(self.out, "{i}"),
                     Reg::Float(f) => writeln!(self.out, "{f}"),
                     Reg::Str(sid) => writeln!(self.out, "{}", self.gc.get_string_by_id(*sid)),
-                    Reg::Ref(r) => writeln!(self.out, "Object@<{r}>"),
+                    Reg::Ref(r) => match &self.gc[*r] {
+                        GcObject::Closure {
+                            func_id,
+                            parameters: _,
+                            reg_size: _,
+                            captured: _,
+                        } => {
+                            writeln!(self.out, "Closure[{func_id}]")
+                        }
+                        GcObject::NativeFunction(f) => {
+                            write!(self.out, "External function@{:p}", f.as_ptr())
+                        }
+                        GcObject::Table(t) => {
+                            let mut table = "{".to_string();
+                            for (i, (k, v)) in t.attributes.iter().enumerate() {
+                                let content = match v {
+                                    Reg::Unit => "()".to_string(),
+                                    Reg::Bool(b) => format!("{b}"),
+                                    Reg::Int(i) => format!("{i}"),
+                                    Reg::Float(f) => format!("{f}"),
+                                    Reg::Str(sid) => {
+                                        format!("'{}'", self.gc.get_string_by_id(*sid))
+                                    }
+                                    Reg::Ref(r) => format!("Ref@<{r}>"),
+                                };
+                                if i == t.attributes.len() - 1 {
+                                    write!(table, "{k} = {content}").unwrap();
+                                } else {
+                                    write!(table, "{k} = {content}, ").unwrap();
+                                }
+                            }
+                            write!(table, "}}").unwrap();
+                            writeln!(self.out, "{table}")
+                        }
+                    },
                 }
                 .map_err(|err| {
                     let error_code = VmError::IoError {
@@ -484,56 +475,113 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 condition,
                 body,
             } => {
-                let start_label = self.get_current_func().insts.len();
-                let before_test_inserted = self.registers.insert_offset;
+                let jump_to_start = FutureJump {
+                    previous_insert_offset: self.registers.insert_offset,
+                    condition_reg: None,
+                    previous_inst_offset: self.get_current_func().insts.len(),
+                    loc: loc.clone(),
+                };
                 let branch_inst = if let Some(condition) = condition {
                     let (condition_reg, tmp) = self.compile_expr(condition, false)?;
                     if tmp {
                         self.registers.free_intermediate(condition_reg);
                     }
                     self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
-                    Some((
-                        self.get_current_func().insts.len() - 1,
-                        condition_reg,
-                        condition.get_loc(),
-                    ))
+                    Some(FutureJump {
+                        previous_insert_offset: self.registers.insert_offset,
+                        condition_reg: Some((condition_reg, false)),
+                        previous_inst_offset: self.get_current_func().insts.len() - 1,
+                        loc: condition.get_loc(),
+                    })
                 } else {
                     None
                 };
-                let after_test_inserted = self.registers.insert_offset;
                 self.enter_block();
+                let current_inst = self.get_current_func().insts.len();
+                self.registers.loops.push(Loop {
+                    start_inst_offset: current_inst,
+                    start_insert_offset: self.registers.insert_offset,
+                    breaks: vec![],
+                });
                 for stmt in body.iter() {
                     self.compile_stmt(stmt, true).map_err(|err| {
                         self.leave_block();
                         err
                     })?;
                 }
+                let breaks = self.registers.loops.pop().unwrap().breaks;
                 self.leave_block();
 
-                // number of load const inserted after compile block
-                let inserted = self.registers.insert_offset - before_test_inserted;
-                let jump_loc = self.get_current_func().insts.len();
+                // patch jump to loop start
+                let current_insert_offset = self.registers.insert_offset;
+                jump_to_start.patch_backward(self.get_current_func(), current_insert_offset);
 
-                self.get_current_func().insts.push(VmInst::OpJump(OpJump {
-                    loc: loc.clone(),
-                    offset: start_label as i64 + inserted as i64 - jump_loc as i64,
-                }));
+                // patch breaks
+                breaks.into_iter().for_each(|jump| {
+                    let current_insert_offset = self.registers.insert_offset;
+                    jump.patch_forward(self.get_current_func(), current_insert_offset);
+                });
 
-                // jump out of loop
-                let inserted = self.registers.insert_offset - after_test_inserted;
-                if let Some((inst, reg, loc)) = branch_inst {
-                    self.get_current_func().insts[inst + inserted] = VmInst::OpBranch(OpBranch {
-                        condition: reg,
-                        loc,
-                        offset: self.get_current_func().insts.len() as i64
-                            - inst as i64
-                            - inserted as i64,
-                    })
+                // patch branch out of loop
+                if let Some(jump) = branch_inst {
+                    let current_insert_offset = self.registers.insert_offset;
+                    jump.patch_forward(self.get_current_func(), current_insert_offset);
                 };
             }
-            Stmt::Continue { loc: _ } => todo!(),
-            Stmt::Break { loc: _ } => todo!(),
-            Stmt::Return { loc: _, value: _ } => todo!(),
+            Stmt::Continue { loc } => {
+                let Loop {
+                    start_inst_offset,
+                    start_insert_offset,
+                    breaks: _,
+                } = self
+                    .registers
+                    .loops
+                    .last()
+                    .ok_or(ErrorCode::ContinueOutsideLoop(loc.clone()))?;
+                let jump = FutureJump {
+                    previous_insert_offset: *start_insert_offset,
+                    condition_reg: None,
+                    previous_inst_offset: *start_inst_offset,
+                    loc: loc.clone(),
+                };
+                let current_insert_offset = self.registers.insert_offset;
+                jump.patch_backward(self.get_current_func(), current_insert_offset)
+            }
+            Stmt::Break { loc } => {
+                self.registers
+                    .loops
+                    .last()
+                    .ok_or(ErrorCode::BreakOutsideLoop(loc.clone()))?;
+                let insert_offset = self.registers.insert_offset;
+                let inst_offset = self.get_current_func().insts.len();
+                let jump = FutureJump {
+                    previous_insert_offset: insert_offset,
+                    condition_reg: None,
+                    previous_inst_offset: inst_offset,
+                    loc: loc.clone(),
+                };
+                self.registers.loops.last_mut().unwrap().breaks.push(jump);
+                self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
+            }
+            Stmt::Return { loc, value } => {
+                if self.registers.prev.is_none() {
+                    return Err(ErrorCode::ReturnOutsideFunction(loc.clone()));
+                }
+                let return_reg = if let Some(expr) = value {
+                    let (reg, tmp) = self.compile_expr(expr, false)?;
+                    if tmp {
+                        self.registers.free_intermediate(reg);
+                    }
+                    reg
+                } else {
+                    let (reg, _) = self.compile_constant(&Const::Unit, loc.clone())?;
+                    reg
+                };
+                self.get_current_func().insts.push(VmInst::OpRet(OpRet {
+                    return_reg,
+                    loc: loc.clone(),
+                }))
+            }
             Stmt::For {
                 loc: _,
                 loop_variable: _,
@@ -541,11 +589,52 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 body: _,
             } => todo!(),
             Stmt::Def {
-                loc: _,
-                name: _,
-                parameters: _,
-                body: _,
-            } => todo!(),
+                loc,
+                name,
+                parameters,
+                body,
+            } => {
+                // declare variable
+                let id = if let Some((id, depth, loc, _)) = self.registers.lookup_variable(name) {
+                    // variable is captured
+                    // make a local copy and register capture info
+                    if depth > 0 {
+                        let local_id = self.registers.declare_variable(name, loc);
+                        self.registers.capture.push(Capture {
+                            rd: local_id,
+                            rs: id,
+                            depth,
+                        });
+                        local_id
+                    } else {
+                        id
+                    }
+                } else {
+                    self.scopes.last_mut().unwrap().insert(name.clone());
+                    self.registers.declare_variable(name, Some(loc.clone()))
+                };
+
+                let (func_id, parameters, capture, reg_size) =
+                    self.compile_closure(parameters, either::Right(body), loc.clone())?;
+                let reg_f_id = self.registers.declare_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpMakeClosure(OpMakeClosure {
+                        loc: loc.clone(),
+                        func_id,
+                        parameters,
+                        rd: reg_f_id,
+                        capture,
+                        reg_size,
+                    }));
+
+                self.registers.free_intermediate(reg_f_id);
+                self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                    loc: loc.clone(),
+                    rs: reg_f_id,
+                    rd: id,
+                }));
+            }
             Stmt::Error => unreachable!(),
         }
         Ok(return_value)
@@ -559,6 +648,33 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     self.registers.free_intermediate(rhs_id)
                 };
                 Ok(self.compile_prefix(op, rhs_id, loc.clone()))
+            }
+            Expr::Infix {
+                loc,
+                op: OpInfix::Member,
+                lhs,
+                rhs,
+            } => {
+                let name = match rhs.as_ref() {
+                    Expr::Id { loc: _, name } => name.clone(),
+                    expr => {
+                        return Err(ErrorCode::InvalidMember(expr.get_loc()));
+                    }
+                };
+                let (lhs, tmp) = self.compile_expr(lhs, false)?;
+                if tmp {
+                    self.registers.free_intermediate(lhs);
+                }
+                let rd = self.registers.declare_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpGetAttr(OpGetAttr {
+                        loc: loc.clone(),
+                        rs: lhs,
+                        rd,
+                        attr: name,
+                    }));
+                Ok((rd, true))
             }
             Expr::Infix {
                 loc,
@@ -579,11 +695,11 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 Ok(ret)
             }
             Expr::Id { loc, name } => match self.registers.lookup_variable(name) {
-                Some((id, depth, loc)) => {
+                Some((id, depth, loc, _)) => {
                     // variable is captured
                     // make a local copy and register capture info
                     if depth > 0 {
-                        let local_id = self.registers.declare_variable(name, loc);
+                        let local_id = self.registers.declare_captured_variable(name, loc);
                         self.registers.capture.push(Capture {
                             rd: local_id,
                             rs: id,
@@ -597,7 +713,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 None => Err(ErrorCode::NameNotDefined(loc.clone(), name.clone())),
             },
             Expr::Parentheses { loc: _, content } => self.compile_expr(content, discard),
-            Expr::Const { loc, value } => Ok(self.compile_constant(value, loc.clone())),
+            Expr::Const { loc, value } => Ok(self.compile_constant(value, loc.clone()))?,
             Expr::Error => unreachable!(),
             Expr::Block { loc, body } => {
                 self.enter_block();
@@ -616,16 +732,154 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     (_, true) => Ok((usize::MAX, true)),
                     (Some(ret), false) => Ok(ret),
                     (None, false) => {
-                        let rd = self.compile_constant(&Const::Unit, loc.clone());
+                        let rd = self.compile_constant(&Const::Unit, loc.clone())?;
                         Ok(rd)
                     }
                 }
             }
             Expr::If {
-                loc: _,
-                conditional: _,
-                default: _,
-            } => todo!(),
+                loc,
+                conditional,
+                default,
+            } => {
+                assert!(!conditional.is_empty());
+                let mut branch_op: Option<FutureJump> = None;
+                let mut jump_to_ends = vec![];
+                let ret = if discard {
+                    None
+                } else {
+                    Some(self.registers.declare_intermediate())
+                };
+                for (condition, body) in conditional {
+                    // patch branch
+                    if let Some(jump) = branch_op {
+                        let current_insert_offset = self.registers.insert_offset;
+                        jump.patch_forward(self.get_current_func(), current_insert_offset);
+                    }
+                    // compile condition
+                    let (condition_reg, tmp) = self.compile_expr(condition, false)?;
+                    if tmp {
+                        self.registers.free_intermediate(condition_reg);
+                    }
+                    let insert_offset = self.registers.insert_offset;
+                    let inst_offset = self.get_current_func().insts.len();
+                    branch_op = Some(FutureJump {
+                        previous_insert_offset: insert_offset,
+                        condition_reg: Some((condition_reg, true)),
+                        previous_inst_offset: inst_offset,
+                        loc: condition.get_loc(),
+                    });
+                    self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
+
+                    // compile body
+                    self.enter_block();
+                    // return unit for empty body
+                    if body.is_empty() && !discard {
+                        // load a unit value
+                        let (reg, _) = self.compile_constant(&Const::Unit, loc.clone())?;
+                        // move unit value
+                        self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                            loc: loc.clone(),
+                            rs: reg,
+                            rd: ret.unwrap(),
+                        }));
+                    }
+                    for (i, stmt) in body.iter().enumerate() {
+                        if !discard && i == body.len() - 1 {
+                            let ret_this = self.compile_stmt(stmt, false)?;
+                            // move return value to return reg
+                            if let Some((reg, tmp)) = ret_this {
+                                if tmp {
+                                    self.registers.free_intermediate(reg)
+                                };
+                                self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                                    loc: stmt.get_loc(),
+                                    rs: reg,
+                                    rd: ret.unwrap(),
+                                }))
+                            } else {
+                                // load a unit value
+                                let (reg, _) =
+                                    self.compile_constant(&Const::Unit, stmt.get_loc())?;
+                                // move unit value
+                                self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                                    loc: stmt.get_loc(),
+                                    rs: reg,
+                                    rd: ret.unwrap(),
+                                }))
+                            }
+                        } else {
+                            self.compile_stmt(stmt, true)?;
+                        }
+                    }
+                    self.leave_block();
+                    let insert_offset = self.registers.insert_offset;
+                    let inst_offset = self.get_current_func().insts.len();
+                    jump_to_ends.push(FutureJump {
+                        previous_insert_offset: insert_offset,
+                        condition_reg: None,
+                        previous_inst_offset: inst_offset,
+                        loc: loc.clone(),
+                    });
+                    self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
+                }
+                // patch branch
+                if let Some(jump) = branch_op {
+                    let current_insert_offset = self.registers.insert_offset;
+                    jump.patch_forward(self.get_current_func(), current_insert_offset);
+                }
+
+                // compile default else body
+                if let Some(body) = default {
+                    self.enter_block();
+                    if body.is_empty() && !discard {
+                        // load a unit value
+                        let (reg, _) = self.compile_constant(&Const::Unit, loc.clone())?;
+                        // move unit value
+                        self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                            loc: loc.clone(),
+                            rs: reg,
+                            rd: ret.unwrap(),
+                        }))
+                    }
+                    for (i, stmt) in body.iter().enumerate() {
+                        if !discard && i == body.len() - 1 {
+                            let ret_this = self.compile_stmt(stmt, false)?;
+                            // move return value to return reg
+                            if let Some((reg, tmp)) = ret_this {
+                                if tmp {
+                                    self.registers.free_intermediate(reg)
+                                };
+                                self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                                    loc: stmt.get_loc(),
+                                    rs: reg,
+                                    rd: ret.unwrap(),
+                                }))
+                            } else {
+                                // load a unit value
+                                let (reg, _) =
+                                    self.compile_constant(&Const::Unit, stmt.get_loc())?;
+                                // move unit value
+                                self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                                    loc: stmt.get_loc(),
+                                    rs: reg,
+                                    rd: ret.unwrap(),
+                                }))
+                            }
+                        } else {
+                            self.compile_stmt(stmt, true)?;
+                        }
+                    }
+                    self.leave_block();
+                }
+                // patch all jumps
+                jump_to_ends.into_iter().for_each(|jump| {
+                    let current_insert_offset = self.registers.insert_offset;
+                    jump.patch_forward(self.get_current_func(), current_insert_offset);
+                });
+
+                Ok(ret.map(|reg| (reg, true)).unwrap_or((usize::MAX, false)))
+            }
             Expr::Call {
                 loc,
                 lhs,
@@ -671,7 +925,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 body,
             } => {
                 let (func_id, parameters, capture, reg_size) =
-                    self.compile_closure(parameters, body, loc.clone())?;
+                    self.compile_closure(parameters, either::Left(body), loc.clone())?;
                 let rd = self.registers.declare_intermediate();
                 self.get_current_func()
                     .insts
@@ -690,44 +944,101 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     }
 
     fn compile_assignment(&mut self, lhs: &Expr, rhs: &Expr, loc: Loc) -> Result<(), ErrorCode> {
-        if let Expr::Id { loc: id_loc, name } = lhs {
-            // register to local block
-            if self.registers.lookup_variable(name).is_none() {}
-            // declare variable
-            let id = if let Some((id, depth, loc)) = self.registers.lookup_variable(name) {
-                // variable is captured
-                // make a local copy and register capture info
-                if depth > 0 {
-                    let local_id = self.registers.declare_variable(name, loc);
-                    self.registers.capture.push(Capture {
-                        rd: local_id,
-                        rs: id,
-                        depth,
-                    });
-                    local_id
+        match lhs {
+            Expr::Id { loc: id_loc, name } => {
+                // declare variable
+                let id = if let Some((id, depth, loc, _)) = self.registers.lookup_variable(name) {
+                    // variable is captured
+                    // make a local copy and register capture info
+                    if depth > 0 {
+                        let local_id = self.registers.declare_variable(name, loc);
+                        self.registers.capture.push(Capture {
+                            rd: local_id,
+                            rs: id,
+                            depth,
+                        });
+                        local_id
+                    } else {
+                        id
+                    }
                 } else {
-                    id
+                    self.scopes.last_mut().unwrap().insert(name.clone());
+                    self.registers.declare_variable(name, Some(id_loc.clone()))
+                };
+                let (rhs, tmp) = self.compile_expr(rhs, false)?;
+                if tmp {
+                    self.registers.free_intermediate(rhs);
                 }
-            } else {
-                self.scopes.last_mut().unwrap().insert(name.clone());
-                self.registers.declare_variable(name, Some(id_loc.clone()))
-            };
-            let (rhs, tmp) = self.compile_expr(rhs, false)?;
-            if tmp {
-                self.registers.free_intermediate(rhs);
+                self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                    loc,
+                    rs: rhs,
+                    rd: id,
+                }));
+                Ok(())
             }
-            self.get_current_func().insts.push(VmInst::OpMove(OpMove {
-                loc,
-                rs: rhs,
-                rd: id,
-            }));
-            Ok(())
-        } else {
-            Err(ErrorCode::CannotAssign(lhs.get_loc()))
+            expr @ Expr::Infix {
+                op: OpInfix::Member,
+                ..
+            } => {
+                let mut expr = expr;
+                let mut attrs = vec![];
+                loop {
+                    match expr {
+                        Expr::Id { loc: _, name } => {
+                            attrs.push(name.clone());
+                            break;
+                        }
+                        Expr::Infix {
+                            loc,
+                            op: OpInfix::Member,
+                            lhs,
+                            rhs,
+                        } => {
+                            if let Expr::Id { loc: _, name } = rhs.as_ref() {
+                                attrs.push(name.clone());
+                                expr = lhs;
+                            } else {
+                                return Err(ErrorCode::CannotAssign(loc.clone()));
+                            }
+                        }
+                        _ => return Err(ErrorCode::CannotAssign(expr.get_loc())),
+                    }
+                }
+                let name = attrs.pop().unwrap();
+                let rd = match self.registers.lookup_variable(&name) {
+                    Some((id, depth, loc, _)) => {
+                        // variable is captured
+                        // make a local copy and register capture info
+                        if depth > 0 {
+                            let local_id = self.registers.declare_captured_variable(name, loc);
+                            self.registers.capture.push(Capture {
+                                rd: local_id,
+                                rs: id,
+                                depth,
+                            });
+                            Ok(local_id)
+                        } else {
+                            Ok(id)
+                        }
+                    }
+                    None => Err(ErrorCode::NameNotDefined(loc.clone(), name)),
+                }?;
+
+                attrs.reverse();
+                let (rs, tmp) = self.compile_expr(rhs, false)?;
+                if tmp {
+                    self.registers.free_intermediate(rs);
+                }
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpSetAttr(OpSetAttr { loc, rs, rd, attrs }));
+                Ok(())
+            }
+            _ => Err(ErrorCode::CannotAssign(lhs.get_loc())),
         }
     }
 
-    fn compile_constant(&mut self, constant: &Const, loc: Loc) -> (usize, bool) {
+    fn compile_constant(&mut self, constant: &Const, loc: Loc) -> Result<(usize, bool), ErrorCode> {
         let constant = match constant {
             Const::Unit => self
                 .registers
@@ -753,15 +1064,34 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 .get_or_alloc_constant(ConstantValue::Bool(*b))
                 .map_err(|reg| (reg, Reg::Bool(*b))),
             Const::List(_) => todo!(),
-            Const::Table(_) => todo!(),
+            Const::Table(pairs) => {
+                let reg_id = self.registers.declare_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpMakeTable(OpMakeTable { rd: reg_id }));
+                for (name, expr, loc) in pairs.iter() {
+                    let (value, tmp) = self.compile_expr(expr, false)?;
+                    if tmp {
+                        self.registers.free_intermediate(value);
+                    }
+                    self.get_current_func()
+                        .insts
+                        .push(VmInst::OpSetAttr(OpSetAttr {
+                            loc: loc.clone(),
+                            rs: value,
+                            rd: reg_id,
+                            attrs: vec![name.clone()],
+                        }));
+                }
+                return Ok((reg_id, true));
+            }
         };
-        match constant {
+        Ok(match constant {
             Ok(reg_id) => (reg_id, false),
             Err((reg_id, reg)) => {
-                let insert_loc = self.registers.current_start_loc;
                 self.registers.insert_offset += 1;
                 self.get_current_func().insts.insert(
-                    insert_loc,
+                    0,
                     VmInst::OpLoadConstant(OpLoadConstant {
                         constant: reg,
                         rd: reg_id,
@@ -770,7 +1100,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 );
                 (reg_id, false)
             }
-        }
+        })
     }
 
     fn compile_infix(&mut self, op: &OpInfix, lhs: usize, rhs: usize, loc: Loc) -> (usize, bool) {
@@ -883,7 +1213,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 (rd, true)
             }
             OpInfix::Comma => todo!(),
-            OpInfix::Member => todo!(),
+            OpInfix::Member => unreachable!(),
         }
     }
 
@@ -910,7 +1240,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     fn compile_closure(
         &mut self,
         parameters: &[(String, Loc)],
-        body: &Expr,
+        body: Either<&Expr, &[Stmt]>,
         loc: Loc,
     ) -> std::result::Result<(usize, usize, Vec<Capture>, usize), ErrorCode> {
         let func_id = self.byte_code.len();
@@ -921,9 +1251,11 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         });
         self.registers.enter_function(func_id);
         for (para, loc) in parameters.iter() {
-            if let Some((_, _, loc_prev)) = self.registers.lookup_variable(para) {
+            if let Some((_, _, loc_prev, define_in_scope)) = self.registers.lookup_variable(para) {
+                let is_extern = loc_prev.is_none();
                 return Err(ErrorCode::ParameterShadowing {
-                    previous: loc_prev,
+                    previous: if define_in_scope { loc_prev } else { None },
+                    is_extern,
                     parameter: loc.clone(),
                     name: para.clone(),
                 });
@@ -931,10 +1263,37 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 self.registers.declare_variable(para, Some(loc.clone()));
             }
         }
-        let result = self.compile_expr(body, false).map_err(|err| {
-            self.registers.leave_function();
-            err
-        })?;
+        let result = match body {
+            Either::Left(body) => self.compile_expr(body, false).map_err(|err| {
+                self.registers.leave_function();
+                err
+            })?,
+            Either::Right(body) => {
+                let mut ret = None;
+                if body.is_empty() {
+                    // load a unit value
+                    let (reg, _) = self.compile_constant(&Const::Unit, loc.clone())?;
+                    ret = Some((reg, false));
+                }
+
+                for (i, stmt) in body.iter().enumerate() {
+                    if i == body.len() - 1 {
+                        let ret_this = self.compile_stmt(stmt, false)?;
+                        // move return value to return reg
+                        if let Some(ret_this) = ret_this {
+                            ret = Some(ret_this);
+                        } else {
+                            // load a unit value
+                            let (reg, _) = self.compile_constant(&Const::Unit, stmt.get_loc())?;
+                            ret = Some((reg, false));
+                        }
+                    } else {
+                        self.compile_stmt(stmt, true)?;
+                    }
+                }
+                ret.unwrap()
+            }
+        };
         // return expression value
         self.get_current_func().insts.push(VmInst::OpRet(OpRet {
             return_reg: result.0,

@@ -1,7 +1,9 @@
+use ahash::AHashMap;
+
 use crate::{
     diagnostic::Loc,
     interpreter::{
-        gc::{Gc, GcObject, Reg},
+        gc::{Gc, GcObject, Reg, Table},
         Capture,
     },
     IoWrite, State,
@@ -27,13 +29,13 @@ fn get_type<Buffer: IoWrite>(reg: &Reg, gc: &Gc<Buffer>) -> String {
                     reg_size: _,
                 } => "Closure".to_string(),
                 GcObject::NativeFunction(_) => "Extern_Function".to_string(),
-                GcObject::_Object(_) => "Table".to_string(),
+                GcObject::Table(_) => "Table".to_string(),
             }
         }
     }
 }
 
-const FORMAT_PAD: usize = 7;
+const FORMAT_PAD: usize = 10;
 
 pub struct OpAllocReg {
     pub n_reg: usize,
@@ -173,10 +175,12 @@ impl Instruction for OpCallClosure {
     }
 
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
-        let parameters = self.parameters.iter().fold(String::new(), |mut s, x| {
+        let mut parameters = self.parameters.iter().fold(String::new(), |mut s, x| {
             s.push_str(&format!("{x}, "));
             s
         });
+        parameters.pop();
+        parameters.pop();
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} $ Reg#{{{}}} -> {}",
@@ -311,7 +315,7 @@ impl Instruction for OpLoadConstant {
             Reg::Bool(b) => b.to_string(),
             Reg::Int(i) => i.to_string(),
             Reg::Float(f) => f.to_string(),
-            Reg::Str(sid) => gc.get_string_by_id(*sid).to_string(),
+            Reg::Str(sid) => format!("'{}'", gc.get_string_by_id(*sid)),
             Reg::Ref(_) => unreachable!(),
         };
         writeln!(
@@ -1131,13 +1135,13 @@ impl Instruction for OpMove {
     }
 }
 
-pub struct OpBranch {
+pub struct OpBranchTrue {
     pub loc: Loc,
     pub condition: usize,
     pub offset: i64,
 }
 
-impl Instruction for OpBranch {
+impl Instruction for OpBranchTrue {
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1167,7 +1171,49 @@ impl Instruction for OpBranch {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} => {:+}",
-            "branch", self.condition, self.offset
+            "bt", self.condition, self.offset
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpBranchFalse {
+    pub loc: Loc,
+    pub condition: usize,
+    pub offset: i64,
+}
+
+impl Instruction for OpBranchFalse {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let condition = gc.read_reg(self.condition);
+        if let Reg::Bool(b) = condition {
+            Ok(if !*b {
+                Ip {
+                    func_id: ip.func_id,
+                    inst: (ip.inst as i64 + self.offset) as usize,
+                }
+            } else {
+                Ip {
+                    func_id: ip.func_id,
+                    inst: ip.inst + 1,
+                }
+            })
+        } else {
+            let t = get_type(condition, gc);
+            Err(VmError::InvalidCondition(self.loc.clone(), t))
+        }
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} => {:+}",
+            "bf", self.condition, self.offset
         )
         .unwrap()
     }
@@ -1201,14 +1247,12 @@ pub struct OpDummy;
 impl Instruction for OpDummy {
     fn exec<Buffer: IoWrite>(
         &self,
-        ip: Ip,
+        _ip: Ip,
         _gc: &mut Gc<Buffer>,
         _out: &mut Buffer,
     ) -> Result<Ip, VmError> {
-        Ok(Ip {
-            func_id: ip.func_id,
-            inst: ip.inst + 1,
-        })
+        // This instruction will never be executed
+        unreachable!()
     }
 
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
@@ -1216,7 +1260,7 @@ impl Instruction for OpDummy {
     }
 }
 
-/// Print register to output and stop execution
+/// Pause execution and yield control
 pub struct OpYield {
     pub show_id: Option<usize>,
 }
@@ -1241,6 +1285,161 @@ impl Instruction for OpYield {
             } else {
                 String::new()
             }
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpSetAttr {
+    pub loc: Loc,
+    pub rs: usize,
+    pub rd: usize,
+    pub attrs: Vec<String>,
+}
+
+impl Instruction for OpSetAttr {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let target = gc.read_reg(self.rs).clone();
+        debug_assert!(!self.attrs.is_empty());
+        let mut table = gc.read_reg(self.rd).clone();
+        for (i, attr) in self.attrs.iter().enumerate() {
+            match table {
+                Reg::Ref(r) => match &mut gc[r] {
+                    GcObject::Table(t) => {
+                        if i == self.attrs.len() - 1 {
+                            t.attributes.insert(attr.clone(), target.clone());
+                        } else {
+                            table = t
+                                .attributes
+                                .get(attr)
+                                .ok_or_else(|| VmError::NoSuchKey {
+                                    loc: self.loc.clone(),
+                                    attr: attr.clone(),
+                                })?
+                                .clone();
+                        }
+                        Ok(())
+                    }
+                    _ => Err(()),
+                },
+                _ => Err(()),
+            }
+            .map_err(|_| {
+                let reg = gc.read_reg(self.rd);
+                let t = get_type(reg, gc);
+                VmError::CanNotSetAttr {
+                    loc: self.loc.clone(),
+                    t,
+                }
+            })?;
+        }
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        let attr = self.attrs.iter().fold(String::new(), |mut acc, s| {
+            write!(acc, ".{s}").unwrap();
+            acc
+        });
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}   Reg#{} -> Reg#{}{}",
+            "set_attr", self.rs, self.rd, attr
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpGetAttr {
+    pub loc: Loc,
+    pub rs: usize,
+    pub rd: usize,
+    pub attr: String,
+}
+
+impl Instruction for OpGetAttr {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let table = gc.read_reg(self.rs);
+        if let Reg::Ref(rid) = table {
+            let rid = *rid;
+            match &gc[rid] {
+                GcObject::Closure { .. } => (),
+                GcObject::NativeFunction(_) => (),
+                GcObject::Table(t) => {
+                    let value = t
+                        .attributes
+                        .get(&self.attr)
+                        .ok_or(VmError::NoSuchKey {
+                            loc: self.loc.clone(),
+                            attr: self.attr.clone(),
+                        })?
+                        .clone();
+                    gc.write_reg(self.rd, value);
+                    return Ok(Ip {
+                        func_id: ip.func_id,
+                        inst: ip.inst + 1,
+                    });
+                }
+            }
+        }
+
+        let t = get_type(table, gc);
+        Err(VmError::NotATable {
+            loc: self.loc.clone(),
+            t,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}   Reg#{}.{} -> Reg#{}",
+            "set_attr", self.rs, self.attr, self.rd
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpMakeTable {
+    pub rd: usize,
+}
+
+impl Instruction for OpMakeTable {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let table = gc.alloc(GcObject::Table(Table {
+            attributes: AHashMap::new(),
+        }));
+        let table = Reg::Ref(table);
+        gc.write_reg(self.rd, table);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}   Reg#{}",
+            "new_table", self.rd
         )
         .unwrap()
     }

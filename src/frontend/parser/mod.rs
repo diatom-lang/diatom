@@ -26,8 +26,8 @@ use std::{
 const fn precedence_infix(op: OpInfix) -> (u16, u16) {
     use OpInfix::*;
     match op {
-        Assign => (2, 1),
-        Comma => (3, 4),
+        Comma => (1, 2),
+        Assign => (4, 3),
         Range => (5, 6),
         Or => (7, 8),
         And => (9, 10),
@@ -455,6 +455,7 @@ impl Parser {
                     }
                 }
                 Some(Key(End)) => {
+                    conditional.push((condition, block));
                     iter.next();
                     let end = iter.loc();
                     return Expr::If {
@@ -623,23 +624,17 @@ impl Parser {
                 return Stmt::Error;
             }
         };
-        let eof = self.consume_to_op(iter, ast, LPar, Some((Key(Def), start.clone())));
-        if eof {
-            return Stmt::Error;
-        }
         let mut parameters = vec![];
         loop {
             match iter.peek() {
                 Some(Id(name)) => {
                     let name = name.clone();
                     iter.next();
-                    parameters.push(name);
+                    let loc = iter.loc();
+                    parameters.push((name, loc));
                 }
-                Some(Op(RPar)) => {
+                Some(Op(Assign)) => {
                     iter.next();
-                    if self.consume_to_op(iter, ast, Assign, Some((Key(Def), start.clone()))) {
-                        return Stmt::Error;
-                    };
                     break;
                 }
                 Some(token) => {
@@ -647,6 +642,7 @@ impl Parser {
                         ErrorCode::UnexpectedToken(Some(token.clone()), None, None),
                         iter.loc(),
                     ));
+                    iter.next();
                 }
                 None => {
                     ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
@@ -711,35 +707,110 @@ impl Parser {
         use Token::*;
         iter.next();
         let start = iter.loc();
-        let mut key_vals = vec![];
+
+        if let Some(Op(RBrc)) = iter.peek() {
+            iter.next();
+            let end = iter.loc();
+            return Expr::Const {
+                loc: start.start..end.end,
+                value: Const::Table(vec![]),
+            };
+        }
+        let mut key_vals: Vec<(String, Expr, std::ops::Range<usize>)> = vec![];
+        let mut content = self.consume_expr(iter, ast, 0, Some(Op(RBrc)));
+        if self.consume_to_op(iter, ast, RBrc, Some((Op(LBrc), start.clone()))) {
+            return Expr::Error;
+        };
+
         loop {
-            match iter.peek() {
-                Some(Op(RBrc)) => {
-                    iter.next();
-                    return Expr::Const {
-                        loc: start.start..iter.loc().end,
-                        value: Const::Table(key_vals),
-                    };
-                }
-                Some(_) => {
-                    if let Some(Token::Id(id)) = iter.peek() {
-                        let key = id.clone();
-                        iter.next();
-                        if self.consume_to_op(iter, ast, Assign, None) {
+            match content {
+                Expr::Infix {
+                    loc,
+                    op: OpInfix::Assign,
+                    lhs,
+                    rhs,
+                } => {
+                    let lhs = *lhs;
+                    let (name, name_loc) = match lhs {
+                        Expr::Id { loc, name } => (name, loc),
+                        _ => {
+                            ast.add_diagnostic(to_diagnostic(
+                                ErrorCode::InvalidTableKey,
+                                lhs.get_loc(),
+                            ));
                             return Expr::Error;
-                        };
-                        let value = self.consume_expr(iter, ast, 0, Some(Op(RBrc)));
-                        key_vals.push((key, value));
-                    } else {
-                        let loc = iter.next_loc();
-                        ast.add_diagnostic(to_diagnostic(ErrorCode::InvalidTableKey, loc));
-                        iter.next();
+                        }
+                    };
+                    if let Some((name, _, prev_loc)) =
+                        key_vals.iter().find(|(prev, _, _)| prev == &name)
+                    {
+                        ast.add_diagnostic(to_diagnostic(
+                            ErrorCode::DuplicateKey(prev_loc.clone(), name.clone()),
+                            name_loc,
+                        ));
+                        return Expr::Error;
                     }
+                    key_vals.push((name, *rhs, loc));
+                    break;
                 }
-                None => {
+                Expr::Infix {
+                    loc,
+                    op: OpInfix::Comma,
+                    lhs,
+                    rhs,
+                } => {
+                    match *rhs {
+                        Expr::Infix {
+                            loc,
+                            op: OpInfix::Assign,
+                            lhs,
+                            rhs,
+                        } => {
+                            let lhs = *lhs;
+                            let (name, name_loc) = match lhs {
+                                Expr::Id { loc, name } => (name, loc),
+                                _ => {
+                                    ast.add_diagnostic(to_diagnostic(
+                                        ErrorCode::InvalidTableKey,
+                                        lhs.get_loc(),
+                                    ));
+                                    return Expr::Error;
+                                }
+                            };
+                            if let Some((name, _, prev_loc)) =
+                                key_vals.iter().find(|(prev, _, _)| prev == &name)
+                            {
+                                ast.add_diagnostic(to_diagnostic(
+                                    ErrorCode::DuplicateKey(prev_loc.clone(), name.clone()),
+                                    name_loc,
+                                ));
+                                return Expr::Error;
+                            }
+                            key_vals.push((name, *rhs, loc));
+                        }
+                        _ => {
+                            ast.add_diagnostic(to_diagnostic(ErrorCode::InvalidTableFormat, loc));
+                            return Expr::Error;
+                        }
+                    }
+                    content = *lhs;
+                }
+                Expr::Error => return content,
+                _ => {
+                    ast.add_diagnostic(to_diagnostic(
+                        ErrorCode::InvalidTableFormat,
+                        content.get_loc(),
+                    ));
                     return Expr::Error;
                 }
             }
+        }
+
+        let end = iter.loc();
+        key_vals.reverse();
+        Expr::Const {
+            loc: start.start..end.end,
+            value: Const::Table(key_vals),
         }
     }
 
@@ -841,22 +912,38 @@ impl Parser {
             Some(Key(Require)) => self.consume_require(iter, ast),
             Some(Op(LBrk)) => {
                 iter.next();
+                let previous_loc = iter.loc();
                 let mut exprs = vec![];
-                loop {
-                    match iter.peek() {
-                        Some(Op(RBrk)) => {
-                            iter.next();
-                            break Expr::Const {
-                                loc: start.start..iter.loc().end,
-                                value: Const::List(exprs),
-                            };
-                        }
-                        Some(_) => exprs.push(self.consume_expr(iter, ast, 0, Some(Op(RBrk)))),
-                        None => {
-                            ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                            break Expr::Error;
+                if let Some(Op(RBrk)) = iter.peek() {
+                    iter.next();
+                } else {
+                    let mut parameters = self.consume_expr(iter, ast, 0, Some(Op(RBrk)));
+                    loop {
+                        match parameters {
+                            Expr::Infix {
+                                loc: _,
+                                op: OpInfix::Comma,
+                                lhs,
+                                rhs,
+                            } => {
+                                exprs.push(*rhs);
+                                parameters = *lhs;
+                            }
+                            expr => {
+                                exprs.push(expr);
+                                break;
+                            }
                         }
                     }
+                    // reverse to normal order
+                    exprs.reverse();
+                    if self.consume_to_op(iter, ast, RBrk, Some((Op(LBrk), previous_loc))) {
+                        return Expr::Error;
+                    };
+                }
+                Expr::Const {
+                    loc: start.start..iter.loc().end,
+                    value: Const::List(exprs),
                 }
             }
             Some(Op(LBrc)) => self.consume_table(iter, ast),
@@ -928,27 +1015,40 @@ impl Parser {
                             OpPostfix::Call => {
                                 iter.next();
                                 iter.next();
+                                let previous_loc = iter.loc();
                                 let mut exprs = vec![];
-                                loop {
-                                    match iter.peek() {
-                                        Some(Op(RPar)) => {
-                                            iter.next();
-                                            break;
-                                        }
-                                        Some(_) => exprs.push(self.consume_expr(
-                                            iter,
-                                            ast,
-                                            0,
-                                            Some(Op(RBrk)),
-                                        )),
-                                        None => {
-                                            ast.add_diagnostic(to_diagnostic(
-                                                ErrorCode::UnexpectedEof,
-                                                iter.loc(),
-                                            ));
-                                            break;
+                                if let Some(Op(RPar)) = iter.peek() {
+                                    iter.next();
+                                } else {
+                                    let mut parameters =
+                                        self.consume_expr(iter, ast, 0, Some(Op(RPar)));
+                                    loop {
+                                        match parameters {
+                                            Expr::Infix {
+                                                loc: _,
+                                                op: OpInfix::Comma,
+                                                lhs,
+                                                rhs,
+                                            } => {
+                                                exprs.push(*rhs);
+                                                parameters = *lhs;
+                                            }
+                                            expr => {
+                                                exprs.push(expr);
+                                                break;
+                                            }
                                         }
                                     }
+                                    // reverse to normal order
+                                    exprs.reverse();
+                                    if self.consume_to_op(
+                                        iter,
+                                        ast,
+                                        RPar,
+                                        Some((Op(LPar), previous_loc)),
+                                    ) {
+                                        return Expr::Error;
+                                    };
                                 }
                                 lhs = Expr::Call {
                                     loc: start.start..iter.loc().end,

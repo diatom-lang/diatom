@@ -1,12 +1,10 @@
-use std::ops::Index;
-
-use ahash::AHashSet;
+use std::{collections::BTreeSet, ops::Index};
 
 /// Immutable String Pool without Interning
 #[derive(Default)]
 pub struct StringPool {
     pool: Vec<String>,
-    free: AHashSet<usize>,
+    free: BTreeSet<usize>,
 }
 
 impl StringPool {
@@ -14,17 +12,12 @@ impl StringPool {
         Self::default()
     }
 
-    fn pop_free(&mut self) -> usize {
-        let elem = *self.free.iter().next().unwrap();
-        self.free.remove(&elem);
-        elem
-    }
     pub fn alloc(&mut self, s: String) -> usize {
         if self.free.is_empty() {
             self.pool.push(s);
             self.pool.len() - 1
         } else {
-            let id = self.pop_free();
+            let id = self.free.pop_last().unwrap();
             self.pool[id] = s;
             id
         }

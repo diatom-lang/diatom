@@ -20,10 +20,10 @@ pub trait Instruction {
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
-        context: &mut Gc<Buffer>,
+        gc: &mut Gc<Buffer>,
         out: &mut Buffer,
     ) -> Result<Ip, VmError>;
-    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, context: &Gc<Buffer>);
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, gc: &Gc<Buffer>);
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -40,7 +40,8 @@ pub enum VmInst {
     OpNot,
     OpNeg,
     OpJump,
-    OpBranch,
+    OpBranchTrue,
+    OpBranchFalse,
     OpEq,
     OpNe,
     OpLt,
@@ -49,6 +50,9 @@ pub enum VmInst {
     OpGe,
     OpPow,
     OpRem,
+    OpSetAttr,
+    OpGetAttr,
+    OpMakeTable,
     OpAllocReg,
     OpCallClosure,
     OpRet,
@@ -95,7 +99,10 @@ impl Vm {
         }
     }
 
-    pub fn set_ip(&mut self, ip: Ip) {
-        self.ip = ip
+    pub fn reset_ip(&mut self) {
+        self.ip = Ip {
+            func_id: 0,
+            inst: 0,
+        }
     }
 }

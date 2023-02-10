@@ -53,6 +53,9 @@ fn test_assignment() {
 #[test]
 fn test_loop() {
     test_ok!("a = 0 until a > 100 do a = a + 1 end a", "101");
+    test_ok!("a = 0 until false do a = 5 break end a", "5");
+    test_err!("break");
+    test_err!("continue");
 }
 
 #[test]
@@ -100,4 +103,32 @@ fn test_closure() {
     "#,
         ""
     );
+}
+
+#[test]
+fn test_if() {
+    test_ok!(
+        r#"
+    x = 0
+    if x > 0 then
+        1
+    elsif x < 0 then
+        2
+    else 
+        3
+    end
+    "#,
+        "3"
+    );
+}
+
+#[test]
+fn test_table() {
+    test_ok!("{}", "{}");
+    test_ok!("{a = 1}", "{a = 1}");
+    test_ok!("x = {a = 1} x.a = 100 x.a", "100");
+    test_ok!("x = {a = {i = 1}} x.a.i = 'Hello' x.a.i", "Hello");
+    test_err!("{a = 1, a = 1}");
+    test_err!("a.b");
+    test_err!("a.'hello'");
 }

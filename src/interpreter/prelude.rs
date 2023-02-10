@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use crate::{DiatomValue, Interpreter};
+use crate::{DiatomObject, DiatomValue, Interpreter};
 
 pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
     interpreter.add_extern_function("print".to_string(), |state, parameters, out| {
@@ -17,7 +17,22 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
                 DiatomValue::Int(i) => write!(out, "{i}"),
                 DiatomValue::Float(f) => write!(out, "{f}"),
                 DiatomValue::Str(sid) => write!(out, "{}", state.get_string_by_id(*sid).unwrap()),
-                DiatomValue::Ref(rid) => write!(out, "Object@<{rid}>"),
+                DiatomValue::Ref(r) => match state.get_obj_by_ref(*r).unwrap() {
+                    DiatomObject::Closure {
+                        func_id,
+                        parameters: _,
+                        reg_size: _,
+                        captured: _,
+                    } => {
+                        writeln!(out, "Closure[{func_id}]")
+                    }
+                    DiatomObject::NativeFunction(f) => {
+                        write!(out, "External function@{:p}", f.as_ptr())
+                    }
+                    DiatomObject::Table(t) => {
+                        write!(out, "Table@{:p}", &t)
+                    }
+                },
             }
             .map_err(|err| format!("IoError: {err}"))?;
         }

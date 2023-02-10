@@ -17,7 +17,7 @@ fn test_str(code: &str, should_fail: bool) {
 
 #[test]
 fn test_expr_postfix_ambiguous() {
-    let code = "0,a $ (1,2,3) (3,4)$[2-1]+0.333//[0 1 2]$[1][v]";
+    let code = "0,a $ (1,2,3) (3,4)$[2-1]+0.333//[0, 1, 2]$[1][v]";
     let mut parser = Parser::new();
     let ast = parser.parse_str(OsStr::new(file!()), code);
     if ast.diagnoser.error_count() > 0 {
@@ -30,7 +30,7 @@ fn test_expr_postfix_ambiguous() {
 #[test]
 fn test_valid() {
     test_str("a$()", false);
-    test_str("a$(1 2 [2 2])", false);
+    test_str("a$(1, 2, [2, 2])", false);
     test_str("[]", false);
     test_str("", false);
 }
@@ -40,6 +40,8 @@ fn test_invalid() {
     test_str(">> <<", true);
     test_str("a$[]", true);
     test_str("[1 2,]", true);
+    test_str("[1 2]", true);
+    test_str("a$([1 2], [])", true);
 }
 
 #[test]
@@ -60,12 +62,10 @@ fn test_if() {
 #[test]
 fn test_def() {
     test_str("def a a+1 end", true);
-    test_str("def a() a+1", true);
-    test_str("def () a+1 end", true);
-    test_str("def a(a) = a+1 end", false);
-    test_str("def x (a b c) = a+b+1 fn x = x end", false);
-    test_str("def x () = g$() where end", false);
-    test_str("def f() = g$(1) where g = fn x = f$() end", false);
+    test_str("def a a+1", true);
+    test_str("def a+1 end", true);
+    test_str("def a a = a+1 end", false);
+    test_str("def x a b c = a+b+1 fn x = x end", false);
 }
 
 #[test]
@@ -79,17 +79,17 @@ fn test_fn() {
 #[test]
 fn test_statement() {
     test_str("begin return end", false);
-    test_str("begin return [1 2 3] return fn = [] end", false);
+    test_str("begin return [1, 2, 3] return fn = [] end", false);
     test_str("begin break continue end", false);
     test_str("if false then return else end", false);
     test_str(
-        "if false then return [1 2 3] return fn = [] else end",
+        "if false then return [1, 2, 3] return fn = [] else end",
         false,
     );
     test_str("if false then break continue else end", false);
     test_str("return", false);
-    test_str("def x () = return 1 end", false);
-    test_str("def x () = return end ", false);
+    test_str("def x = return 1 end", false);
+    test_str("def x = return end ", false);
     test_str("fn x = x <= 1", false);
 }
 
@@ -101,13 +101,13 @@ fn test_loop() {
     test_str("until iii end", true);
     test_str("until true do end", false);
     test_str("until true do () end", false);
-    test_str("until [1 2 3] do xxx yyy break end", false);
+    test_str("until [1, 2, 3] do xxx yyy break end", false);
 }
 
 #[test]
 fn test_table() {
     test_str("{}", false);
-    test_str("{ a = 1 b= 3 c= 'abc'}", false);
+    test_str("{ a = 1, b= 3, c= 'abc'}", false);
     test_str("{loop = 1}", true);
 }
 

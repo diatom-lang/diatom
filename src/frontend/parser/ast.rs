@@ -34,10 +34,40 @@ pub enum Stmt {
     Def {
         loc: Loc,
         name: String,
-        parameters: Vec<String>,
+        parameters: Vec<(String, Loc)>,
         body: Vec<Stmt>,
     },
     Error,
+}
+
+impl Stmt {
+    pub fn get_loc(&self) -> Loc {
+        match self {
+            Stmt::Expr { loc, expr: _ } => loc,
+            Stmt::Continue { loc } => loc,
+            Stmt::Break { loc } => loc,
+            Stmt::Return { loc, value: _ } => loc,
+            Stmt::Loop {
+                loc,
+                condition: _,
+                body: _,
+            } => loc,
+            Stmt::For {
+                loc,
+                loop_variable: _,
+                iterator: _,
+                body: _,
+            } => loc,
+            Stmt::Def {
+                loc,
+                name: _,
+                parameters: _,
+                body: _,
+            } => loc,
+            Stmt::Error => unreachable!(),
+        }
+        .clone()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -178,7 +208,7 @@ pub enum Const {
     Str(String),
     Bool(bool),
     List(Vec<Expr>),
-    Table(Vec<(String, Expr)>),
+    Table(Vec<(String, Expr, Loc)>),
 }
 
 /// Abstract syntax tree on a given file
