@@ -35,7 +35,7 @@ fn get_type<Buffer: IoWrite>(reg: &Reg, gc: &Gc<Buffer>) -> String {
     }
 }
 
-const FORMAT_PAD: usize = 7;
+const FORMAT_PAD: usize = 10;
 
 pub struct OpAllocReg {
     pub n_reg: usize,
@@ -1358,6 +1358,61 @@ impl Instruction for OpSetAttr {
     }
 }
 
+pub struct OpGetAttr {
+    pub loc: Loc,
+    pub rs: usize,
+    pub rd: usize,
+    pub attr: String,
+}
+
+impl Instruction for OpGetAttr {
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let table = gc.read_reg(self.rs);
+        if let Reg::Ref(rid) = table {
+            let rid = *rid;
+            match &gc[rid] {
+                GcObject::Closure { .. } => (),
+                GcObject::NativeFunction(_) => (),
+                GcObject::Table(t) => {
+                    let value = t
+                        .attributes
+                        .get(&self.attr)
+                        .ok_or(VmError::NoSuchKey {
+                            loc: self.loc.clone(),
+                            attr: self.attr.clone(),
+                        })?
+                        .clone();
+                    gc.write_reg(self.rd, value);
+                    return Ok(Ip {
+                        func_id: ip.func_id,
+                        inst: ip.inst + 1,
+                    });
+                }
+            }
+        }
+
+        let t = get_type(table, gc);
+        Err(VmError::NotATable {
+            loc: self.loc.clone(),
+            t,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}   Reg#{}.{} -> Reg#{}",
+            "set_attr", self.rs, self.attr, self.rd
+        )
+        .unwrap()
+    }
+}
+
 pub struct OpMakeTable {
     pub rd: usize,
 }
@@ -1384,7 +1439,7 @@ impl Instruction for OpMakeTable {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}   Reg#{}",
-            "make_table", self.rd
+            "new_table", self.rd
         )
         .unwrap()
     }

@@ -126,5 +126,9 @@ fn test_if() {
 fn test_table() {
     test_ok!("{}", "{}");
     test_ok!("{a = 1}", "{a = 1}");
+    test_ok!("x = {a = 1} x.a = 100 x.a", "100");
+    test_ok!("x = {a = {i = 1}} x.a.i = 'Hello' x.a.i", "Hello");
     test_err!("{a = 1, a = 1}");
+    test_err!("a.b");
+    test_err!("a.'hello'");
 }

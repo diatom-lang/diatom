@@ -12,7 +12,7 @@ mod register_table;
 mod string_pool;
 
 mod state;
-use crate::vm::op::{OpGe, OpLe, OpLt, OpMakeTable, OpNe, OpSetAttr};
+use crate::vm::op::{OpGe, OpGetAttr, OpLe, OpLt, OpMakeTable, OpNe, OpSetAttr};
 use crate::{
     diagnostic::{Diagnostic, Loc},
     frontend::{
@@ -650,6 +650,33 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             }
             Expr::Infix {
                 loc,
+                op: OpInfix::Member,
+                lhs,
+                rhs,
+            } => {
+                let name = match rhs.as_ref() {
+                    Expr::Id { loc: _, name } => name.clone(),
+                    expr => {
+                        return Err(ErrorCode::InvalidMember(expr.get_loc()));
+                    }
+                };
+                let (lhs, tmp) = self.compile_expr(lhs, false)?;
+                if tmp {
+                    self.registers.free_intermediate(lhs);
+                }
+                let rd = self.registers.declare_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpGetAttr(OpGetAttr {
+                        loc: loc.clone(),
+                        rs: lhs,
+                        rd,
+                        attr: name,
+                    }));
+                Ok((rd, true))
+            }
+            Expr::Infix {
+                loc,
                 op: OpInfix::Assign,
                 lhs: _,
                 rhs: _,
@@ -916,38 +943,97 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     }
 
     fn compile_assignment(&mut self, lhs: &Expr, rhs: &Expr, loc: Loc) -> Result<(), ErrorCode> {
-        if let Expr::Id { loc: id_loc, name } = lhs {
-            // declare variable
-            let id = if let Some((id, depth, loc, _)) = self.registers.lookup_variable(name) {
-                // variable is captured
-                // make a local copy and register capture info
-                if depth > 0 {
-                    let local_id = self.registers.declare_variable(name, loc);
-                    self.registers.capture.push(Capture {
-                        rd: local_id,
-                        rs: id,
-                        depth,
-                    });
-                    local_id
+        match lhs {
+            Expr::Id { loc: id_loc, name } => {
+                // declare variable
+                let id = if let Some((id, depth, loc, _)) = self.registers.lookup_variable(name) {
+                    // variable is captured
+                    // make a local copy and register capture info
+                    if depth > 0 {
+                        let local_id = self.registers.declare_variable(name, loc);
+                        self.registers.capture.push(Capture {
+                            rd: local_id,
+                            rs: id,
+                            depth,
+                        });
+                        local_id
+                    } else {
+                        id
+                    }
                 } else {
-                    id
+                    self.scopes.last_mut().unwrap().insert(name.clone());
+                    self.registers.declare_variable(name, Some(id_loc.clone()))
+                };
+                let (rhs, tmp) = self.compile_expr(rhs, false)?;
+                if tmp {
+                    self.registers.free_intermediate(rhs);
                 }
-            } else {
-                self.scopes.last_mut().unwrap().insert(name.clone());
-                self.registers.declare_variable(name, Some(id_loc.clone()))
-            };
-            let (rhs, tmp) = self.compile_expr(rhs, false)?;
-            if tmp {
-                self.registers.free_intermediate(rhs);
+                self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                    loc,
+                    rs: rhs,
+                    rd: id,
+                }));
+                Ok(())
             }
-            self.get_current_func().insts.push(VmInst::OpMove(OpMove {
-                loc,
-                rs: rhs,
-                rd: id,
-            }));
-            Ok(())
-        } else {
-            Err(ErrorCode::CannotAssign(lhs.get_loc()))
+            expr @ Expr::Infix {
+                op: OpInfix::Member,
+                ..
+            } => {
+                let mut expr = expr;
+                let mut attrs = vec![];
+                loop {
+                    match expr {
+                        Expr::Id { loc: _, name } => {
+                            attrs.push(name.clone());
+                            break;
+                        }
+                        Expr::Infix {
+                            loc,
+                            op: OpInfix::Member,
+                            lhs,
+                            rhs,
+                        } => {
+                            if let Expr::Id { loc: _, name } = rhs.as_ref() {
+                                attrs.push(name.clone());
+                                expr = lhs;
+                            } else {
+                                return Err(ErrorCode::CannotAssign(loc.clone()));
+                            }
+                        }
+                        _ => return Err(ErrorCode::CannotAssign(expr.get_loc())),
+                    }
+                }
+                let name = attrs.pop().unwrap();
+                let rd = match self.registers.lookup_variable(&name) {
+                    Some((id, depth, loc, _)) => {
+                        // variable is captured
+                        // make a local copy and register capture info
+                        if depth > 0 {
+                            let local_id = self.registers.declare_captured_variable(name, loc);
+                            self.registers.capture.push(Capture {
+                                rd: local_id,
+                                rs: id,
+                                depth,
+                            });
+                            Ok(local_id)
+                        } else {
+                            Ok(id)
+                        }
+                    }
+                    None => Err(ErrorCode::NameNotDefined(loc.clone(), name)),
+                }?;
+
+                attrs.reverse();
+                let (rs, tmp) = self.compile_expr(rhs, false)?;
+                if tmp {
+                    self.registers.free_intermediate(rs);
+                }
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpSetAttr(OpSetAttr { loc, rs, rd, attrs }));
+                Ok(())
+            }
+            _ => Err(ErrorCode::CannotAssign(lhs.get_loc())),
         }
     }
 
@@ -1126,7 +1212,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 (rd, true)
             }
             OpInfix::Comma => todo!(),
-            OpInfix::Member => todo!(),
+            OpInfix::Member => unreachable!(),
         }
     }
 

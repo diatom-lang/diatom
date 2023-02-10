@@ -40,6 +40,8 @@ pub enum VmError {
     CanNotSetAttr { loc: Loc, t: String },
     /// E3010 No Such Key
     NoSuchKey { loc: Loc, attr: String },
+    /// E3011 Not a table
+    NotATable { loc: Loc, t: String },
 }
 
 impl From<VmError> for Diagnostic {
@@ -97,6 +99,12 @@ impl From<VmError> for Diagnostic {
             VmError::NoSuchKey { loc, attr } => Diagnostic::error()
                 .with_code("E3010")
                 .with_message(format!("Table does not contain key `{attr}`"))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::NotATable { loc, t } => Diagnostic::error()
+                .with_code("E3011")
+                .with_message(format!(
+                    "Read attribute from type `{t}` which is not a table"
+                ))
                 .with_labels(vec![Label::primary((), loc)]),
         }
     }

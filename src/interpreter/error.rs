@@ -27,6 +27,8 @@ pub enum ErrorCode {
     ContinueOutsideLoop(Loc),
     /// E2006 Return outside function
     ReturnOutsideFunction(Loc),
+    /// E2007 Invalid Member Access
+    InvalidMember(Loc),
 }
 
 impl From<ErrorCode> for Diagnostic {
@@ -76,6 +78,10 @@ impl From<ErrorCode> for Diagnostic {
             ErrorCode::ReturnOutsideFunction(loc) => Diagnostic::error()
                 .with_code("E2006")
                 .with_message("Can not return outside a function")
+                .with_labels(vec![Label::primary((), loc)]),
+            ErrorCode::InvalidMember(loc) => Diagnostic::error()
+                .with_code("E2007")
+                .with_message("Member assessment must be an identifier")
                 .with_labels(vec![Label::primary((), loc)]),
         }
     }

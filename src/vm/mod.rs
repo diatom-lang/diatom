@@ -51,6 +51,7 @@ pub enum VmInst {
     OpPow,
     OpRem,
     OpSetAttr,
+    OpGetAttr,
     OpMakeTable,
     OpAllocReg,
     OpCallClosure,
