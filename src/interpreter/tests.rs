@@ -132,3 +132,25 @@ fn test_table() {
     test_err!("a.b");
     test_err!("a.'hello'");
 }
+
+#[test]
+fn test_recursive() {
+    test_ok!(
+        r#"
+        def fib n = 
+            if n <= 1 then
+                n
+            else
+                fib$(n-1) + fib$(n-2)
+            end
+        end
+        fib$(10)
+    "#,
+        "55"
+    );
+}
+
+#[test]
+fn test_compile_with_target() {
+    test_ok!("def add a b = a + b end add$(add$(1,2), 3)", "6");
+}

@@ -17,14 +17,14 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
                 DiatomValue::Int(i) => write!(out, "{i}"),
                 DiatomValue::Float(f) => write!(out, "{f}"),
                 DiatomValue::Str(sid) => write!(out, "{}", state.get_string_by_id(*sid).unwrap()),
-                DiatomValue::Ref(r) => match state.get_obj_by_ref(*r).unwrap() {
+                DiatomValue::Ref(r) => match state.get_obj(*r).unwrap() {
                     DiatomObject::Closure {
                         func_id,
                         parameters: _,
                         reg_size: _,
                         captured: _,
                     } => {
-                        writeln!(out, "Closure[{func_id}]")
+                        write!(out, "Closure[{func_id}]")
                     }
                     DiatomObject::NativeFunction(f) => {
                         write!(out, "External function@{:p}", f.as_ptr())

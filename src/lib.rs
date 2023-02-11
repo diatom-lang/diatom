@@ -11,7 +11,7 @@
 //!
 //! See examples in [Interpreter].
 //!
-//!
+
 mod diagnostic;
 mod frontend;
 mod interpreter;
