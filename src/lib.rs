@@ -12,8 +12,6 @@
 //! See examples in [Interpreter].
 //!
 
-#![allow(clippy::option_map_unit_fn)]
-
 mod diagnostic;
 mod frontend;
 mod interpreter;

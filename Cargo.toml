@@ -1,6 +1,6 @@
 [package]
 name = "diatom"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 authors = [ "Terence Ng", "Aoyang Yu" ]
 description = "The diatom programming language"

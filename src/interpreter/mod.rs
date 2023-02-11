@@ -452,12 +452,16 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             Stmt::Continue { .. } => (),
             Stmt::Break { .. } => (),
             Stmt::Return { value, .. } => {
-                value.as_ref().map(|expr| self.scan_constant_expr(expr));
+                if let Some(expr) = value {
+                    self.scan_constant_expr(expr)
+                }
             }
             Stmt::Loop {
                 condition, body, ..
             } => {
-                condition.as_ref().map(|expr| self.scan_constant_expr(expr));
+                if let Some(expr) = condition {
+                    self.scan_constant_expr(expr)
+                }
                 body.iter().for_each(|stmt| self.scan_constant_stmt(stmt));
             }
             Stmt::For { .. } => todo!(),
@@ -476,9 +480,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             } => conditional.iter().for_each(|(expr, stmts)| {
                 self.scan_constant_expr(expr);
                 stmts.iter().for_each(|stmt| self.scan_constant_stmt(stmt));
-                default
-                    .as_ref()
-                    .map(|stmts| stmts.iter().for_each(|stmt| self.scan_constant_stmt(stmt)));
+                if let Some(stmts) = default {
+                    stmts.iter().for_each(|stmt| self.scan_constant_stmt(stmt))
+                }
             }),
             Expr::Prefix { rhs, .. } => self.scan_constant_expr(rhs),
             Expr::Call {
@@ -621,7 +625,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     .for_each(|jump| jump.patch_forward(self.get_current_func()));
 
                 // patch branch out of loop
-                branch_inst.map(|jump| jump.patch_forward(self.get_current_func()));
+                if let Some(jump) = branch_inst {
+                    jump.patch_forward(self.get_current_func())
+                }
             }
             Stmt::Continue { loc } => {
                 let Loop {
@@ -866,7 +872,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 };
                 for (condition, body) in conditional {
                     // patch branch
-                    branch_op.map(|jump| jump.patch_forward(self.get_current_func()));
+                    if let Some(jump) = branch_op {
+                        jump.patch_forward(self.get_current_func())
+                    }
                     // compile condition
                     let (condition_reg, tmp) = self.compile_expr(condition, false, None)?;
                     if tmp {
@@ -912,7 +920,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
                 }
                 // patch branch
-                branch_op.map(|jump| jump.patch_forward(self.get_current_func()));
+                if let Some(jump) = branch_op {
+                    jump.patch_forward(self.get_current_func())
+                }
 
                 // compile default else body
                 if let Some(body) = default {
