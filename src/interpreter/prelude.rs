@@ -24,7 +24,7 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
                         reg_size: _,
                         captured: _,
                     } => {
-                        writeln!(out, "Closure[{func_id}]")
+                        write!(out, "Closure[{func_id}]")
                     }
                     DiatomObject::NativeFunction(f) => {
                         write!(out, "External function@{:p}", f.as_ptr())

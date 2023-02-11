@@ -67,12 +67,14 @@ impl Instruction for OpAllocReg {
 
 pub struct OpCall {
     pub reg_id: usize,
-    pub parameters: Vec<usize>,
+    pub parameters: usize,
+    pub start: usize,
     pub write_back: Option<usize>,
     pub loc: Loc,
 }
 
 impl Instruction for OpCall {
+    #[inline(never)]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -95,11 +97,11 @@ impl Instruction for OpCall {
                         let parameters = *parameters;
                         let captured = captured as *const Vec<(usize, Rc<UnsafeCell<Reg>>)>;
                         let reg_size = *reg_size;
-                        if parameters != self.parameters.len() {
+                        if parameters != self.parameters {
                             return Err(VmError::ParameterLengthNotMatch {
                                 loc: self.loc.clone(),
                                 expected: parameters,
-                                got: self.parameters.len(),
+                                got: self.parameters,
                             });
                         }
 
@@ -110,22 +112,15 @@ impl Instruction for OpCall {
                                 inst: ip.inst + 1,
                             },
                             self.write_back,
+                            // Reg#0 is always unit type
+                            self.start - 1,
                         );
 
                         // alloc reg file
                         gc.alloc_reg_file(reg_size);
 
-                        // write parameters to call stack
-                        self.parameters
-                            .iter()
-                            .enumerate()
-                            .for_each(|(i, reg_prev)| {
-                                let reg = gc.read_reg_prev(*reg_prev).clone();
-                                gc.write_reg(i, reg);
-                            });
-
                         // write capture values to stack
-                        // This operation violets borrow rules but since closure can not be modified or garbaged
+                        // This operation violets borrow rules but since closure can not be modified or garbage
                         // collected here. It is safe to dereference the pointer here.
                         unsafe { &*captured }
                             .iter()
@@ -137,10 +132,12 @@ impl Instruction for OpCall {
                         let f = f.clone();
                         let f = f.borrow();
                         let mut parameters = vec![];
-                        for para in self.parameters.iter() {
-                            let reg = gc.read_reg(*para).clone();
-                            parameters.push(reg);
-                        }
+                        (self.start..self.start + self.parameters)
+                            .into_iter()
+                            .for_each(|i| {
+                                let reg = gc.read_reg(i).clone();
+                                parameters.push(reg);
+                            });
                         let mut state = State { gc };
                         let ret = f(&mut state, &parameters, out).map_err(|s| VmError::Panic {
                             loc: self.loc.clone(),
@@ -177,18 +174,13 @@ impl Instruction for OpCall {
     }
 
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
-        let mut parameters = self.parameters.iter().fold(String::new(), |mut s, x| {
-            s.push_str(&format!("{x}, "));
-            s
-        });
-        parameters.pop();
-        parameters.pop();
         writeln!(
             decompiled,
-            "{: >FORMAT_PAD$}    Reg#{} $ Reg#{{{}}} -> {}",
+            "{: >FORMAT_PAD$}    Reg#{} $ Reg#{}..{} -> {}",
             "call",
             self.reg_id,
-            parameters,
+            self.start,
+            self.start + self.parameters,
             self.write_back
                 .map(|x| x.to_string())
                 .unwrap_or_else(|| "[[discard]]".to_string())
@@ -212,7 +204,7 @@ impl Instruction for OpRet {
         let reg = gc.read_reg(self.return_reg).clone();
 
         // clean call stack
-        let (ip, write_back) = gc.pop_call_stack().expect("Return on empty call stack!");
+        let (ip, write_back) = gc.pop_call_stack().unwrap();
 
         // write return value back
         if let Some(write_back) = write_back {
@@ -276,7 +268,7 @@ impl Instruction for OpMakeClosure {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Func@{} -> Reg#{}",
-            "clos", self.func_id, self.rd
+            "closure", self.func_id, self.rd
         )
         .unwrap();
         for Capture { rd, rs, depth } in self.capture.iter() {
@@ -293,7 +285,6 @@ impl Instruction for OpMakeClosure {
 pub struct OpLoadConstant {
     pub constant: Reg,
     pub rd: usize,
-    pub loc: Loc,
 }
 
 impl Instruction for OpLoadConstant {
@@ -396,7 +387,7 @@ impl Instruction for OpNeg {
         })
     }
 
-    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, __gc: &Gc<Buffer>) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} -> Reg#{}",
@@ -1107,7 +1098,6 @@ impl Instruction for OpOr {
 }
 
 pub struct OpMove {
-    pub loc: Loc,
     pub rs: usize,
     pub rd: usize,
 }
@@ -1173,7 +1163,7 @@ impl Instruction for OpBranchTrue {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} => {:+}",
-            "bt", self.condition, self.offset
+            "br_true", self.condition, self.offset
         )
         .unwrap()
     }
@@ -1215,7 +1205,7 @@ impl Instruction for OpBranchFalse {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} => {:+}",
-            "bf", self.condition, self.offset
+            "br_false", self.condition, self.offset
         )
         .unwrap()
     }

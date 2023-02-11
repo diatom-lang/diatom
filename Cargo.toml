@@ -27,15 +27,7 @@ default = ["console"]
 console = ["reedline", "nu-ansi-term", "crossterm"]
 
 [profile.release]
-opt-level = 3
+opt-level = 2
 lto = true
 codegen-units = 1
 panic = "abort"
-debug = true
-
-[dev-dependencies]
-criterion = "0.4"
-
-[[bench]]
-name = "loop"
-harness = false

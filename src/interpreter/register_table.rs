@@ -24,7 +24,6 @@ pub struct Capture {
 #[derive(Clone)]
 pub struct Loop {
     pub start_inst_offset: usize,
-    pub start_insert_offset: usize,
     pub breaks: Vec<FutureJump>,
 }
 
@@ -37,8 +36,6 @@ pub struct RegisterTable {
     pub assigned: usize,
     pub func_id: usize,
     constant_table: AHashMap<ConstantValue, usize>,
-    /// Count how many load constant inserted
-    pub insert_offset: usize,
     /// captured variables
     pub capture: Vec<Capture>,
     pub loops: Vec<Loop>,
@@ -50,13 +47,19 @@ impl RegisterTable {
             prev: None,
             variables: AHashMap::default(),
             free: vec![],
-            assigned: 0,
+            assigned: 1,
             func_id,
-            constant_table: AHashMap::default(),
-            insert_offset: 0,
+            constant_table: AHashMap::from([(ConstantValue::Unit, 0)]),
             capture: vec![],
             loops: vec![],
         }
+    }
+
+    /// prepare n free register for function call
+    pub fn prepare_for_call(&mut self, para_size: usize) -> usize {
+        let start = self.assigned;
+        self.assigned += para_size;
+        start
     }
 
     pub fn declare_variable(&mut self, name: impl AsRef<str>, loc: Option<Loc>) -> usize {
@@ -113,16 +116,11 @@ impl RegisterTable {
         }
     }
 
-    /// Return ok is constant is in table, otherwise alloc a new register for this constant
     pub fn get_or_alloc_constant(&mut self, constant: ConstantValue) -> Result<usize, usize> {
         match self.constant_table.get(&constant) {
             Some(id) => Ok(*id),
             None => {
-                // must alloc new register to prevent
-                // already compiled Instruction
-                // overwrite constant value
-                let id = self.assigned;
-                self.assigned += 1;
+                let id = self.declare_intermediate();
                 self.constant_table.insert(constant, id);
                 Err(id)
             }

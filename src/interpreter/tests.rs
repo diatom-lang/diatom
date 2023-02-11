@@ -149,3 +149,8 @@ fn test_recursive() {
         "55"
     );
 }
+
+#[test]
+fn test_compile_with_target() {
+    test_ok!("def add a b = a + b end add$(add$(1,2), 3)", "6");
+}

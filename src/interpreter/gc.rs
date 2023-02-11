@@ -57,13 +57,16 @@ enum StackReg {
 
 struct Frame {
     ptr: usize,
+    shared: usize,
     return_addr: Ip,
     write_back: Option<usize>,
 }
 
 struct CallStack {
+    shared: Vec<usize>,
     frames: Vec<Frame>,
     regs: Vec<StackReg>,
+    fp: Frame,
 }
 
 /// Garbage Collector
@@ -74,21 +77,26 @@ pub struct Gc<Buffer: Write> {
     string_pool: StringPool,
 }
 
+static UNIT_REG: Reg = Reg::Unit;
+
 impl<Buffer: Write> Gc<Buffer> {
     pub fn new() -> Self {
         Self {
             pool: vec![],
             free: BTreeSet::new(),
             call_stack: CallStack {
-                frames: vec![Frame {
+                shared: vec![],
+                frames: vec![],
+                regs: vec![],
+                fp: Frame {
                     ptr: 0,
+                    shared: 0,
                     return_addr: Ip {
                         func_id: usize::MAX,
                         inst: usize::MAX,
                     },
                     write_back: None,
-                }],
-                regs: vec![],
+                },
             },
             string_pool: StringPool::new(),
         }
@@ -105,17 +113,18 @@ impl<Buffer: Write> Gc<Buffer> {
 
     pub fn alloc_reg_file(&mut self, n: usize) {
         let stack = &mut self.call_stack;
-        debug_assert!(!stack.frames.is_empty());
-        let frame = unsafe { stack.frames.last().unwrap_unchecked().ptr };
+        let frame = stack.fp.ptr;
         (stack.regs.len()..frame + n)
             .into_iter()
             .for_each(|_| stack.regs.push(StackReg::Reg(Reg::Unit)))
     }
 
     pub fn read_reg(&self, n: usize) -> &Reg {
+        if n == 0 {
+            return &UNIT_REG;
+        }
         let stack = &self.call_stack;
-        debug_assert!(!stack.frames.is_empty());
-        let n = unsafe { stack.frames.last().unwrap_unchecked().ptr } + n;
+        let n = stack.fp.ptr + n;
         debug_assert!(stack.regs.len() > n);
         let reg = unsafe { self.call_stack.regs.get_unchecked(n) };
         match reg {
@@ -124,21 +133,15 @@ impl<Buffer: Write> Gc<Buffer> {
         }
     }
 
-    pub fn read_reg_prev(&self, n: usize) -> &Reg {
-        let stack = &self.call_stack;
-        debug_assert!(stack.frames.len() >= 2);
-        let frame_len = stack.frames.len();
-        let n = unsafe { stack.frames.get_unchecked(frame_len - 2).ptr } + n;
-        debug_assert!(stack.regs.len() > n);
-        let reg = unsafe { self.call_stack.regs.get_unchecked(n) };
-        match reg {
-            StackReg::Reg(reg) => reg,
-            StackReg::Shared(rc) => unsafe { &*rc.as_ref().get() },
-        }
-    }
     pub fn share_reg(&mut self, id: usize, depth: usize) -> Rc<UnsafeCell<Reg>> {
+        debug_assert!(id != 0);
         let stack = &mut self.call_stack;
-        let frame = stack.frames[stack.frames.len() - depth].ptr;
+        debug_assert!(depth > 0);
+        let frame = if depth == 1 {
+            stack.fp.ptr
+        } else {
+            stack.frames[stack.frames.len() + 1 - depth].ptr
+        };
         let shared_reg = &mut self.call_stack.regs[frame + id];
         let reg = std::mem::replace(shared_reg, StackReg::Reg(Reg::Unit));
         match reg {
@@ -155,9 +158,9 @@ impl<Buffer: Write> Gc<Buffer> {
     ///
     /// Automatically extend reg file size if n > regs.len()
     pub fn write_reg(&mut self, n: usize, reg: Reg) {
+        debug_assert!(n != 0);
         let stack = &mut self.call_stack;
-        debug_assert!(!stack.frames.is_empty());
-        let n = unsafe { stack.frames.last().unwrap_unchecked().ptr } + n;
+        let n = stack.fp.ptr + n;
         debug_assert!(stack.regs.len() > n);
         let prev = unsafe { stack.regs.get_unchecked_mut(n) };
         match prev {
@@ -167,31 +170,47 @@ impl<Buffer: Write> Gc<Buffer> {
     }
 
     pub fn write_shared_reg(&mut self, n: usize, reg: Rc<UnsafeCell<Reg>>) {
+        debug_assert!(n != 0);
         let stack = &mut self.call_stack;
-        debug_assert!(!stack.frames.is_empty());
-        let n = unsafe { stack.frames.last().unwrap_unchecked().ptr } + n;
+        stack.fp.shared += 1;
+        stack.shared.push(n);
+        let n = stack.fp.ptr + n;
         debug_assert!(stack.regs.len() > n);
         *unsafe { stack.regs.get_unchecked_mut(n) } = StackReg::Shared(reg)
     }
 
-    pub fn alloc_call_stack(&mut self, return_addr: Ip, write_back: Option<usize>) {
-        let ptr = self.call_stack.regs.len();
-        self.call_stack.frames.push(Frame {
-            ptr,
-            return_addr,
-            write_back,
-        })
+    pub fn alloc_call_stack(&mut self, return_addr: Ip, write_back: Option<usize>, start: usize) {
+        let stack = &mut self.call_stack;
+        let ptr = stack.fp.ptr;
+        let fp_old = std::mem::replace(
+            &mut stack.fp,
+            Frame {
+                ptr: ptr + start,
+                shared: 0,
+                return_addr,
+                write_back,
+            },
+        );
+        self.call_stack.frames.push(fp_old);
     }
 
     /// None if there is no more call stack
     pub fn pop_call_stack(&mut self) -> Option<(Ip, Option<usize>)> {
-        self.call_stack.frames.pop().map(
-            |Frame {
-                 ptr: _,
-                 return_addr,
-                 write_back,
-             }| (return_addr, write_back),
-        )
+        let stack = &mut self.call_stack;
+        let fp = stack.frames.pop().unwrap();
+
+        let Frame {
+            return_addr,
+            write_back,
+            shared,
+            ptr,
+        } = std::mem::replace(&mut stack.fp, fp);
+
+        (0..shared).into_iter().for_each(|_| {
+            let shared_reg = stack.shared.pop().unwrap();
+            stack.regs[shared_reg + ptr] = StackReg::Reg(Reg::Unit);
+        });
+        Some((return_addr, write_back))
     }
 
     pub fn clean_call_stack(&mut self) {
