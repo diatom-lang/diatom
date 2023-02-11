@@ -8,7 +8,7 @@ use crate::{
     },
     IoWrite, State,
 };
-use std::{cell::UnsafeCell, fmt::Write, rc::Rc};
+use std::fmt::Write;
 
 use super::{Instruction, Ip, VmError};
 
@@ -20,7 +20,7 @@ fn get_type<Buffer: IoWrite>(reg: &Reg, gc: &Gc<Buffer>) -> String {
         Reg::Float(_) => "Float".to_string(),
         Reg::Str(_) => "String".to_string(),
         Reg::Ref(r) => {
-            let obj = &gc[*r];
+            let obj = unsafe { gc.get_obj_unchecked(*r) };
             match obj {
                 GcObject::Closure {
                     func_id: _,
@@ -42,6 +42,7 @@ pub struct OpAllocReg {
 }
 
 impl Instruction for OpAllocReg {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -85,18 +86,15 @@ impl Instruction for OpCall {
         let obj = gc.read_reg(self.reg_id).clone();
         match obj {
             Reg::Ref(r) => {
-                let obj = &gc[r];
+                let obj = unsafe { gc.get_obj_unchecked(r) };
                 match obj {
                     GcObject::Closure {
                         func_id,
                         parameters,
-                        captured,
-                        reg_size,
+                        ..
                     } => {
                         let func_id = *func_id;
                         let parameters = *parameters;
-                        let captured = captured as *const Vec<(usize, Rc<UnsafeCell<Reg>>)>;
-                        let reg_size = *reg_size;
                         if parameters != self.parameters {
                             return Err(VmError::ParameterLengthNotMatch {
                                 loc: self.loc.clone(),
@@ -114,17 +112,8 @@ impl Instruction for OpCall {
                             self.write_back,
                             // Reg#0 is always unit type
                             self.start - 1,
+                            r,
                         );
-
-                        // alloc reg file
-                        gc.alloc_reg_file(reg_size);
-
-                        // write capture values to stack
-                        // This operation violets borrow rules but since closure can not be modified or garbage
-                        // collected here. It is safe to dereference the pointer here.
-                        unsafe { &*captured }
-                            .iter()
-                            .for_each(|(rd, reg)| gc.write_shared_reg(*rd, reg.clone()));
 
                         Ok(Ip { func_id, inst: 0 })
                     }
@@ -146,7 +135,7 @@ impl Instruction for OpCall {
                         })?;
                         match ret {
                             Reg::Str(id) => {
-                                if gc.get_string_by_id_checked(id).is_none() {
+                                if gc.get_str(id).is_none() {
                                     return Err(VmError::InvalidRef {
                                         loc: self.loc.clone(),
                                         t: "Str",
@@ -195,6 +184,7 @@ pub struct OpRet {
 }
 
 impl Instruction for OpRet {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         _: Ip,
@@ -204,7 +194,7 @@ impl Instruction for OpRet {
         let reg = gc.read_reg(self.return_reg).clone();
 
         // clean call stack
-        let (ip, write_back) = gc.pop_call_stack().unwrap();
+        let (ip, write_back) = gc.pop_call_stack();
 
         // write return value back
         if let Some(write_back) = write_back {
@@ -237,6 +227,7 @@ pub struct OpMakeClosure {
 }
 
 impl Instruction for OpMakeClosure {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -256,7 +247,7 @@ impl Instruction for OpMakeClosure {
             captured: captured_regs,
             reg_size: self.reg_size,
         };
-        let reg = Reg::Ref(gc.alloc(closure));
+        let reg = Reg::Ref(gc.alloc_obj(closure));
         gc.write_reg(self.rd, reg);
         Ok(Ip {
             func_id: ip.func_id,
@@ -288,6 +279,7 @@ pub struct OpLoadConstant {
 }
 
 impl Instruction for OpLoadConstant {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -308,7 +300,7 @@ impl Instruction for OpLoadConstant {
             Reg::Bool(b) => b.to_string(),
             Reg::Int(i) => i.to_string(),
             Reg::Float(f) => f.to_string(),
-            Reg::Str(sid) => format!("'{}'", gc.get_string_by_id(*sid)),
+            Reg::Str(sid) => format!("'{}'", gc.get_str(*sid).unwrap()),
             Reg::Ref(_) => unreachable!(),
         };
         writeln!(
@@ -327,6 +319,7 @@ pub struct OpNot {
 }
 
 impl Instruction for OpNot {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -365,6 +358,7 @@ pub struct OpNeg {
 }
 
 impl Instruction for OpNeg {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -405,6 +399,7 @@ pub struct OpAdd {
 }
 
 impl Instruction for OpAdd {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -419,11 +414,11 @@ impl Instruction for OpAdd {
             (Reg::Float(f1), Reg::Int(i2)) => Reg::Float(*f1 + *i2 as f64),
             (Reg::Float(f1), Reg::Float(f2)) => Reg::Float(*f1 + *f2),
             (Reg::Str(s1), Reg::Str(s2)) => {
-                let str1 = gc.get_string_by_id(*s1);
-                let str2 = gc.get_string_by_id(*s2);
-                let mut s = str1.to_string();
-                s.push_str(str2);
-                let sid_ret = gc.string_pool().alloc(s);
+                let s1 = unsafe { gc.get_str_unchecked(*s1) };
+                let s2 = unsafe { gc.get_str_unchecked(*s2) };
+                let mut s = s1.to_string();
+                s.push_str(s2);
+                let sid_ret = gc.alloc_str(s);
                 Reg::Str(sid_ret)
             }
             _ => {
@@ -457,6 +452,7 @@ pub struct OpSub {
 }
 
 impl Instruction for OpSub {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -501,6 +497,7 @@ pub struct OpMul {
 }
 
 impl Instruction for OpMul {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -515,13 +512,13 @@ impl Instruction for OpMul {
             (Reg::Float(f1), Reg::Int(i2)) => Reg::Float(*f1 * *i2 as f64),
             (Reg::Float(f1), Reg::Float(f2)) => Reg::Float(*f1 * *f2),
             (Reg::Str(s), Reg::Int(i)) => {
-                let s = gc.get_string_by_id(*s);
+                let s = unsafe { gc.get_str_unchecked(*s) };
                 let result = if *i > 0 {
                     s.repeat(*i as usize)
                 } else {
                     String::new()
                 };
-                let id = gc.string_pool().alloc(result);
+                let id = gc.alloc_str(result);
                 Reg::Str(id)
             }
             _ => {
@@ -555,6 +552,7 @@ pub struct OpDiv {
 }
 
 impl Instruction for OpDiv {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -599,6 +597,7 @@ pub struct OpIDiv {
 }
 
 impl Instruction for OpIDiv {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -644,6 +643,7 @@ pub struct OpRem {
 }
 
 impl Instruction for OpRem {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -685,6 +685,7 @@ pub struct OpPow {
 }
 
 impl Instruction for OpPow {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -729,6 +730,7 @@ pub struct OpEq {
 }
 
 impl Instruction for OpEq {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -742,8 +744,8 @@ impl Instruction for OpEq {
             (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 == *i2),
             (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(*b1 == *b2),
             (Reg::Str(s1), Reg::Str(s2)) => {
-                let s1 = gc.get_string_by_id(*s1);
-                let s2 = gc.get_string_by_id(*s2);
+                let s1 = gc.get_str(*s1);
+                let s2 = gc.get_str(*s2);
                 Reg::Bool(s1 == s2)
             }
             _ => {
@@ -777,6 +779,7 @@ pub struct OpNe {
 }
 
 impl Instruction for OpNe {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -788,8 +791,8 @@ impl Instruction for OpNe {
         let reg = match (lhs, rhs) {
             (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 != *i2),
             (Reg::Str(s1), Reg::Str(s2)) => {
-                let s1 = gc.get_string_by_id(*s1);
-                let s2 = gc.get_string_by_id(*s2);
+                let s1 = unsafe { gc.get_str_unchecked(*s1) };
+                let s2 = unsafe { gc.get_str_unchecked(*s2) };
                 Reg::Bool(s1 != s2)
             }
             (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(*b1 != *b2),
@@ -825,6 +828,7 @@ pub struct OpLt {
 }
 
 impl Instruction for OpLt {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -839,8 +843,8 @@ impl Instruction for OpLt {
             (Reg::Float(f1), Reg::Int(i2)) => Reg::Bool(*f1 < *i2 as f64),
             (Reg::Float(f1), Reg::Float(f2)) => Reg::Bool(*f1 < *f2),
             (Reg::Str(s1), Reg::Str(s2)) => {
-                let s1 = gc.get_string_by_id(*s1);
-                let s2 = gc.get_string_by_id(*s2);
+                let s1 = unsafe { gc.get_str_unchecked(*s1) };
+                let s2 = unsafe { gc.get_str_unchecked(*s2) };
                 Reg::Bool(s1 < s2)
             }
             (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::lt(b1, b2)),
@@ -876,6 +880,7 @@ pub struct OpLe {
 }
 
 impl Instruction for OpLe {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -887,8 +892,8 @@ impl Instruction for OpLe {
         let reg = match (lhs, rhs) {
             (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 <= *i2),
             (Reg::Str(s1), Reg::Str(s2)) => {
-                let s1 = gc.get_string_by_id(*s1);
-                let s2 = gc.get_string_by_id(*s2);
+                let s1 = unsafe { gc.get_str_unchecked(*s1) };
+                let s2 = unsafe { gc.get_str_unchecked(*s2) };
                 Reg::Bool(s1 <= s2)
             }
             (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::le(b1, b2)),
@@ -924,6 +929,7 @@ pub struct OpGt {
 }
 
 impl Instruction for OpGt {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -938,8 +944,8 @@ impl Instruction for OpGt {
             (Reg::Float(f1), Reg::Int(i2)) => Reg::Bool(*f1 > *i2 as f64),
             (Reg::Float(f1), Reg::Float(f2)) => Reg::Bool(*f1 > *f2),
             (Reg::Str(s1), Reg::Str(s2)) => {
-                let s1 = gc.get_string_by_id(*s1);
-                let s2 = gc.get_string_by_id(*s2);
+                let s1 = unsafe { gc.get_str_unchecked(*s1) };
+                let s2 = unsafe { gc.get_str_unchecked(*s2) };
                 Reg::Bool(s1 > s2)
             }
             (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::gt(b1, b2)),
@@ -975,6 +981,7 @@ pub struct OpGe {
 }
 
 impl Instruction for OpGe {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -986,8 +993,8 @@ impl Instruction for OpGe {
         let reg = match (lhs, rhs) {
             (Reg::Int(i1), Reg::Int(i2)) => Reg::Bool(*i1 >= *i2),
             (Reg::Str(s1), Reg::Str(s2)) => {
-                let s1 = gc.get_string_by_id(*s1);
-                let s2 = gc.get_string_by_id(*s2);
+                let s1 = unsafe { gc.get_str_unchecked(*s1) };
+                let s2 = unsafe { gc.get_str_unchecked(*s2) };
                 Reg::Bool(s1 >= s2)
             }
             (Reg::Bool(b1), Reg::Bool(b2)) => Reg::Bool(bool::ge(b1, b2)),
@@ -1023,6 +1030,7 @@ pub struct OpAnd {
 }
 
 impl Instruction for OpAnd {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1064,6 +1072,7 @@ pub struct OpOr {
 }
 
 impl Instruction for OpOr {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1103,6 +1112,7 @@ pub struct OpMove {
 }
 
 impl Instruction for OpMove {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1134,6 +1144,7 @@ pub struct OpBranchTrue {
 }
 
 impl Instruction for OpBranchTrue {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1176,6 +1187,7 @@ pub struct OpBranchFalse {
 }
 
 impl Instruction for OpBranchFalse {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1217,6 +1229,7 @@ pub struct OpJump {
 }
 
 impl Instruction for OpJump {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1237,6 +1250,7 @@ impl Instruction for OpJump {
 pub struct OpDummy;
 
 impl Instruction for OpDummy {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         _ip: Ip,
@@ -1258,6 +1272,7 @@ pub struct OpYield {
 }
 
 impl Instruction for OpYield {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         _ip: Ip,
@@ -1290,6 +1305,7 @@ pub struct OpSetAttr {
 }
 
 impl Instruction for OpSetAttr {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1301,7 +1317,7 @@ impl Instruction for OpSetAttr {
         let mut table = gc.read_reg(self.rd).clone();
         for (i, attr) in self.attrs.iter().enumerate() {
             match table {
-                Reg::Ref(r) => match &mut gc[r] {
+                Reg::Ref(r) => match unsafe { gc.get_obj_unchecked_mut(r) } {
                     GcObject::Table(t) => {
                         if i == self.attrs.len() - 1 {
                             t.attributes.insert(attr.clone(), target.clone());
@@ -1358,6 +1374,7 @@ pub struct OpGetAttr {
 }
 
 impl Instruction for OpGetAttr {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1367,7 +1384,7 @@ impl Instruction for OpGetAttr {
         let table = gc.read_reg(self.rs);
         if let Reg::Ref(rid) = table {
             let rid = *rid;
-            match &gc[rid] {
+            match unsafe { gc.get_obj_unchecked(rid) } {
                 GcObject::Closure { .. } => (),
                 GcObject::NativeFunction(_) => (),
                 GcObject::Table(t) => {
@@ -1410,13 +1427,14 @@ pub struct OpMakeTable {
 }
 
 impl Instruction for OpMakeTable {
+    #[cfg_attr(feature = "profile", inline(never))]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
         gc: &mut Gc<Buffer>,
         _out: &mut Buffer,
     ) -> Result<Ip, VmError> {
-        let table = gc.alloc(GcObject::Table(Table {
+        let table = gc.alloc_obj(GcObject::Table(Table {
             attributes: AHashMap::new(),
         }));
         let table = Reg::Ref(table);

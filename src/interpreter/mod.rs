@@ -9,7 +9,6 @@ mod error;
 pub mod gc;
 mod prelude;
 mod register_table;
-mod string_pool;
 
 mod state;
 use crate::vm::op::{OpGe, OpGetAttr, OpLe, OpLt, OpMakeTable, OpNe, OpSetAttr};
@@ -234,7 +233,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             + 'static,
     {
         let f = GcObject::NativeFunction(Rc::new(RefCell::new(f)));
-        let gc_id = self.gc.alloc(f);
+        let gc_id = self.gc.alloc_obj(f);
         let reg = Reg::Ref(gc_id);
         let reg_id = self.registers.declare_variable(name.into(), None);
         self.gc.alloc_reg_file(reg_id + 1);
@@ -365,8 +364,8 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     Reg::Bool(b) => writeln!(self.out, "{b}"),
                     Reg::Int(i) => writeln!(self.out, "{i}"),
                     Reg::Float(f) => writeln!(self.out, "{f}"),
-                    Reg::Str(sid) => writeln!(self.out, "{}", self.gc.get_string_by_id(*sid)),
-                    Reg::Ref(r) => match &self.gc[*r] {
+                    Reg::Str(sid) => writeln!(self.out, "{}", self.gc.get_str(*sid).unwrap()),
+                    Reg::Ref(r) => match self.gc.get_obj(*r).unwrap() {
                         GcObject::Closure {
                             func_id,
                             parameters: _,
@@ -387,7 +386,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                                     Reg::Int(i) => format!("{i}"),
                                     Reg::Float(f) => format!("{f}"),
                                     Reg::Str(sid) => {
-                                        format!("'{}'", self.gc.get_string_by_id(*sid))
+                                        format!("'{}'", self.gc.get_str(*sid).unwrap())
                                     }
                                     Reg::Ref(r) => format!("Ref@<{r}>"),
                                 };
@@ -431,7 +430,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             .for_each(|stmt| self.scan_constant_stmt(stmt));
 
         for (i, stmt) in ast.statements.iter().enumerate() {
-            match self.compile_stmt(stmt, i != ast.statements.len() - 1) {
+            match self.compile_stmt(stmt, i != ast.statements.len() - 1, None) {
                 Ok(ret) => return_value = ret,
                 Err(code) => {
                     has_error = true;
@@ -525,7 +524,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 .registers
                 .get_or_alloc_constant(ConstantValue::Str(s.clone()))
                 .map_err(|reg| {
-                    let sid = self.gc.string_pool().alloc(s.clone());
+                    let sid = self.gc.alloc_str(s.clone());
                     (reg, Reg::Str(sid))
                 }),
             Const::Bool(b) => self
@@ -556,6 +555,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         &mut self,
         stmt: &Stmt,
         discard: bool,
+        target: Option<usize>,
     ) -> Result<Option<(usize, bool)>, ErrorCode> {
         let mut return_value = None;
         match stmt {
@@ -570,7 +570,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     },
             } => self.compile_assignment(lhs, rhs, loc.clone())?,
             Stmt::Expr { loc: _, expr } => {
-                let (reg_id, tmp) = self.compile_expr(expr, discard, None)?;
+                let (reg_id, tmp) = self.compile_expr(expr, discard, target)?;
                 return_value = Some((reg_id, tmp));
             }
             Stmt::Loop {
@@ -604,7 +604,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     breaks: vec![],
                 });
                 for stmt in body.iter() {
-                    self.compile_stmt(stmt, true).map_err(|err| {
+                    self.compile_stmt(stmt, true, None).map_err(|err| {
                         self.leave_block();
                         err
                     })?;
@@ -823,7 +823,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 let mut ret = None;
                 for (i, stmt) in body.iter().enumerate() {
                     let reg = self
-                        .compile_stmt(stmt, i != body.len() - 1)
+                        .compile_stmt(stmt, i != body.len() - 1, target)
                         .map_err(|err| {
                             self.leave_block();
                             err
@@ -888,22 +888,18 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     }
                     for (i, stmt) in body.iter().enumerate() {
                         if !discard && i == body.len() - 1 {
-                            let ret_this = self.compile_stmt(stmt, false)?;
+                            let ret_this = self.compile_stmt(stmt, false, ret)?;
                             // move return value to return reg
                             if let Some((reg, tmp)) = ret_this {
                                 if tmp {
                                     self.registers.free_intermediate(reg)
                                 };
-                                self.get_current_func().insts.push(VmInst::OpMove(OpMove {
-                                    rs: reg,
-                                    rd: ret.unwrap(),
-                                }))
                             } else {
                                 // load a unit value
                                 self.compile_constant(&Const::Unit, ret)?;
                             }
                         } else {
-                            self.compile_stmt(stmt, true)?;
+                            self.compile_stmt(stmt, true, None)?;
                         }
                     }
                     self.leave_block();
@@ -927,22 +923,18 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     }
                     for (i, stmt) in body.iter().enumerate() {
                         if !discard && i == body.len() - 1 {
-                            let ret_this = self.compile_stmt(stmt, false)?;
+                            let ret_this = self.compile_stmt(stmt, false, ret)?;
                             // move return value to return reg
                             if let Some((reg, tmp)) = ret_this {
                                 if tmp {
                                     self.registers.free_intermediate(reg)
                                 };
-                                self.get_current_func().insts.push(VmInst::OpMove(OpMove {
-                                    rs: reg,
-                                    rd: ret.unwrap(),
-                                }))
                             } else {
                                 // load a unit value
                                 self.compile_constant(&Const::Unit, ret)?;
                             }
                         } else {
-                            self.compile_stmt(stmt, true)?;
+                            self.compile_stmt(stmt, true, None)?;
                         }
                     }
                     self.leave_block();
@@ -1365,7 +1357,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
 
                 for (i, stmt) in body.iter().enumerate() {
                     if i == body.len() - 1 {
-                        let ret_this = self.compile_stmt(stmt, false)?;
+                        let ret_this = self.compile_stmt(stmt, false, None)?;
                         // move return value to return reg
                         if let Some(ret_this) = ret_this {
                             ret = Some(ret_this);
@@ -1375,7 +1367,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                             ret = Some((reg, false));
                         }
                     } else {
-                        self.compile_stmt(stmt, true)?;
+                        self.compile_stmt(stmt, true, None)?;
                     }
                 }
                 ret.unwrap()
