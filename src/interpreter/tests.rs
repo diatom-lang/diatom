@@ -152,5 +152,11 @@ fn test_recursive() {
 
 #[test]
 fn test_compile_with_target() {
-    test_ok!("def add a b = a + b end add$(add$(1,2), 3)", "6");
+    test_ok!("def add a b = a + b end add$(add$(1,2), begin 3 end)", "6");
+}
+
+#[test]
+fn test_tuple() {
+    test_ok!("a = (1,2,3) a.2", "3");
+    test_ok!("a = (1,2, {}) a.2.idx='hello' b = a.2 b.idx", "hello");
 }

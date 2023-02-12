@@ -32,6 +32,9 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
                     DiatomObject::Table(t) => {
                         write!(out, "Table@{:p}", &t)
                     }
+                    DiatomObject::Tuple(t) => {
+                        write!(out, "Tuple@{:p}", &t)
+                    }
                 },
             }
             .map_err(|err| format!("IoError: {err}"))?;

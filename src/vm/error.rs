@@ -42,6 +42,14 @@ pub enum VmError {
     NoSuchKey { loc: Loc, attr: String },
     /// E3011 Not a table
     NotATable { loc: Loc, t: String },
+    /// E3012 Not a tuple
+    NotATuple { loc: Loc, t: String },
+    /// E3013 Tuple access out of bound
+    TupleOutOfBound {
+        loc: Loc,
+        bound: usize,
+        access: usize,
+    },
 }
 
 impl From<VmError> for Diagnostic {
@@ -104,6 +112,16 @@ impl From<VmError> for Diagnostic {
                 .with_code("E3011")
                 .with_message(format!(
                     "Read attribute from type `{t}` which is not a table"
+                ))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::NotATuple { loc, t } => Diagnostic::error()
+                .with_code("E3012")
+                .with_message(format!("Read content from type `{t}` which is not a tuple"))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::TupleOutOfBound { loc, bound, access } => Diagnostic::error()
+                .with_code("E3013")
+                .with_message(format!(
+                    "Tuple has {bound} item(s) while attempting to get an item at {access}"
                 ))
                 .with_labels(vec![Label::primary((), loc)]),
         }

@@ -11,7 +11,10 @@ mod prelude;
 mod register_table;
 
 mod state;
-use crate::vm::op::{OpGe, OpGetAttr, OpLe, OpLt, OpMakeTable, OpNe, OpSetAttr};
+use crate::vm::op::{
+    OpGe, OpGetTable, OpGetTuple, OpLe, OpLt, OpMakeTable, OpMakeTuple, OpNe, OpSetTable,
+    OpSetTuple,
+};
 use crate::{
     diagnostic::{Diagnostic, Loc},
     frontend::{
@@ -359,57 +362,20 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             VmError::Yield(Some(reg_id)) => {
                 let reg = self.gc.read_reg(reg_id);
                 match reg {
-                    // omit unit output in repl
                     Reg::Unit => Ok(()),
-                    Reg::Bool(b) => writeln!(self.out, "{b}"),
-                    Reg::Int(i) => writeln!(self.out, "{i}"),
-                    Reg::Float(f) => writeln!(self.out, "{f}"),
-                    Reg::Str(sid) => writeln!(self.out, "{}", self.gc.get_str(*sid).unwrap()),
-                    Reg::Ref(r) => match self.gc.get_obj(*r).unwrap() {
-                        GcObject::Closure {
-                            func_id,
-                            parameters: _,
-                            reg_size: _,
-                            captured: _,
-                        } => {
-                            writeln!(self.out, "Closure[{func_id}]")
-                        }
-                        GcObject::NativeFunction(f) => {
-                            writeln!(self.out, "External function@{:p}", f.as_ptr())
-                        }
-                        GcObject::Table(t) => {
-                            let mut table = "{".to_string();
-                            for (i, (k, v)) in t.attributes.iter().enumerate() {
-                                let content = match v {
-                                    Reg::Unit => "()".to_string(),
-                                    Reg::Bool(b) => format!("{b}"),
-                                    Reg::Int(i) => format!("{i}"),
-                                    Reg::Float(f) => format!("{f}"),
-                                    Reg::Str(sid) => {
-                                        format!("'{}'", self.gc.get_str(*sid).unwrap())
-                                    }
-                                    Reg::Ref(r) => format!("Ref@<{r}>"),
-                                };
-                                if i == t.attributes.len() - 1 {
-                                    write!(table, "{k} = {content}").unwrap();
-                                } else {
-                                    write!(table, "{k} = {content}, ").unwrap();
-                                }
-                            }
-                            write!(table, "}}").unwrap();
-                            writeln!(self.out, "{table}")
-                        }
-                    },
+                    _ => {
+                        let content = self.gc.print(reg);
+                        writeln!(self.out, "{content}").map_err(|err| {
+                            let error_code = VmError::IoError {
+                                loc: None,
+                                error: err,
+                            };
+                            let diagnostic = Diagnostic::from(error_code);
+                            ast.diagnoser.push(diagnostic);
+                            ast.diagnoser.render(color)
+                        })
+                    }
                 }
-                .map_err(|err| {
-                    let error_code = VmError::IoError {
-                        loc: None,
-                        error: err,
-                    };
-                    let diagnostic = Diagnostic::from(error_code);
-                    ast.diagnoser.push(diagnostic);
-                    ast.diagnoser.render(color)
-                })
             }
             error_code => {
                 let diagnostic = Diagnostic::from(error_code);
@@ -750,29 +716,81 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             }
             Expr::Infix {
                 loc,
+                op: OpInfix::Comma,
+                lhs,
+                rhs,
+            } => {
+                let mut items = vec![rhs.as_ref()];
+                let mut left = lhs.as_ref();
+                while let Expr::Infix {
+                    loc: _,
+                    op: OpInfix::Comma,
+                    lhs,
+                    rhs,
+                } = left
+                {
+                    items.push(rhs);
+                    left = lhs;
+                }
+                items.push(left);
+                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpMakeTuple(OpMakeTuple {
+                        rd,
+                        size: items.len(),
+                    }));
+
+                for (idx, item) in items.into_iter().rev().enumerate() {
+                    let (rs, tmp) = self.compile_expr(item, false, None)?;
+                    if tmp {
+                        self.registers.free_intermediate(rs);
+                    }
+                    self.get_current_func()
+                        .insts
+                        .push(VmInst::OpSetTuple(OpSetTuple {
+                            loc: loc.clone(),
+                            rs,
+                            rd,
+                            idx,
+                        }))
+                }
+
+                Ok((rd, target.is_none()))
+            }
+            Expr::Infix {
+                loc,
                 op: OpInfix::Member,
                 lhs,
                 rhs,
             } => {
-                let name = match rhs.as_ref() {
-                    Expr::Id { loc: _, name } => name.clone(),
-                    expr => {
-                        return Err(ErrorCode::InvalidMember(expr.get_loc()));
-                    }
-                };
                 let (lhs, tmp) = self.compile_expr(lhs, false, None)?;
                 if tmp {
                     self.registers.free_intermediate(lhs);
                 }
                 let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
-                self.get_current_func()
-                    .insts
-                    .push(VmInst::OpGetAttr(OpGetAttr {
+                let op = match rhs.as_ref() {
+                    Expr::Id { loc: _, name } => VmInst::OpGetTable(OpGetTable {
                         loc: loc.clone(),
                         rs: lhs,
                         rd,
-                        attr: name,
-                    }));
+                        attr: name.clone(),
+                    }),
+                    Expr::Const {
+                        loc: _,
+                        value: Const::Int(i),
+                    } => VmInst::OpGetTuple(OpGetTuple {
+                        loc: loc.clone(),
+                        rs: lhs,
+                        rd,
+                        idx: *i as usize,
+                    }),
+                    expr => {
+                        return Err(ErrorCode::InvalidMember(expr.get_loc()));
+                    }
+                };
+
+                self.get_current_func().insts.push(op);
                 Ok((rd, target.is_none()))
             }
             Expr::Infix {
@@ -1054,11 +1072,15 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 ..
             } => {
                 let mut expr = expr;
+                enum Attr {
+                    Name(String),
+                    Index(usize),
+                }
                 let mut attrs = vec![];
                 loop {
                     match expr {
-                        Expr::Id { loc: _, name } => {
-                            attrs.push(name.clone());
+                        Expr::Id { loc, name } => {
+                            attrs.push((Attr::Name(name.clone()), loc));
                             break;
                         }
                         Expr::Infix {
@@ -1066,19 +1088,31 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                             op: OpInfix::Member,
                             lhs,
                             rhs,
-                        } => {
-                            if let Expr::Id { loc: _, name } = rhs.as_ref() {
-                                attrs.push(name.clone());
+                        } => match rhs.as_ref() {
+                            Expr::Id { loc, name } => {
+                                attrs.push((Attr::Name(name.clone()), loc));
                                 expr = lhs;
-                            } else {
-                                return Err(ErrorCode::CannotAssign(loc.clone()));
                             }
-                        }
+                            Expr::Const {
+                                loc,
+                                value: Const::Int(i),
+                            } => {
+                                assert!(*i >= 0);
+                                attrs.push((Attr::Index(*i as usize), loc));
+                                expr = lhs;
+                            }
+                            _ => return Err(ErrorCode::CannotAssign(loc.clone())),
+                        },
                         _ => return Err(ErrorCode::CannotAssign(expr.get_loc())),
                     }
                 }
                 let name = attrs.pop().unwrap();
-                let rd = match self.registers.lookup_variable(&name) {
+                let name = if let (Attr::Name(name), _) = name {
+                    name
+                } else {
+                    unreachable!()
+                };
+                let var_reg = match self.registers.lookup_variable(&name) {
                     Some((id, depth, loc, _)) => {
                         // variable is captured
                         // make a local copy and register capture info
@@ -1094,17 +1128,64 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                             Ok(id)
                         }
                     }
-                    None => Err(ErrorCode::NameNotDefined(loc.clone(), name)),
+                    None => Err(ErrorCode::NameNotDefined(loc, name)),
                 }?;
 
                 attrs.reverse();
-                let (rs, tmp) = self.compile_expr(rhs, false, None)?;
-                if tmp {
-                    self.registers.free_intermediate(rs);
+                let last = attrs.len() - 1;
+                let mut rd = None;
+                for (i, (attr, loc)) in attrs.into_iter().enumerate() {
+                    if i == last {
+                        let (rs, tmp) = self.compile_expr(rhs, false, None)?;
+                        if tmp {
+                            self.registers.free_intermediate(rs);
+                        }
+                        let rd = rd
+                            .map(|rd| {
+                                self.registers.free_intermediate(rd);
+                                rd
+                            })
+                            .unwrap_or(var_reg);
+                        let op = match attr {
+                            Attr::Name(attr) => VmInst::OpSetTable(OpSetTable {
+                                loc: loc.clone(),
+                                rs,
+                                rd,
+                                attr,
+                            }),
+                            Attr::Index(idx) => VmInst::OpSetTuple(OpSetTuple {
+                                loc: loc.clone(),
+                                rs,
+                                rd,
+                                idx,
+                            }),
+                        };
+                        self.get_current_func().insts.push(op);
+                    } else {
+                        let rs = if let Some(rs) = rd {
+                            rs
+                        } else {
+                            rd = Some(self.registers.declare_intermediate());
+                            var_reg
+                        };
+                        let rd = rd.unwrap();
+                        let op = match attr {
+                            Attr::Name(attr) => VmInst::OpGetTable(OpGetTable {
+                                loc: loc.clone(),
+                                rs,
+                                rd,
+                                attr,
+                            }),
+                            Attr::Index(idx) => VmInst::OpGetTuple(OpGetTuple {
+                                loc: loc.clone(),
+                                rs,
+                                rd,
+                                idx,
+                            }),
+                        };
+                        self.get_current_func().insts.push(op);
+                    }
                 }
-                self.get_current_func()
-                    .insts
-                    .push(VmInst::OpSetAttr(OpSetAttr { loc, rs, rd, attrs }));
                 Ok(())
             }
             _ => Err(ErrorCode::CannotAssign(lhs.get_loc())),
@@ -1143,18 +1224,18 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 self.get_current_func()
                     .insts
                     .push(VmInst::OpMakeTable(OpMakeTable { rd }));
-                for (name, expr, loc) in pairs.iter() {
+                for (attr, expr, loc) in pairs.iter() {
                     let (value, tmp) = self.compile_expr(expr, false, None)?;
                     if tmp {
                         self.registers.free_intermediate(value);
                     }
                     self.get_current_func()
                         .insts
-                        .push(VmInst::OpSetAttr(OpSetAttr {
+                        .push(VmInst::OpSetTable(OpSetTable {
                             loc: loc.clone(),
                             rs: value,
                             rd,
-                            attrs: vec![name.clone()],
+                            attr: attr.clone(),
                         }));
                 }
                 return Ok((rd, target.is_none()));
@@ -1287,7 +1368,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     .push(VmInst::OpPow(OpPow { loc, lhs, rhs, rd }));
                 (rd, target.is_none())
             }
-            OpInfix::Comma => todo!(),
+            OpInfix::Comma => unreachable!(),
             OpInfix::Member => unreachable!(),
         }
     }

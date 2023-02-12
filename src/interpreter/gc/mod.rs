@@ -1,4 +1,4 @@
-use std::{cell::RefCell, io::Write, rc::Rc};
+use std::{cell::RefCell, collections::BTreeSet, io::Write, rc::Rc};
 
 use ahash::AHashMap;
 
@@ -26,6 +26,7 @@ pub enum GcObject<Buffer: Write> {
         Rc<RefCell<dyn Fn(&mut State<Buffer>, &[Reg], &mut Buffer) -> Result<Reg, String>>>,
     ),
     Table(Table),
+    Tuple(Vec<Reg>),
 }
 
 /// Diatom's unboxed value type
@@ -246,5 +247,69 @@ impl<Buffer: Write> Gc<Buffer> {
 
     pub fn clean_call_stack(&mut self) {
         self.call_stack.frames.truncate(1);
+    }
+
+    pub fn print(&self, reg: &Reg) -> String {
+        let mut buffer = String::new();
+        let mut visited = BTreeSet::new();
+        self.print_reg(reg, &mut visited, &mut buffer);
+        buffer
+    }
+
+    fn print_reg(&self, reg: &Reg, visited: &mut BTreeSet<usize>, buffer: &mut String) {
+        use std::fmt::Write;
+        match reg {
+            Reg::Unit => write!(buffer, "()"),
+            Reg::Bool(b) => write!(buffer, "{b}"),
+            Reg::Int(i) => write!(buffer, "{i}"),
+            Reg::Float(f) => write!(buffer, "{f}"),
+            Reg::Str(sid) => write!(buffer, "{}", self.get_str(*sid).unwrap()),
+            Reg::Ref(r) => {
+                if visited.get(r).is_some() {
+                    write!(buffer, "<Recursive ref@{}>", *r).unwrap();
+                    return;
+                }
+                visited.insert(*r);
+                match self.get_obj(*r).unwrap() {
+                    GcObject::Closure {
+                        func_id,
+                        parameters: _,
+                        reg_size: _,
+                        captured: _,
+                    } => {
+                        write!(buffer, "Closure[{func_id}]")
+                    }
+                    GcObject::NativeFunction(f) => {
+                        write!(buffer, "External function@{:p}", f.as_ptr())
+                    }
+                    GcObject::Table(t) => {
+                        write!(buffer, "{{").unwrap();
+                        for (i, (key, value)) in t.attributes.iter().enumerate() {
+                            write!(buffer, "{key} = ").unwrap();
+                            if i == t.attributes.len() - 1 {
+                                self.print_reg(value, visited, buffer);
+                            } else {
+                                self.print_reg(value, visited, buffer);
+                                write!(buffer, ", ").unwrap();
+                            }
+                        }
+                        write!(buffer, "}}")
+                    }
+                    GcObject::Tuple(t) => {
+                        write!(buffer, "(").unwrap();
+                        for (i, value) in t.iter().enumerate() {
+                            if i == t.len() - 1 {
+                                self.print_reg(value, visited, buffer);
+                            } else {
+                                self.print_reg(value, visited, buffer);
+                                write!(buffer, ", ").unwrap();
+                            }
+                        }
+                        write!(buffer, ")")
+                    }
+                }
+            }
+        }
+        .unwrap();
     }
 }
