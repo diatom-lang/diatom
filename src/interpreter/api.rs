@@ -1,4 +1,4 @@
-use crate::{interpreter::Gc, DiatomObject, IoWrite, DiatomValue};
+use crate::{interpreter::Gc, DiatomObject, DiatomValue, IoWrite};
 
 /// State of the virtual machine
 pub struct State<'a, Buffer: IoWrite> {

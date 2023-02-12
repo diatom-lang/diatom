@@ -23,8 +23,3 @@ pub use interpreter::State;
 pub use std::io::Write as IoWrite;
 /// The version of this build
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[cfg(feature = "console")]
-mod console;
-#[cfg(feature = "console")]
-pub use console::Console;

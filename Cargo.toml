@@ -18,13 +18,13 @@ ahash = { version = "0.8", default-features = false, features = ["compile-time-r
 reedline = { version = "0.15", optional = true }
 nu-ansi-term = { version = "0.46", optional = true }
 crossterm = { version = "0.24", optional = true }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive"], optional = true }
 enum_dispatch = "0.3"
 either = "1.8"
 
 [features]
 default = ["console"]
-console = ["reedline", "nu-ansi-term", "crossterm"]
+console = ["reedline", "nu-ansi-term", "crossterm", "clap"]
 profile = []
 
 [profile.release]

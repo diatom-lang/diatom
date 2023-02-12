@@ -32,8 +32,8 @@ use crate::{
     },
     DiatomValue, IoWrite,
 };
-pub use gc::{GcObject, Reg};
 pub use api::State;
+pub use gc::{GcObject, Reg};
 
 use error::ErrorCode;
 pub use gc::Gc;
@@ -112,7 +112,7 @@ pub struct Func {
 ///
 /// High performance interpreter for the diatom programming language. This interpreter compiles
 /// diatom source code into byte code and executes the byte code with carefully tuned virtual
-/// machine. Our benchmark shows it can reach up to **2x** the execution speed of Lua 5.4 .
+/// machine. Our benchmark shows it can match or even surpass the execution speed of Lua 5.4 .
 ///
 /// # Example
 ///
@@ -355,7 +355,10 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         }
     }
 
-    pub(crate) fn exec_repl(&mut self, code: impl AsRef<str>, color: bool) -> Result<(), String> {
+    /// Execute and print last statement's return value
+    ///
+    /// If return value is unit, then it will not be printed.
+    pub fn exec_repl(&mut self, code: impl AsRef<str>, color: bool) -> Result<(), String> {
         let mut ast = self.compile(code, OsStr::new("<interactive>"), color)?;
         match self.vm.exec(&self.byte_code, &mut self.gc, &mut self.out) {
             VmError::Yield(None) => Ok(()),
