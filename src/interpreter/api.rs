@@ -1,4 +1,4 @@
-use crate::{interpreter::Gc, DiatomObject, IoWrite};
+use crate::{interpreter::Gc, DiatomObject, IoWrite, DiatomValue};
 
 /// State of the virtual machine
 pub struct State<'a, Buffer: IoWrite> {
@@ -32,5 +32,9 @@ impl<'a, Buffer: IoWrite> State<'a, Buffer> {
     /// Same as `get_obj_mut` but this is immutable
     pub fn get_obj(&mut self, ref_id: usize) -> Option<&DiatomObject<Buffer>> {
         self.gc.get_obj(ref_id)
+    }
+
+    pub fn print(&self, value: &DiatomValue) -> String {
+        self.gc.print(value)
     }
 }

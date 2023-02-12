@@ -1,16 +1,21 @@
-use std::{cell::RefCell, collections::BTreeSet, io::Write, rc::Rc};
-
-use ahash::AHashMap;
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet},
+    io::Write,
+    rc::Rc,
+};
 
 use crate::State;
 
+mod key_pool;
 mod pool;
+use key_pool::KeyPool;
 use pool::Pool;
 
 use super::Ip;
 
 pub struct Table {
-    pub attributes: AHashMap<String, Reg>,
+    pub attributes: BTreeMap<usize, Reg>,
 }
 
 pub enum GcObject<Buffer: Write> {
@@ -65,6 +70,7 @@ pub struct Gc<Buffer: Write> {
     escaped_pool: Pool<Reg>,
     string_pool: Pool<String>,
     call_stack: CallStack,
+    key_pool: KeyPool,
 }
 
 static UNIT_REG: Reg = Reg::Unit;
@@ -89,7 +95,16 @@ impl<Buffer: Write> Gc<Buffer> {
             string_pool: Default::default(),
             obj_pool: Default::default(),
             escaped_pool: Default::default(),
+            key_pool: Default::default(),
         }
+    }
+
+    pub fn look_up_table_key(&self, id: usize) -> Option<&str> {
+        self.key_pool.look_up_key(id)
+    }
+
+    pub fn get_or_insert_table_key(&mut self, key: impl Into<String> + AsRef<str>) -> usize {
+        self.key_pool.get_or_insert(key)
     }
 
     pub fn alloc_obj(&mut self, obj: GcObject<Buffer>) -> usize {
@@ -285,6 +300,7 @@ impl<Buffer: Write> Gc<Buffer> {
                     GcObject::Table(t) => {
                         write!(buffer, "{{").unwrap();
                         for (i, (key, value)) in t.attributes.iter().enumerate() {
+                            let key = self.key_pool.look_up_key(*key).unwrap();
                             write!(buffer, "{key} = ").unwrap();
                             if i == t.attributes.len() - 1 {
                                 self.print_reg(value, visited, buffer);
@@ -311,5 +327,11 @@ impl<Buffer: Write> Gc<Buffer> {
             }
         }
         .unwrap();
+    }
+}
+
+impl<Buffer: Write> Default for Gc<Buffer> {
+    fn default() -> Self {
+        Self::new()
     }
 }

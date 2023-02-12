@@ -1,5 +1,3 @@
-use ahash::AHashMap;
-
 use crate::{
     diagnostic::Loc,
     interpreter::{
@@ -8,7 +6,7 @@ use crate::{
     },
     IoWrite, State,
 };
-use std::fmt::Write;
+use std::{collections::BTreeMap, fmt::Write};
 
 use super::{Instruction, Ip, VmError};
 
@@ -1361,7 +1359,7 @@ pub struct OpSetTable {
     pub loc: Loc,
     pub rs: usize,
     pub rd: usize,
-    pub attr: String,
+    pub attr: usize,
 }
 
 impl Instruction for OpSetTable {
@@ -1377,7 +1375,7 @@ impl Instruction for OpSetTable {
         match table {
             Reg::Ref(r) => match unsafe { gc.get_obj_unchecked_mut(r) } {
                 GcObject::Table(t) => {
-                    t.attributes.insert(self.attr.clone(), target);
+                    t.attributes.insert(self.attr, target);
                     Ok(())
                 }
                 _ => Err(()),
@@ -1412,7 +1410,7 @@ pub struct OpGetTable {
     pub loc: Loc,
     pub rs: usize,
     pub rd: usize,
-    pub attr: String,
+    pub attr: usize,
 }
 
 impl Instruction for OpGetTable {
@@ -1432,7 +1430,7 @@ impl Instruction for OpGetTable {
                     .get(&self.attr)
                     .ok_or(VmError::NoSuchKey {
                         loc: self.loc.clone(),
-                        attr: self.attr.clone(),
+                        attr: gc.look_up_table_key(self.attr).unwrap().to_string(),
                     })?
                     .clone();
                 gc.write_reg(self.rd, value);
@@ -1525,7 +1523,7 @@ impl Instruction for OpMakeTable {
         _out: &mut Buffer,
     ) -> Result<Ip, VmError> {
         let table = gc.alloc_obj(GcObject::Table(Table {
-            attributes: AHashMap::new(),
+            attributes: BTreeMap::new(),
         }));
         let table = Reg::Ref(table);
         gc.write_reg(self.rd, table);

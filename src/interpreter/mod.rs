@@ -10,7 +10,7 @@ pub mod gc;
 mod prelude;
 mod register_table;
 
-mod state;
+mod api;
 use crate::vm::op::{
     OpGe, OpGetTable, OpGetTuple, OpLe, OpLt, OpMakeTable, OpMakeTuple, OpNe, OpSetTable,
     OpSetTuple,
@@ -33,7 +33,7 @@ use crate::{
     DiatomValue, IoWrite,
 };
 pub use gc::{GcObject, Reg};
-pub use state::State;
+pub use api::State;
 
 use error::ErrorCode;
 pub use gc::Gc;
@@ -774,7 +774,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                         loc: loc.clone(),
                         rs: lhs,
                         rd,
-                        attr: name.clone(),
+                        attr: self.gc.get_or_insert_table_key(name),
                     }),
                     Expr::Const {
                         loc: _,
@@ -1151,7 +1151,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                                 loc: loc.clone(),
                                 rs,
                                 rd,
-                                attr,
+                                attr: self.gc.get_or_insert_table_key(attr),
                             }),
                             Attr::Index(idx) => VmInst::OpSetTuple(OpSetTuple {
                                 loc: loc.clone(),
@@ -1174,7 +1174,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                                 loc: loc.clone(),
                                 rs,
                                 rd,
-                                attr,
+                                attr: self.gc.get_or_insert_table_key(attr),
                             }),
                             Attr::Index(idx) => VmInst::OpGetTuple(OpGetTuple {
                                 loc: loc.clone(),
@@ -1229,13 +1229,14 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     if tmp {
                         self.registers.free_intermediate(value);
                     }
+                    let attr = self.gc.get_or_insert_table_key(attr);
                     self.get_current_func()
                         .insts
                         .push(VmInst::OpSetTable(OpSetTable {
                             loc: loc.clone(),
                             rs: value,
                             rd,
-                            attr: attr.clone(),
+                            attr,
                         }));
                 }
                 return Ok((rd, target.is_none()));
