@@ -9,8 +9,11 @@ use crate::State;
 
 mod key_pool;
 mod pool;
+mod prelude;
 use key_pool::KeyPool;
 use pool::Pool;
+
+use self::prelude::{init_float_meta, init_int_meta};
 
 use super::Ip;
 
@@ -72,12 +75,19 @@ pub struct Gc<Buffer: Write> {
     string_pool: Pool<String>,
     call_stack: CallStack,
     key_pool: KeyPool,
+    int_meta: usize,
+    float_meta: usize,
 }
 
 static UNIT_REG: Reg = Reg::Unit;
 
 impl<Buffer: Write> Gc<Buffer> {
     pub fn new() -> Self {
+        let mut key_pool = KeyPool::default();
+        let mut obj_pool = Pool::<GcObject<Buffer>>::default();
+        let int_meta = init_int_meta(&mut obj_pool, &mut key_pool);
+        let float_meta = init_float_meta(&mut obj_pool, &mut key_pool);
+
         Self {
             call_stack: CallStack {
                 frames: vec![],
@@ -94,9 +104,11 @@ impl<Buffer: Write> Gc<Buffer> {
                 },
             },
             string_pool: Default::default(),
-            obj_pool: Default::default(),
+            obj_pool,
             escaped_pool: Default::default(),
-            key_pool: Default::default(),
+            key_pool,
+            int_meta,
+            float_meta,
         }
     }
 
@@ -255,6 +267,14 @@ impl<Buffer: Write> Gc<Buffer> {
             debug_assert!(false)
         }
         (return_addr, write_back)
+    }
+
+    pub fn int_meta(&self) -> usize {
+        self.int_meta
+    }
+
+    pub fn float_meta(&self) -> usize {
+        self.float_meta
     }
 
     pub fn clean_call_stack(&mut self) {

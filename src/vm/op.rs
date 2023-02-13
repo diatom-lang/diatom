@@ -1455,6 +1455,50 @@ impl Instruction for OpGetTable {
             }
         }
 
+        match table {
+            Reg::Int(_) => {
+                let meta = unsafe { gc.get_obj_unchecked(gc.int_meta()) };
+                if let GcObject::Table(t) = meta {
+                    let value = t
+                        .attributes
+                        .get(&self.attr)
+                        .ok_or(VmError::NoSuchKey {
+                            loc: self.loc.clone(),
+                            attr: gc.look_up_table_key(self.attr).unwrap().to_string(),
+                        })?
+                        .clone();
+                    gc.write_reg(self.rd, value);
+                    return Ok(Ip {
+                        func_id: ip.func_id,
+                        inst: ip.inst + 1,
+                    });
+                } else {
+                    unreachable!()
+                }
+            }
+            Reg::Float(_) => {
+                let meta = unsafe { gc.get_obj_unchecked(gc.float_meta()) };
+                if let GcObject::Table(t) = meta {
+                    let value = t
+                        .attributes
+                        .get(&self.attr)
+                        .ok_or(VmError::NoSuchKey {
+                            loc: self.loc.clone(),
+                            attr: gc.look_up_table_key(self.attr).unwrap().to_string(),
+                        })?
+                        .clone();
+                    gc.write_reg(self.rd, value);
+                    return Ok(Ip {
+                        func_id: ip.func_id,
+                        inst: ip.inst + 1,
+                    });
+                } else {
+                    unreachable!()
+                }
+            }
+            _ => (),
+        }
+
         let t = get_type(table, gc);
         Err(VmError::NotATable {
             loc: self.loc.clone(),

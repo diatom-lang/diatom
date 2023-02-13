@@ -182,6 +182,18 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             gc: Gc::new(),
             out: buffer,
         };
+        // Initialize int and float meta table
+        let int = interpreter.registers.declare_variable("Int", None);
+        interpreter.gc.alloc_reg_file(int + 1);
+        interpreter
+            .gc
+            .write_reg(int, Reg::Ref(interpreter.gc.int_meta()));
+        let float = interpreter.registers.declare_variable("Float", None);
+        interpreter.gc.alloc_reg_file(float + 1);
+        interpreter
+            .gc
+            .write_reg(float, Reg::Ref(interpreter.gc.float_meta()));
+
         impl_prelude(&mut interpreter);
         interpreter
     }

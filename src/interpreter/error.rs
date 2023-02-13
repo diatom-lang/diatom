@@ -63,9 +63,7 @@ impl From<ErrorCode> for Diagnostic {
                         Label::secondary((), previous).with_message("Name previously defined here"),
                     )
                 } else if is_extern {
-                    error = error.with_notes(vec![format!(
-                        "`{name}` is an external function defined by host"
-                    )])
+                    error = error.with_notes(vec![format!("`{name}` is defined by host or diatom")])
                 };
                 error.with_labels(labels)
             }

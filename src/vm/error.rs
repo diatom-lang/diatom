@@ -108,7 +108,9 @@ impl From<VmError> for Diagnostic {
                 .with_labels(vec![Label::primary((), loc)]),
             VmError::NoSuchKey { loc, attr } => Diagnostic::error()
                 .with_code("E3010")
-                .with_message(format!("Table does not contain key `{attr}`"))
+                .with_message(format!(
+                    "Table or its meta table does not contain key `{attr}`"
+                ))
                 .with_labels(vec![Label::primary((), loc)]),
             VmError::NotATable { loc, t } => Diagnostic::error()
                 .with_code("E3011")
