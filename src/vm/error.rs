@@ -50,6 +50,8 @@ pub enum VmError {
         bound: usize,
         access: usize,
     },
+    /// E3014 Invalid meta table
+    InvalidMetaTable { loc: Loc, t: String },
 }
 
 impl From<VmError> for Diagnostic {
@@ -123,6 +125,10 @@ impl From<VmError> for Diagnostic {
                 .with_message(format!(
                     "Tuple has {bound} item(s) while attempting to get an item at {access}"
                 ))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::InvalidMetaTable { loc, t } => Diagnostic::error()
+                .with_code("E3014")
+                .with_message(format!("Attempt to use type `{t}` as meta table"))
                 .with_labels(vec![Label::primary((), loc)]),
         }
     }

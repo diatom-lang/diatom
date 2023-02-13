@@ -1304,7 +1304,7 @@ pub struct OpSetTuple {
 }
 
 impl Instruction for OpSetTuple {
-    #[cfg_attr(feature = "profile", inline(never))]
+    #[inline(never)]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1363,7 +1363,7 @@ pub struct OpSetTable {
 }
 
 impl Instruction for OpSetTable {
-    #[cfg_attr(feature = "profile", inline(never))]
+    #[inline(never)]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1396,11 +1396,14 @@ impl Instruction for OpSetTable {
         })
     }
 
-    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}   Reg#{} -> Reg#{}.{}",
-            "set_table", self.rs, self.rd, self.attr
+            "set_table",
+            self.rs,
+            self.rd,
+            gc.look_up_table_key(self.attr).unwrap()
         )
         .unwrap()
     }
@@ -1414,7 +1417,7 @@ pub struct OpGetTable {
 }
 
 impl Instruction for OpGetTable {
-    #[cfg_attr(feature = "profile", inline(never))]
+    #[inline(never)]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1428,6 +1431,17 @@ impl Instruction for OpGetTable {
                 let value = t
                     .attributes
                     .get(&self.attr)
+                    .or_else(|| {
+                        t.meta_table.and_then(|meta_table| {
+                            let meta_table = unsafe { gc.get_obj_unchecked(meta_table) };
+                            let meta_table = if let GcObject::Table(t) = meta_table {
+                                t.attributes.get(&self.attr)
+                            } else {
+                                unreachable!()
+                            };
+                            meta_table
+                        })
+                    })
                     .ok_or(VmError::NoSuchKey {
                         loc: self.loc.clone(),
                         attr: gc.look_up_table_key(self.attr).unwrap().to_string(),
@@ -1466,7 +1480,7 @@ pub struct OpGetTuple {
 }
 
 impl Instruction for OpGetTuple {
-    #[cfg_attr(feature = "profile", inline(never))]
+    #[inline(never)]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1515,7 +1529,7 @@ pub struct OpMakeTable {
 }
 
 impl Instruction for OpMakeTable {
-    #[cfg_attr(feature = "profile", inline(never))]
+    #[inline(never)]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1524,6 +1538,7 @@ impl Instruction for OpMakeTable {
     ) -> Result<Ip, VmError> {
         let table = gc.alloc_obj(GcObject::Table(Table {
             attributes: BTreeMap::new(),
+            meta_table: None,
         }));
         let table = Reg::Ref(table);
         gc.write_reg(self.rd, table);
@@ -1549,7 +1564,7 @@ pub struct OpMakeTuple {
 }
 
 impl Instruction for OpMakeTuple {
-    #[cfg_attr(feature = "profile", inline(never))]
+    #[inline(never)]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -1570,6 +1585,62 @@ impl Instruction for OpMakeTuple {
             decompiled,
             "{: >FORMAT_PAD$}   size@{} -> Reg#{}",
             "new_tuple", self.size, self.rd
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpSetMeta {
+    pub rs: usize,
+    pub rd: usize,
+    pub loc: Loc,
+}
+
+impl Instruction for OpSetMeta {
+    #[inline(never)]
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let rs = gc.read_reg(self.rs);
+        let rs = match gc.read_reg(self.rs) {
+            Reg::Ref(rid) => {
+                if matches!(unsafe { gc.get_obj_unchecked(*rid) }, GcObject::Table(_)) {
+                    Ok(*rid)
+                } else {
+                    Err(())
+                }
+            }
+            _ => Err(()),
+        }
+        .map_err(|_| VmError::InvalidMetaTable {
+            loc: self.loc.clone(),
+            t: get_type(rs, gc),
+        })?;
+        match gc.read_reg(self.rd) {
+            Reg::Ref(rid) => match unsafe { gc.get_obj_unchecked_mut(*rid) } {
+                GcObject::Table(t) => {
+                    t.meta_table = Some(rs);
+                }
+                _ => unreachable!(),
+            },
+            _ => {
+                unreachable!()
+            }
+        };
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} <- Reg#{}",
+            "set_meta", self.rd, self.rs
         )
         .unwrap()
     }

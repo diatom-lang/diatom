@@ -109,14 +109,14 @@ pub enum Operator {
     LBrc,
     /// "}"
     RBrc,
-    /// ":"
-    Colon,
+    /// "::"
+    DoubleColon,
     /// $
     Call,
     /// @
     At,
-    /// =>
-    Arm,
+    /// <-
+    LArrow,
 }
 
 impl Display for Token {
@@ -201,10 +201,10 @@ impl Display for Operator {
             Operator::RBrk => "]",
             Operator::LBrc => "{",
             Operator::RBrc => "}",
-            Operator::Colon => ":",
+            Operator::DoubleColon => "::",
             Operator::Call => "$",
             Operator::At => "@",
-            Operator::Arm => "=>",
+            Operator::LArrow => "<-",
         };
         write!(f, "{name}")
     }

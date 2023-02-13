@@ -12,8 +12,8 @@ mod register_table;
 
 mod api;
 use crate::vm::op::{
-    OpGe, OpGetTable, OpGetTuple, OpLe, OpLt, OpMakeTable, OpMakeTuple, OpNe, OpSetTable,
-    OpSetTuple,
+    OpGe, OpGetTable, OpGetTuple, OpLe, OpLt, OpMakeTable, OpMakeTuple, OpNe, OpSetMeta,
+    OpSetTable, OpSetTuple,
 };
 use crate::{
     diagnostic::{Diagnostic, Loc},
@@ -513,8 +513,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             }
         };
         if let Err((reg_id, reg)) = constant {
-            self.get_current_func()
-                .insts
+            self.get_current_insts()
                 .push(VmInst::OpLoadConstant(OpLoadConstant {
                     constant: reg,
                     rd: reg_id,
@@ -553,7 +552,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             } => {
                 let jump_to_start = FutureJump {
                     condition_reg: None,
-                    inst_offset: self.get_current_func().insts.len(),
+                    inst_offset: self.get_current_insts().len(),
                     loc: loc.clone(),
                 };
                 let branch_inst = if let Some(condition) = condition {
@@ -561,17 +560,17 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     if tmp {
                         self.registers.free_intermediate(condition_reg);
                     }
-                    self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
+                    self.get_current_insts().push(VmInst::OpDummy(OpDummy));
                     Some(FutureJump {
                         condition_reg: Some((condition_reg, false)),
-                        inst_offset: self.get_current_func().insts.len() - 1,
+                        inst_offset: self.get_current_insts().len() - 1,
                         loc: condition.get_loc(),
                     })
                 } else {
                     None
                 };
                 self.enter_block();
-                let current_inst = self.get_current_func().insts.len();
+                let current_inst = self.get_current_insts().len();
                 self.registers.loops.push(Loop {
                     start_inst_offset: current_inst,
                     breaks: vec![],
@@ -621,11 +620,11 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     .ok_or(ErrorCode::BreakOutsideLoop(loc.clone()))?;
                 let jump = FutureJump {
                     condition_reg: None,
-                    inst_offset: self.get_current_func().insts.len(),
+                    inst_offset: self.get_current_insts().len(),
                     loc: loc.clone(),
                 };
                 self.registers.loops.last_mut().unwrap().breaks.push(jump);
-                self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
+                self.get_current_insts().push(VmInst::OpDummy(OpDummy));
             }
             Stmt::Return { loc, value } => {
                 if self.registers.prev.is_none() {
@@ -641,7 +640,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     let (reg, _) = self.compile_constant(&Const::Unit, None)?;
                     reg
                 };
-                self.get_current_func().insts.push(VmInst::OpRet(OpRet {
+                self.get_current_insts().push(VmInst::OpRet(OpRet {
                     return_reg,
                     loc: loc.clone(),
                 }))
@@ -693,7 +692,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     }));
 
                 self.registers.free_intermediate(reg_f_id);
-                self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                self.get_current_insts().push(VmInst::OpMove(OpMove {
                     rs: reg_f_id,
                     rd: id,
                 }));
@@ -763,7 +762,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             }
             Expr::Infix {
                 loc,
-                op: OpInfix::Member,
+                op: OpInfix::Member | OpInfix::DoubleColon,
                 lhs,
                 rhs,
             } => {
@@ -793,9 +792,38 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     }
                 };
 
-                self.get_current_func().insts.push(op);
+                self.get_current_insts().push(op);
                 Ok((rd, target.is_none()))
             }
+            Expr::Infix {
+                loc,
+                op: OpInfix::LArrow,
+                lhs,
+                rhs,
+            } => {
+                if matches!(
+                    lhs.as_ref(),
+                    Expr::Const {
+                        value: Const::Table(_),
+                        ..
+                    }
+                ) {
+                    let (lhs_id, lhs_tmp) = self.compile_expr(lhs, false, target)?;
+                    let (rhs_id, rhs_tmp) = self.compile_expr(rhs, false, None)?;
+                    self.get_current_insts().push(VmInst::OpSetMeta(OpSetMeta {
+                        rs: rhs_id,
+                        rd: lhs_id,
+                        loc: loc.clone(),
+                    }));
+                    if rhs_tmp {
+                        self.registers.free_intermediate(rhs_id);
+                    }
+                    Ok((lhs_id, target.is_none() && lhs_tmp))
+                } else {
+                    Err(ErrorCode::MetaNotAllowed(loc.clone()))
+                }
+            }
+            // prevent use assignment as expression
             Expr::Infix {
                 loc,
                 op: OpInfix::Assign,
@@ -865,7 +893,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                             self.registers.free_intermediate(ret);
                         }
                         let target = target.unwrap();
-                        self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+                        self.get_current_insts().push(VmInst::OpMove(OpMove {
                             rs: ret,
                             rd: target,
                         }));
@@ -903,10 +931,10 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     }
                     branch_op = Some(FutureJump {
                         condition_reg: Some((condition_reg, true)),
-                        inst_offset: self.get_current_func().insts.len(),
+                        inst_offset: self.get_current_insts().len(),
                         loc: condition.get_loc(),
                     });
-                    self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
+                    self.get_current_insts().push(VmInst::OpDummy(OpDummy));
 
                     // compile body
                     self.enter_block();
@@ -935,10 +963,10 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
 
                     jump_to_ends.push(FutureJump {
                         condition_reg: None,
-                        inst_offset: self.get_current_func().insts.len(),
+                        inst_offset: self.get_current_insts().len(),
                         loc: loc.clone(),
                     });
-                    self.get_current_func().insts.push(VmInst::OpDummy(OpDummy));
+                    self.get_current_insts().push(VmInst::OpDummy(OpDummy));
                 }
                 // patch branch
                 if let Some(jump) = branch_op {
@@ -984,27 +1012,70 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 lhs,
                 parameters,
             } => {
-                let (lhs, lhs_tmp) = self.compile_expr(lhs, false, None)?;
-                let frame_start = self.registers.prepare_for_call(parameters.len());
-                for (i, para) in parameters.iter().enumerate() {
-                    self.compile_expr(para, false, Some(frame_start + i))?;
-                }
-                if lhs_tmp {
-                    self.registers.free_intermediate(lhs);
-                }
+                let is_member_call = if let Expr::Infix {
+                    op: OpInfix::Member,
+                    rhs,
+                    ..
+                } = lhs.as_ref()
+                {
+                    matches!(rhs.as_ref(), Expr::Id { .. })
+                } else {
+                    false
+                };
+                let (lhs_id, frame_start) = if is_member_call {
+                    if let Expr::Infix {
+                        op: OpInfix::Member,
+                        loc,
+                        lhs,
+                        rhs,
+                    } = lhs.as_ref()
+                    {
+                        // add lhs as first parameter
+                        let lhs_id = self.registers.declare_intermediate();
+                        let frame_start = self.registers.prepare_for_call(parameters.len() + 1);
+                        self.compile_expr(lhs, false, Some(frame_start))?;
+                        let op = match rhs.as_ref() {
+                            Expr::Id { loc: _, name } => VmInst::OpGetTable(OpGetTable {
+                                loc: loc.clone(),
+                                rs: frame_start,
+                                rd: lhs_id,
+                                attr: self.gc.get_or_insert_table_key(name),
+                            }),
+                            _ => unreachable!(),
+                        };
+                        self.get_current_insts().push(op);
+                        for (i, para) in parameters.iter().enumerate() {
+                            self.compile_expr(para, false, Some(frame_start + i + 1))?;
+                        }
+                        self.registers.free_intermediate(lhs_id);
+                        (lhs_id, frame_start)
+                    } else {
+                        unreachable!()
+                    }
+                } else {
+                    let (lhs_id, lhs_tmp) = self.compile_expr(lhs, false, None)?;
+                    let frame_start = self.registers.prepare_for_call(parameters.len());
+                    for (i, para) in parameters.iter().enumerate() {
+                        self.compile_expr(para, false, Some(frame_start + i))?;
+                    }
+                    if lhs_tmp {
+                        self.registers.free_intermediate(lhs_id);
+                    }
+                    (lhs_id, frame_start)
+                };
                 let rd = if discard {
                     None
                 } else {
                     Some(target.unwrap_or_else(|| self.registers.declare_intermediate()))
                 };
-                self.get_current_func().insts.push(VmInst::OpCall(OpCall {
-                    reg_id: lhs,
-                    parameters: parameters.len(),
+                self.get_current_insts().push(VmInst::OpCall(OpCall {
+                    reg_id: lhs_id,
+                    parameters: parameters.len() + if is_member_call { 1 } else { 0 },
                     start: frame_start,
                     write_back: rd,
                     loc: loc.clone(),
                 }));
-                (frame_start..frame_start + parameters.len())
+                (frame_start..frame_start + parameters.len() + if is_member_call { 1 } else { 0 })
                     .into_iter()
                     .for_each(|reg| self.registers.free_intermediate(reg));
                 Ok((rd.unwrap_or(usize::MAX), target.is_none()))
@@ -1163,7 +1234,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                                 idx,
                             }),
                         };
-                        self.get_current_func().insts.push(op);
+                        self.get_current_insts().push(op);
                     } else {
                         let rs = if let Some(rs) = rd {
                             rs
@@ -1186,7 +1257,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                                 idx,
                             }),
                         };
-                        self.get_current_func().insts.push(op);
+                        self.get_current_insts().push(op);
                     }
                 }
                 Ok(())
@@ -1246,7 +1317,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             }
         };
         if let Some(target) = target {
-            self.get_current_func().insts.push(VmInst::OpMove(OpMove {
+            self.get_current_insts().push(VmInst::OpMove(OpMove {
                 rs: constant,
                 rd: target,
             }));
@@ -1372,8 +1443,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     .push(VmInst::OpPow(OpPow { loc, lhs, rhs, rd }));
                 (rd, target.is_none())
             }
-            OpInfix::Comma => unreachable!(),
-            OpInfix::Member => unreachable!(),
+            OpInfix::Comma | OpInfix::Member | OpInfix::DoubleColon | OpInfix::LArrow => {
+                unreachable!()
+            }
         }
     }
 
@@ -1469,7 +1541,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             }
         };
         // return expression value
-        self.get_current_func().insts.push(VmInst::OpRet(OpRet {
+        self.get_current_insts().push(VmInst::OpRet(OpRet {
             return_reg: result.0,
             loc,
         }));
@@ -1481,6 +1553,11 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     fn get_current_func(&mut self) -> &mut Func {
         let id = self.registers.func_id;
         &mut self.byte_code[id]
+    }
+
+    fn get_current_insts(&mut self) -> &mut Vec<VmInst> {
+        let id = self.registers.func_id;
+        &mut self.byte_code[id].insts
     }
 
     fn enter_block(&mut self) {

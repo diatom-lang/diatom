@@ -46,5 +46,5 @@ pub enum DiatomObject {
     /// Table
     Table,
     /// Tuple
-    Tuple
+    Tuple,
 }

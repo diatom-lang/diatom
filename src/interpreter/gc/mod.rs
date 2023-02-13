@@ -16,6 +16,7 @@ use super::Ip;
 
 pub struct Table {
     pub attributes: BTreeMap<usize, Reg>,
+    pub meta_table: Option<usize>,
 }
 
 pub enum GcObject<Buffer: Write> {
@@ -121,10 +122,6 @@ impl<Buffer: Write> Gc<Buffer> {
 
     pub unsafe fn get_obj_unchecked(&self, id: usize) -> &GcObject<Buffer> {
         self.obj_pool.get_unchecked(id)
-    }
-
-    pub fn get_obj_mut(&mut self, id: usize) -> Option<&mut GcObject<Buffer>> {
-        self.obj_pool.get_mut(id)
     }
 
     pub unsafe fn get_obj_unchecked_mut(&mut self, id: usize) -> &mut GcObject<Buffer> {
