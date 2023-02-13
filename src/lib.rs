@@ -16,7 +16,6 @@ mod diagnostic;
 mod frontend;
 mod interpreter;
 mod vm;
-pub use interpreter::GcObject as DiatomObject;
 pub use interpreter::Interpreter;
 pub use interpreter::Reg as DiatomValue;
 pub use interpreter::State;
