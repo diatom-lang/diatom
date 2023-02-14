@@ -426,7 +426,10 @@ impl Lexer {
             (Some('<'), Some('=')) => Ok((Token::Op(Operator::Le), consume_next_2_char(iter))),
             (Some('='), Some('=')) => Ok((Token::Op(Operator::Eq), consume_next_2_char(iter))),
             (Some('<'), Some('>')) => Ok((Token::Op(Operator::Ne), consume_next_2_char(iter))),
-            (Some('='), Some('>')) => Ok((Token::Op(Operator::Arm), consume_next_2_char(iter))),
+            (Some(':'), Some(':')) => {
+                Ok((Token::Op(Operator::DoubleColon), consume_next_2_char(iter)))
+            }
+            (Some('<'), Some('-')) => Ok((Token::Op(Operator::LArrow), consume_next_2_char(iter))),
             (Some(c), _) => {
                 let start = iter.offset();
                 iter.next();
@@ -448,7 +451,6 @@ impl Lexer {
                     ']' => Ok((Token::Op(Operator::RBrk), loc)),
                     '{' => Ok((Token::Op(Operator::LBrc), loc)),
                     '}' => Ok((Token::Op(Operator::RBrc), loc)),
-                    ':' => Ok((Token::Op(Operator::Colon), loc)),
                     '$' => Ok((Token::Op(Operator::Call), loc)),
                     '|' => Ok((Token::Op(Operator::BitOr), loc)),
                     '@' => Ok((Token::Op(Operator::At), loc)),
@@ -476,8 +478,7 @@ mod tests {
             if should_fail {
                 assert!(
                     result.is_err(),
-                    "Expected parse success! source = {s}, result = {:?}",
-                    result
+                    "Expected parse success! source = {s}, result = {result:?}"
                 );
             } else if let Ok((Token::Integer(j), _)) = result {
                 if i != j {
@@ -485,10 +486,7 @@ mod tests {
                 };
                 assert_eq!(i, j);
             } else {
-                panic!(
-                    "Expected parse failure! source = {s} , result = {:?}",
-                    result
-                );
+                panic!("Expected parse failure! source = {s} , result = {result:?}");
             }
         }
 
@@ -535,16 +533,12 @@ mod tests {
             if should_fail {
                 assert!(
                     result.is_err(),
-                    "Expected parse success! source = {s}, result = {:?}",
-                    result
+                    "Expected parse success! source = {s}, result = {result:?}"
                 );
             } else if let Ok((Token::Float(j), _)) = result {
                 assert_eq!(i, j);
             } else {
-                panic!(
-                    "Expected parse failure! source = {s} , result = {:?}",
-                    result
-                );
+                panic!("Expected parse failure! source = {s} , result = {result:?}");
             }
         }
 
@@ -564,16 +558,12 @@ mod tests {
             if should_fail {
                 assert!(
                     result.is_err(),
-                    "Expected parse success! source = {s}, result = {:?}",
-                    result
+                    "Expected parse success! source = {s}, result = {result:?}"
                 );
             } else if let Ok((Token::Str(j), _)) = result {
                 assert_eq!(i, j);
             } else {
-                panic!(
-                    "Expected parse failure! source = {s} , result = {:?}",
-                    result
-                );
+                panic!("Expected parse failure! source = {s} , result = {result:?}");
             }
         }
 
@@ -601,7 +591,7 @@ mod tests {
         let mut ast = Ast::new(OsString::from(file!()), file);
         let token_stream = Lexer::lex(&mut ast);
         for token in token_stream.iter() {
-            println!("{:?}", token);
+            println!("{token:?}");
         }
 
         if !should_fail && ast.diagnoser.error_count() > 0 {
@@ -623,7 +613,7 @@ mod tests {
                 a == 0 then return 1 else return 0
                 end end
             ß = fac(5) å = ß**3//0x11f |> fac 
-            set = {'s', 'ma\u00E9', 65e52, 0b00110} dict = {:}.insert(('key', 98)) 
+            set = {'s', 'ma\u00E9', 65e52, 0b00110} dict = {}.insert(('key', 98)) 
             🐶🐱 <> "Doa\x09 and cat'?'" 
             "#;
         test_str(code, false);

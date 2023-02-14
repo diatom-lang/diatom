@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use crate::{DiatomObject, DiatomValue, Interpreter};
+use crate::{DiatomValue, Interpreter};
 
 pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
     interpreter.add_extern_function("print".to_string(), |state, parameters, out| {
@@ -9,41 +9,20 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
             if flag {
                 flag = false
             } else {
-                write!(out, ", ").map_err(|err| format!("IoError: {err}"))?;
+                write!(out, " ").map_err(|err| format!("IoError: {err}"))?;
             }
-            match parameter {
-                DiatomValue::Unit => write!(out, "()"),
-                DiatomValue::Bool(b) => write!(out, "{b}"),
-                DiatomValue::Int(i) => write!(out, "{i}"),
-                DiatomValue::Float(f) => write!(out, "{f}"),
-                DiatomValue::Str(sid) => write!(out, "{}", state.get_string_by_id(*sid).unwrap()),
-                DiatomValue::Ref(r) => match state.get_obj(*r).unwrap() {
-                    DiatomObject::Closure {
-                        func_id,
-                        parameters: _,
-                        reg_size: _,
-                        captured: _,
-                    } => {
-                        write!(out, "Closure[{func_id}]")
-                    }
-                    DiatomObject::NativeFunction(f) => {
-                        write!(out, "External function@{:p}", f.as_ptr())
-                    }
-                    DiatomObject::Table(t) => {
-                        write!(out, "Table@{:p}", &t)
-                    }
-                },
-            }
-            .map_err(|err| format!("IoError: {err}"))?;
+
+            let text = state.print(parameter);
+            write!(out, "{text}").map_err(|err| format!("IoError: {err}"))?;
         }
         writeln!(out).map_err(|err| format!("IoError: {err}"))?;
         Ok(DiatomValue::Unit)
     });
 
-    interpreter.add_extern_function("assert".to_string(), |_state, parameters, _out| {
+    interpreter.add_extern_function("assert".to_string(), |_state, parameters, _| {
         if parameters.len() != 1 {
             return Err(format!(
-                "Assert expected 1 parameter while {} is provided",
+                "Expected 1 parameter while {} is provided",
                 parameters.len()
             ));
         }
@@ -59,10 +38,10 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
         }
     });
 
-    interpreter.add_extern_function("panic".to_string(), |state, parameters, _out| {
+    interpreter.add_extern_function("panic".to_string(), |state, parameters, _| {
         if parameters.len() > 1 {
             return Err(format!(
-                "Assert expected 1 or 0 parameter while {} is provided",
+                "Expected 1 or 0 parameter while {} is provided",
                 parameters.len()
             ));
         }
@@ -72,11 +51,22 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
         match parameters[0] {
             DiatomValue::Str(sid) => {
                 let reason = state.get_string_by_id(sid).unwrap().to_string();
-                Err(format!("Panic triggered: `{reason}`"))
+                Err(format!("Panic: `{reason}`"))
             }
             _ => Err(
                 "Panic triggered with invalid type(Can not show non-string parameter)".to_string(),
             ),
+        }
+    });
+
+    interpreter.add_extern_function("unreachable".to_string(), |_, parameters, _| {
+        if !parameters.is_empty() {
+            Err(format!(
+                "expect 0 parameter while {} is provided",
+                parameters.len()
+            ))
+        } else {
+            Err("Unreachable code reached".to_string())
         }
     });
 }

@@ -6,4 +6,4 @@ def fib n =
     end
 end
 
-print$(fib$(35))
+assert$(fib$(15) == 610)

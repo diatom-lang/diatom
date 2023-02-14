@@ -42,6 +42,20 @@ pub enum VmError {
     NoSuchKey { loc: Loc, attr: String },
     /// E3011 Not a table
     NotATable { loc: Loc, t: String },
+    /// E3012 Not a tuple
+    NotATuple { loc: Loc, t: String },
+    /// E3013 Tuple access out of bound
+    TupleOutOfBound {
+        loc: Loc,
+        bound: usize,
+        access: usize,
+    },
+    /// E3014 Invalid meta table
+    InvalidMetaTable { loc: Loc, t: String },
+    /// E3015 Index out of bound
+    IndexOutOfBound { loc: Loc, bound: usize, index: i64 },
+    /// E3016 Can Not Index
+    CanNotIndex { loc: Loc, t1: String, t2: String },
 }
 
 impl From<VmError> for Diagnostic {
@@ -98,13 +112,39 @@ impl From<VmError> for Diagnostic {
                 .with_labels(vec![Label::primary((), loc)]),
             VmError::NoSuchKey { loc, attr } => Diagnostic::error()
                 .with_code("E3010")
-                .with_message(format!("Table does not contain key `{attr}`"))
+                .with_message(format!(
+                    "Table or its meta table does not contain key `{attr}`"
+                ))
                 .with_labels(vec![Label::primary((), loc)]),
             VmError::NotATable { loc, t } => Diagnostic::error()
                 .with_code("E3011")
                 .with_message(format!(
                     "Read attribute from type `{t}` which is not a table"
                 ))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::NotATuple { loc, t } => Diagnostic::error()
+                .with_code("E3012")
+                .with_message(format!("Read content from type `{t}` which is not a tuple"))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::TupleOutOfBound { loc, bound, access } => Diagnostic::error()
+                .with_code("E3013")
+                .with_message(format!(
+                    "Tuple has {bound} item(s) while attempting to get an item at {access}"
+                ))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::InvalidMetaTable { loc, t } => Diagnostic::error()
+                .with_code("E3014")
+                .with_message(format!("Attempt to use type `{t}` as meta table"))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::IndexOutOfBound { loc, bound, index } => Diagnostic::error()
+                .with_code("E3015")
+                .with_message(format!(
+                    "List has {bound} item(s) while attempting to get an item at {index}"
+                ))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::CanNotIndex { loc, t1, t2 } => Diagnostic::error()
+                .with_code("E3016")
+                .with_message(format!("Type `{t1}` can not be indexed by type `{t2}`"))
                 .with_labels(vec![Label::primary((), loc)]),
         }
     }

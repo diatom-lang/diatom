@@ -1,11 +1,11 @@
 f = 
     fn x = 
         if x > 5 then
-            print$('>5')
+            'x>5'
         elsif x > 4 then
-            print$('>4')
+            'x>4'
         else
-            print$('<=4')
+            'x<=4'
         end
 
-f$(0)
+assert$(f$(0) == 'x<=4')

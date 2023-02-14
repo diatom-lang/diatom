@@ -15,6 +15,20 @@ macro_rules! test_ok {
     };
 }
 
+macro_rules! test_ok_ignore {
+    ($code: literal) => {
+        let mut interpreter = Interpreter::new(Vec::<u8>::new());
+        interpreter
+            .exec_repl($code, false)
+            .expect("Execution failed!");
+
+        let output = interpreter.replace_buffer(Vec::<u8>::new());
+        let mut output = String::from_utf8(output).unwrap();
+        // pop newline
+        output.pop();
+    };
+}
+
 macro_rules! test_err {
     ($code: literal) => {
         let mut interpreter = Interpreter::new(Vec::<u8>::new());
@@ -152,5 +166,40 @@ fn test_recursive() {
 
 #[test]
 fn test_compile_with_target() {
-    test_ok!("def add a b = a + b end add$(add$(1,2), 3)", "6");
+    test_ok!("def add a b = a + b end add$(add$(1,2), begin 3 end)", "6");
+}
+
+#[test]
+fn test_tuple() {
+    test_ok!("a = (1,2,3) a.2", "3");
+    test_ok!("a = (1,2, {}) a.2.idx='hello' b = a.2 b.idx", "hello");
+}
+
+#[test]
+fn test_method() {
+    test_ok!("a = {print = print} a::print$(1)", "1");
+    test_ok_ignore!("a = {print = print} a.print$(1)");
+    test_ok!("a = (1, print) a.1$(1)", "1");
+}
+
+#[test]
+fn test_meta_table() {
+    test_ok_ignore!(
+        r#"
+        meta_table = {name = 'abc'}
+        table = {} <- meta_table
+        assert$(table.name == 'abc')
+    "#
+    );
+}
+
+#[test]
+fn test_list() {
+    test_ok!("a = [1,2,3] a$[0]", "1");
+    test_ok!("a = [1,2,3] a$[2]", "3");
+    test_ok!("a = [1,2,3] a$[-1]", "3");
+    test_ok!("a = [1,2,3] a$[-3]", "1");
+    test_err!("a = [1,2,3] a$[-4]");
+    test_err!("a = [1,2,3] a$[3]");
+    test_err!("a = [] a$[0]");
 }

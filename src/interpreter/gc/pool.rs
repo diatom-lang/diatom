@@ -39,14 +39,6 @@ impl<T> Pool<T> {
         debug_assert!(self.pool.len() > idx && self.free.get(&idx).is_none());
         self.pool.get_unchecked_mut(idx)
     }
-
-    pub fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
-        if idx < self.pool.len() && self.free.get(&idx).is_none() {
-            Some(&mut self.pool[idx])
-        } else {
-            None
-        }
-    }
 }
 
 impl<T> Default for Pool<T> {

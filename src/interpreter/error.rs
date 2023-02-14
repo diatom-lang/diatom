@@ -29,6 +29,8 @@ pub enum ErrorCode {
     ReturnOutsideFunction(Loc),
     /// E2007 Invalid Member Access
     InvalidMember(Loc),
+    /// E2008 Set Meta Not Allowed
+    MetaNotAllowed(Loc),
 }
 
 impl From<ErrorCode> for Diagnostic {
@@ -61,9 +63,7 @@ impl From<ErrorCode> for Diagnostic {
                         Label::secondary((), previous).with_message("Name previously defined here"),
                     )
                 } else if is_extern {
-                    error = error.with_notes(vec![format!(
-                        "`{name}` is an external function defined by host"
-                    )])
+                    error = error.with_notes(vec![format!("`{name}` is defined by host or diatom")])
                 };
                 error.with_labels(labels)
             }
@@ -83,6 +83,14 @@ impl From<ErrorCode> for Diagnostic {
                 .with_code("E2007")
                 .with_message("Member assessment must be an identifier")
                 .with_labels(vec![Label::primary((), loc)]),
+            ErrorCode::MetaNotAllowed(loc) => Diagnostic::error()
+                .with_code("E2008")
+                .with_message("Set meta table is not allowed here")
+                .with_labels(vec![Label::primary((), loc)])
+                .with_notes(vec![
+                    "Meta table can only be set on newly created table".to_string(),
+                    "For example: `table = {...} <- Meta`".to_string(),
+                ]),
         }
     }
 }

@@ -61,6 +61,8 @@ pub enum OpInfix {
     Exp,
     Comma,
     Member,
+    DoubleColon,
+    LArrow,
 }
 
 #[derive(Clone, Copy)]

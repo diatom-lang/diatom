@@ -1,4 +1,4 @@
-use crate::{interpreter::Gc, DiatomObject, IoWrite};
+use crate::{interpreter::Gc, DiatomValue, IoWrite};
 
 /// State of the virtual machine
 pub struct State<'a, Buffer: IoWrite> {
@@ -25,12 +25,26 @@ impl<'a, Buffer: IoWrite> State<'a, Buffer> {
     ///
     /// Return None if id is invalid. If id is provided by parameters, it can never be invalid and
     /// thus is safe to unwrap.
-    pub fn get_obj_mut(&mut self, ref_id: usize) -> Option<&mut DiatomObject<Buffer>> {
-        self.gc.get_obj_mut(ref_id)
+    pub fn get_obj_mut(&mut self, _ref_id: usize) -> Option<&mut DiatomObject> {
+        todo!()
     }
 
     /// Same as `get_obj_mut` but this is immutable
-    pub fn get_obj(&mut self, ref_id: usize) -> Option<&DiatomObject<Buffer>> {
-        self.gc.get_obj(ref_id)
+    pub fn get_obj(&mut self, _ref_id: usize) -> Option<&DiatomObject> {
+        todo!()
     }
+
+    pub fn print(&self, value: &DiatomValue) -> String {
+        self.gc.print(value)
+    }
+}
+
+/// Heaped allocated object
+pub enum DiatomObject {
+    /// Native or Diatom Closure
+    Closure,
+    /// Table
+    Table,
+    /// Tuple
+    Tuple,
 }
