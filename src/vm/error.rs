@@ -52,6 +52,10 @@ pub enum VmError {
     },
     /// E3014 Invalid meta table
     InvalidMetaTable { loc: Loc, t: String },
+    /// E3015 Index out of bound
+    IndexOutOfBound { loc: Loc, bound: usize, index: i64 },
+    /// E3016 Can Not Index
+    CanNotIndex { loc: Loc, t1: String, t2: String },
 }
 
 impl From<VmError> for Diagnostic {
@@ -131,6 +135,16 @@ impl From<VmError> for Diagnostic {
             VmError::InvalidMetaTable { loc, t } => Diagnostic::error()
                 .with_code("E3014")
                 .with_message(format!("Attempt to use type `{t}` as meta table"))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::IndexOutOfBound { loc, bound, index } => Diagnostic::error()
+                .with_code("E3015")
+                .with_message(format!(
+                    "List has {bound} item(s) while attempting to get an item at {index}"
+                ))
+                .with_labels(vec![Label::primary((), loc)]),
+            VmError::CanNotIndex { loc, t1, t2 } => Diagnostic::error()
+                .with_code("E3016")
+                .with_message(format!("Type `{t1}` can not be indexed by type `{t2}`"))
                 .with_labels(vec![Label::primary((), loc)]),
         }
     }

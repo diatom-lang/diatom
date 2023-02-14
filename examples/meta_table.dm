@@ -1,9 +1,10 @@
 meta_table = {
-    print = (fn self = print$(self, 'meta print') ),
+    positive = (fn self i = i > 0),
     name = 'meta table'
 }
 
-table = {key = 'table key'} <- meta_table
+table = {key = 'key'} <- meta_table
 
-table.print$()
-print$(table.name)
+assert$(table.name == 'meta table')
+assert$(table.key == 'key')
+assert$(table.positive$(10))

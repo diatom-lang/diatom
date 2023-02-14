@@ -13,7 +13,7 @@ mod prelude;
 use key_pool::KeyPool;
 use pool::Pool;
 
-use self::prelude::{init_float_meta, init_int_meta};
+use self::prelude::{init_float_meta, init_int_meta, init_list_meta};
 
 use super::Ip;
 
@@ -34,6 +34,7 @@ pub enum GcObject<Buffer: Write> {
     NativeFunction(
         Rc<RefCell<dyn Fn(&mut State<Buffer>, &[Reg], &mut Buffer) -> Result<Reg, String>>>,
     ),
+    List(Vec<Reg>),
     Table(Table),
     Tuple(Vec<Reg>),
 }
@@ -77,6 +78,7 @@ pub struct Gc<Buffer: Write> {
     key_pool: KeyPool,
     int_meta: usize,
     float_meta: usize,
+    list_meta: usize,
 }
 
 static UNIT_REG: Reg = Reg::Unit;
@@ -87,6 +89,7 @@ impl<Buffer: Write> Gc<Buffer> {
         let mut obj_pool = Pool::<GcObject<Buffer>>::default();
         let int_meta = init_int_meta(&mut obj_pool, &mut key_pool);
         let float_meta = init_float_meta(&mut obj_pool, &mut key_pool);
+        let list_meta = init_list_meta(&mut obj_pool, &mut key_pool);
 
         Self {
             call_stack: CallStack {
@@ -109,6 +112,7 @@ impl<Buffer: Write> Gc<Buffer> {
             key_pool,
             int_meta,
             float_meta,
+            list_meta,
         }
     }
 
@@ -277,6 +281,10 @@ impl<Buffer: Write> Gc<Buffer> {
         self.float_meta
     }
 
+    pub fn list_meta(&self) -> usize {
+        self.list_meta
+    }
+
     pub fn clean_call_stack(&mut self) {
         self.call_stack.frames.truncate(1);
     }
@@ -313,6 +321,18 @@ impl<Buffer: Write> Gc<Buffer> {
                     }
                     GcObject::NativeFunction(f) => {
                         write!(buffer, "External function@{:p}", f.as_ptr())
+                    }
+                    GcObject::List(l) => {
+                        write!(buffer, "[").unwrap();
+                        for (i, value) in l.iter().enumerate() {
+                            if i == l.len() - 1 {
+                                self.print_reg(value, visited, buffer);
+                            } else {
+                                self.print_reg(value, visited, buffer);
+                                write!(buffer, ", ").unwrap();
+                            }
+                        }
+                        write!(buffer, "]")
                     }
                     GcObject::Table(t) => {
                         write!(buffer, "{{").unwrap();

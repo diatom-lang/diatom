@@ -12,8 +12,8 @@ mod register_table;
 
 mod api;
 use crate::vm::op::{
-    OpGe, OpGetTable, OpGetTuple, OpLe, OpLt, OpMakeTable, OpMakeTuple, OpNe, OpSetMeta,
-    OpSetTable, OpSetTuple,
+    OpGe, OpGetTable, OpGetTuple, OpIndex, OpLe, OpLt, OpMakeList, OpMakeTable, OpMakeTuple, OpNe,
+    OpSetMeta, OpSetTable, OpSetTuple,
 };
 use crate::{
     diagnostic::{Diagnostic, Loc},
@@ -193,6 +193,11 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         interpreter
             .gc
             .write_reg(float, Reg::Ref(interpreter.gc.float_meta()));
+        let list = interpreter.registers.declare_variable("List", None);
+        interpreter.gc.alloc_reg_file(list + 1);
+        interpreter
+            .gc
+            .write_reg(list, Reg::Ref(interpreter.gc.list_meta()));
 
         impl_prelude(&mut interpreter);
         interpreter
@@ -487,7 +492,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             Expr::Parentheses { content, .. } => self.scan_constant_expr(content),
             Expr::Const { value, .. } => self.scan_constant(value),
             Expr::Module { .. } => todo!(),
-            Expr::Error => todo!(),
+            Expr::Error => unreachable!(),
         }
     }
 
@@ -516,7 +521,10 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 .registers
                 .get_or_alloc_constant(ConstantValue::Bool(*b))
                 .map_err(|reg| (reg, Reg::Bool(*b))),
-            Const::List(_) => todo!(),
+            Const::List(list) => {
+                list.iter().for_each(|expr| self.scan_constant_expr(expr));
+                return;
+            }
             Const::Table(entries) => {
                 entries
                     .iter()
@@ -1092,11 +1100,22 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     .for_each(|reg| self.registers.free_intermediate(reg));
                 Ok((rd.unwrap_or(usize::MAX), target.is_none()))
             }
-            Expr::Index {
-                loc: _,
-                lhs: _,
-                rhs: _,
-            } => todo!(),
+            Expr::Index { loc, lhs, rhs } => {
+                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
+
+                self.compile_expr(lhs, false, Some(rd))?;
+                let (rhs_id, rhs_tmp) = self.compile_expr(rhs, false, None)?;
+                self.get_current_insts().push(VmInst::OpIndex(OpIndex {
+                    loc: loc.clone(),
+                    lhs: rd,
+                    rhs: rhs_id,
+                    rd,
+                }));
+                if rhs_tmp {
+                    self.registers.free_intermediate(rhs_id);
+                }
+                Ok((rd, target.is_none()))
+            }
             Expr::Fn {
                 loc,
                 parameters,
@@ -1304,7 +1323,25 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 .registers
                 .get_or_alloc_constant(ConstantValue::Bool(*b))
                 .unwrap(),
-            Const::List(_) => todo!(),
+            Const::List(list) => {
+                let mut items = vec![];
+                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
+                for expr in list {
+                    let item = self.compile_expr(expr, false, None)?;
+                    items.push(item);
+                }
+                self.get_current_insts()
+                    .push(VmInst::OpMakeList(OpMakeList {
+                        rd,
+                        items: items.iter().map(|(id, _)| *id).collect(),
+                    }));
+                items.into_iter().for_each(|(id, tmp)| {
+                    if tmp {
+                        self.registers.free_intermediate(id);
+                    }
+                });
+                return Ok((rd, target.is_none()));
+            }
             Const::Table(pairs) => {
                 let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
                 self.get_current_func()

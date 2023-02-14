@@ -184,18 +184,22 @@ fn test_method() {
 
 #[test]
 fn test_meta_table() {
-    test_ok!(
+    test_ok_ignore!(
         r#"
-        meta_table = {
-            print = (fn self = print$(self, 'meta print') ),
-            name = 'meta table'
-        }
-
-        table = {key = 'table key'} <- meta_table
-
-        table.print$()
-        print$(table.name)
-    "#,
-        "{key = table key}, meta print\nmeta table"
+        meta_table = {name = 'abc'}
+        table = {} <- meta_table
+        assert$(table.name == 'abc')
+    "#
     );
+}
+
+#[test]
+fn test_list() {
+    test_ok!("a = [1,2,3] a$[0]", "1");
+    test_ok!("a = [1,2,3] a$[2]", "3");
+    test_ok!("a = [1,2,3] a$[-1]", "3");
+    test_ok!("a = [1,2,3] a$[-3]", "1");
+    test_err!("a = [1,2,3] a$[-4]");
+    test_err!("a = [1,2,3] a$[3]");
+    test_err!("a = [] a$[0]");
 }

@@ -16,6 +16,10 @@ mod diagnostic;
 mod frontend;
 mod interpreter;
 mod vm;
+
+#[cfg(test)]
+mod tests;
+
 pub use interpreter::Interpreter;
 pub use interpreter::Reg as DiatomValue;
 pub use interpreter::State;
