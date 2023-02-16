@@ -785,6 +785,49 @@ impl Instruction for OpIndex {
         .unwrap()
     }
 }
+
+pub struct OpIs {
+    pub loc: Loc,
+    pub lhs: usize,
+    pub rhs: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpIs {
+    #[cfg_attr(feature = "profile", inline(never))]
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let lhs = gc.read_reg(self.lhs);
+        let rhs = gc.read_reg(self.rhs);
+        let reg = match (lhs, rhs) {
+            (Reg::Ref(r1), Reg::Ref(r2)) => Reg::Bool(r1 == r2),
+            _ => {
+                let t1 = get_type(lhs, gc);
+                let t2 = get_type(rhs, gc);
+                return Err(VmError::OpBinNotApplicable(self.loc.clone(), "is", t1, t2));
+            }
+        };
+        gc.write_reg(self.rd, reg);
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "eq", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
+}
+
 pub struct OpEq {
     pub loc: Loc,
     pub lhs: usize,
@@ -1593,11 +1636,14 @@ impl Instruction for OpGetTable {
         })
     }
 
-    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
             "{: >FORMAT_PAD$}   Reg#{}.{} -> Reg#{}",
-            "get_table", self.rs, self.attr, self.rd
+            "get_table",
+            self.rs,
+            gc.look_up_table_key(self.attr).unwrap(),
+            self.rd
         )
         .unwrap()
     }

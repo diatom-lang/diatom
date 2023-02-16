@@ -12,24 +12,15 @@ pub enum ErrorCode {
     NameNotDefined(Loc, String),
     /// E2002 Assignment Not Allowed here
     InvalidAssignment(Loc),
-    /// E2003 Parameter Shadowing
-    ParameterShadowing {
-        // if previously defined by external function
-        // it does not have a location
-        previous: Option<Loc>,
-        is_extern: bool,
-        parameter: Loc,
-        name: String,
-    },
-    /// E2004 Break outside loop
+    /// E2003 Break outside loop
     BreakOutsideLoop(Loc),
-    /// E2005 Continue outside loop
+    /// E2004 Continue outside loop
     ContinueOutsideLoop(Loc),
-    /// E2006 Return outside function
+    /// E2005 Return outside function
     ReturnOutsideFunction(Loc),
-    /// E2007 Invalid Member Access
+    /// E2006 Invalid Member Access
     InvalidMember(Loc),
-    /// E2008 Set Meta Not Allowed
+    /// E2007 Set Meta Not Allowed
     MetaNotAllowed(Loc),
 }
 
@@ -48,43 +39,24 @@ impl From<ErrorCode> for Diagnostic {
                 .with_code("E2002")
                 .with_message("Assignment can not be used as expression")
                 .with_labels(vec![Label::primary((), loc)]),
-            ErrorCode::ParameterShadowing {
-                previous,
-                is_extern,
-                parameter,
-                name,
-            } => {
-                let mut error = Diagnostic::error().with_code("E2003").with_message(format!(
-                    "Function parameter `{name}` has a name that is already defined"
-                ));
-                let mut labels = vec![Label::primary((), parameter)];
-                if let Some(previous) = previous {
-                    labels.push(
-                        Label::secondary((), previous).with_message("Name previously defined here"),
-                    )
-                } else if is_extern {
-                    error = error.with_notes(vec![format!("`{name}` is defined by host or diatom")])
-                };
-                error.with_labels(labels)
-            }
             ErrorCode::BreakOutsideLoop(loc) => Diagnostic::error()
-                .with_code("E2004")
+                .with_code("E2003")
                 .with_message("Can not break outside a loop")
                 .with_labels(vec![Label::primary((), loc)]),
             ErrorCode::ContinueOutsideLoop(loc) => Diagnostic::error()
-                .with_code("E2005")
+                .with_code("E2004")
                 .with_message("Can not continue outside a loop")
                 .with_labels(vec![Label::primary((), loc)]),
             ErrorCode::ReturnOutsideFunction(loc) => Diagnostic::error()
-                .with_code("E2006")
+                .with_code("E2005")
                 .with_message("Can not return outside a function")
                 .with_labels(vec![Label::primary((), loc)]),
             ErrorCode::InvalidMember(loc) => Diagnostic::error()
-                .with_code("E2007")
+                .with_code("E2006")
                 .with_message("Member assessment must be an identifier")
                 .with_labels(vec![Label::primary((), loc)]),
             ErrorCode::MetaNotAllowed(loc) => Diagnostic::error()
-                .with_code("E2008")
+                .with_code("E2007")
                 .with_message("Set meta table is not allowed here")
                 .with_labels(vec![Label::primary((), loc)])
                 .with_notes(vec![

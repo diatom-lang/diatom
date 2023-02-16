@@ -12,8 +12,8 @@ mod register_table;
 
 mod api;
 use crate::vm::op::{
-    OpGe, OpGetTable, OpGetTuple, OpIndex, OpLe, OpLt, OpMakeList, OpMakeTable, OpMakeTuple, OpNe,
-    OpSetMeta, OpSetTable, OpSetTuple,
+    OpGe, OpGetTable, OpGetTuple, OpIndex, OpIs, OpLe, OpLt, OpMakeList, OpMakeTable, OpMakeTuple,
+    OpNe, OpSetMeta, OpSetTable, OpSetTuple,
 };
 use crate::{
     diagnostic::{Diagnostic, Loc},
@@ -200,6 +200,10 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             .write_reg(list, Reg::Ref(interpreter.gc.list_meta()));
 
         impl_prelude(&mut interpreter);
+        interpreter
+            .exec(include_str!("std.dm"), OsStr::new("std.dm"), true)
+            .map_err(|s| print!("{s}"))
+            .expect("Internal Error: Panic while executing diatom standard library.");
         interpreter
     }
 
@@ -413,7 +417,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         // Scan all constant
         ast.statements
             .iter()
-            .for_each(|stmt| self.scan_constant_stmt(stmt));
+            .for_each(|stmt| self.scan_constant_capture_stmt(stmt));
 
         for (i, stmt) in ast.statements.iter().enumerate() {
             match self.compile_stmt(stmt, i != ast.statements.len() - 1, None) {
@@ -432,71 +436,106 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         }
     }
 
-    fn scan_constant_stmt(&mut self, stmt: &Stmt) {
+    fn scan_constant_capture_stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::Expr { expr, .. } => self.scan_constant_expr(expr),
+            Stmt::Expr { expr, .. } => self.scan_constant_capture_expr(expr, true),
             Stmt::Continue { .. } => (),
             Stmt::Break { .. } => (),
             Stmt::Return { value, .. } => {
                 if let Some(expr) = value {
-                    self.scan_constant_expr(expr)
+                    self.scan_constant_capture_expr(expr, true)
                 }
             }
             Stmt::Loop {
                 condition, body, ..
             } => {
                 if let Some(expr) = condition {
-                    self.scan_constant_expr(expr)
+                    self.scan_constant_capture_expr(expr, true)
                 }
-                body.iter().for_each(|stmt| self.scan_constant_stmt(stmt));
+                body.iter()
+                    .for_each(|stmt| self.scan_constant_capture_stmt(stmt));
             }
-            Stmt::For { .. } => todo!(),
+            Stmt::For { iterator, body, .. } => {
+                self.scan_constant_capture_expr(iterator, true);
+                body.iter()
+                    .for_each(|stmt| self.scan_constant_capture_stmt(stmt));
+            }
             Stmt::Def { .. } => (),
             Stmt::Error => unreachable!(),
         }
     }
 
-    fn scan_constant_expr(&mut self, expr: &Expr) {
+    fn scan_constant_capture_expr(&mut self, expr: &Expr, scan_capture: bool) {
         match expr {
-            Expr::Block { body, .. } => body.iter().for_each(|stmt| self.scan_constant_stmt(stmt)),
+            Expr::Block { body, .. } => body
+                .iter()
+                .for_each(|stmt| self.scan_constant_capture_stmt(stmt)),
             Expr::If {
                 conditional,
                 default,
                 ..
             } => conditional.iter().for_each(|(expr, stmts)| {
-                self.scan_constant_expr(expr);
-                stmts.iter().for_each(|stmt| self.scan_constant_stmt(stmt));
+                self.scan_constant_capture_expr(expr, true);
+                stmts
+                    .iter()
+                    .for_each(|stmt| self.scan_constant_capture_stmt(stmt));
                 if let Some(stmts) = default {
-                    stmts.iter().for_each(|stmt| self.scan_constant_stmt(stmt))
+                    stmts
+                        .iter()
+                        .for_each(|stmt| self.scan_constant_capture_stmt(stmt))
                 }
             }),
-            Expr::Prefix { rhs, .. } => self.scan_constant_expr(rhs),
+            Expr::Prefix { rhs, .. } => self.scan_constant_capture_expr(rhs, true),
             Expr::Call {
                 lhs, parameters, ..
             } => {
-                self.scan_constant_expr(lhs);
+                self.scan_constant_capture_expr(lhs, true);
                 parameters
                     .iter()
-                    .for_each(|expr| self.scan_constant_expr(expr));
+                    .for_each(|expr| self.scan_constant_capture_expr(expr, true));
             }
             Expr::Index { lhs, rhs, .. } => {
-                self.scan_constant_expr(lhs);
-                self.scan_constant_expr(rhs);
+                self.scan_constant_capture_expr(lhs, true);
+                self.scan_constant_capture_expr(rhs, true);
+            }
+            Expr::Infix {
+                lhs,
+                rhs,
+                op: OpInfix::Member | OpInfix::DoubleColon,
+                ..
+            } => {
+                let should_scan_lhs = matches!(lhs.as_ref(), Expr::Id { .. });
+                self.scan_constant_capture_expr(lhs, should_scan_lhs);
+                self.scan_constant_capture_expr(rhs, false);
             }
             Expr::Infix { lhs, rhs, .. } => {
-                self.scan_constant_expr(lhs);
-                self.scan_constant_expr(rhs);
+                self.scan_constant_capture_expr(lhs, true);
+                self.scan_constant_capture_expr(rhs, true);
             }
             Expr::Fn { .. } => (),
+            Expr::Id { name, .. } if scan_capture => {
+                if let Some((id, depth, loc, _)) = self.registers.lookup_variable(name) {
+                    // variable is captured
+                    // make a local copy and register capture info
+                    if depth > 0 {
+                        let local_id = self.registers.declare_captured_variable(name, loc);
+                        self.registers.capture.push(Capture {
+                            rd: local_id,
+                            rs: id,
+                            depth,
+                        });
+                    }
+                }
+            }
             Expr::Id { .. } => (),
-            Expr::Parentheses { content, .. } => self.scan_constant_expr(content),
-            Expr::Const { value, .. } => self.scan_constant(value),
+            Expr::Parentheses { content, .. } => self.scan_constant_capture_expr(content, true),
+            Expr::Const { value, .. } => self.scan_constant_capture(value),
             Expr::Module { .. } => todo!(),
             Expr::Error => unreachable!(),
         }
     }
 
-    fn scan_constant(&mut self, constant: &Const) {
+    fn scan_constant_capture(&mut self, constant: &Const) {
         let constant = match constant {
             Const::Unit => self
                 .registers
@@ -522,13 +561,14 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 .get_or_alloc_constant(ConstantValue::Bool(*b))
                 .map_err(|reg| (reg, Reg::Bool(*b))),
             Const::List(list) => {
-                list.iter().for_each(|expr| self.scan_constant_expr(expr));
+                list.iter()
+                    .for_each(|expr| self.scan_constant_capture_expr(expr, true));
                 return;
             }
             Const::Table(entries) => {
                 entries
                     .iter()
-                    .for_each(|(_, expr, _)| self.scan_constant_expr(expr));
+                    .for_each(|(_, expr, _)| self.scan_constant_capture_expr(expr, true));
                 return;
             }
         };
@@ -666,11 +706,135 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 }))
             }
             Stmt::For {
-                loc: _,
-                loop_variable: _,
-                iterator: _,
-                body: _,
-            } => todo!(),
+                loc,
+                loop_variable,
+                iterator,
+                body,
+            } => {
+                let iter = self.registers.gen_sym();
+                // iter = iterator.__iter$()
+                let loop_init_expr = Expr::Infix {
+                    loc: iterator.get_loc(),
+                    op: OpInfix::Assign,
+                    lhs: Box::new(Expr::Id {
+                        loc: iterator.get_loc(),
+                        name: iter.clone(),
+                    }),
+                    rhs: Box::new(Expr::Call {
+                        loc: iterator.get_loc(),
+                        lhs: Box::new(Expr::Infix {
+                            loc: iterator.get_loc(),
+                            op: OpInfix::Member,
+                            lhs: iterator.clone(),
+                            rhs: Box::new(Expr::Id {
+                                loc: iterator.get_loc(),
+                                name: "__iter".to_string(),
+                            }),
+                        }),
+                        parameters: vec![],
+                    }),
+                };
+                let loop_init_stmt = Stmt::Expr {
+                    loc: iterator.get_loc(),
+                    expr: loop_init_expr,
+                };
+                self.compile_stmt(&loop_init_stmt, true, None)?;
+
+                let mut loop_body = vec![];
+                let loop_sym = self.registers.gen_sym();
+                // loop body
+                // loop_sym = iter.__next$()
+                loop_body.push(Stmt::Expr {
+                    loc: loc.clone(),
+                    expr: Expr::Infix {
+                        loc: loc.clone(),
+                        op: OpInfix::Assign,
+                        lhs: Box::new(Expr::Id {
+                            loc: iterator.get_loc(),
+                            name: loop_sym.clone(),
+                        }),
+                        rhs: Box::new(Expr::Call {
+                            loc: loop_variable.get_loc(),
+                            lhs: Box::new(Expr::Infix {
+                                loc: iterator.get_loc(),
+                                op: OpInfix::Member,
+                                lhs: Box::new(Expr::Id {
+                                    loc: loop_variable.get_loc(),
+                                    name: iter,
+                                }),
+                                rhs: Box::new(Expr::Id {
+                                    loc: loop_variable.get_loc(),
+                                    name: "__next".to_string(),
+                                }),
+                            }),
+                            parameters: vec![],
+                        }),
+                    },
+                });
+                //if loop_sym is Option::None then
+                //    break
+                //else
+                //    x = loop_sym.value
+                //    Body
+                //end
+                let if_cond = Expr::Infix {
+                    loc: loop_variable.get_loc(),
+                    op: OpInfix::Is,
+                    lhs: Box::new(Expr::Id {
+                        loc: loop_variable.get_loc(),
+                        name: loop_sym.clone(),
+                    }),
+                    rhs: Box::new(Expr::Infix {
+                        loc: loop_variable.get_loc(),
+                        op: OpInfix::DoubleColon,
+                        lhs: Box::new(Expr::Id {
+                            loc: loop_variable.get_loc(),
+                            name: "Option".to_string(),
+                        }),
+                        rhs: Box::new(Expr::Id {
+                            loc: loop_variable.get_loc(),
+                            name: "None".to_string(),
+                        }),
+                    }),
+                };
+
+                let mut default = vec![Stmt::Expr {
+                    loc: loop_variable.get_loc(),
+                    expr: Expr::Infix {
+                        loc: loop_variable.get_loc(),
+                        op: OpInfix::Assign,
+                        lhs: loop_variable.clone(),
+                        rhs: Box::new(Expr::Infix {
+                            loc: loop_variable.get_loc(),
+                            op: OpInfix::Member,
+                            lhs: Box::new(Expr::Id {
+                                loc: loop_variable.get_loc(),
+                                name: loop_sym,
+                            }),
+                            rhs: Box::new(Expr::Id {
+                                loc: loop_variable.get_loc(),
+                                name: "value".to_string(),
+                            }),
+                        }),
+                    },
+                }];
+                default.extend(body.clone());
+
+                loop_body.push(Stmt::Expr {
+                    loc: loop_variable.get_loc(),
+                    expr: Expr::If {
+                        loc: loop_variable.get_loc(),
+                        conditional: vec![(if_cond, vec![Stmt::Break { loc: loc.clone() }])],
+                        default: Some(default),
+                    },
+                });
+                let stmt = Stmt::Loop {
+                    loc: loc.clone(),
+                    condition: None,
+                    body: loop_body,
+                };
+                self.compile_stmt(&stmt, discard, target)?;
+            }
             Stmt::Def {
                 loc,
                 name,
@@ -678,20 +842,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 body,
             } => {
                 // declare variable
-                let id = if let Some((id, depth, loc, _)) = self.registers.lookup_variable(name) {
-                    // variable is captured
-                    // make a local copy and register capture info
-                    if depth > 0 {
-                        let local_id = self.registers.declare_variable(name, loc);
-                        self.registers.capture.push(Capture {
-                            rd: local_id,
-                            rs: id,
-                            depth,
-                        });
-                        local_id
-                    } else {
-                        id
-                    }
+                let id = if let Some((id, depth, _, _)) = self.registers.lookup_variable(name) {
+                    assert!(depth == 0);
+                    id
                 } else {
                     self.scopes.last_mut().unwrap().insert(name.clone());
                     self.registers.declare_variable(name, Some(loc.clone()))
@@ -782,6 +935,23 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             }
             Expr::Infix {
                 loc,
+                op: OpInfix::Range,
+                lhs,
+                rhs,
+            } => {
+                // Range$(lhs, rhs)
+                let expr = Expr::Call {
+                    loc: loc.clone(),
+                    lhs: Box::new(Expr::Id {
+                        loc: loc.clone(),
+                        name: "Range".to_string(),
+                    }),
+                    parameters: vec![lhs.as_ref().clone(), rhs.as_ref().clone()],
+                };
+                self.compile_expr(&expr, false, target)
+            }
+            Expr::Infix {
+                loc,
                 op: OpInfix::Member | OpInfix::DoubleColon,
                 lhs,
                 rhs,
@@ -863,29 +1033,15 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 Ok(ret)
             }
             Expr::Id { loc, name } => match self.registers.lookup_variable(name) {
-                Some((id, depth, loc, _)) => {
-                    // variable is captured
-                    // make a local copy and register capture info
-                    if depth > 0 {
-                        let local_id = self.registers.declare_captured_variable(name, loc);
-                        self.registers.capture.push(Capture {
-                            rd: local_id,
-                            rs: id,
-                            depth,
-                        });
-                        Ok((local_id, false))
+                Some((id, depth, _, _)) => {
+                    assert!(depth == 0);
+                    Ok(if let Some(target) = target {
+                        self.get_current_func()
+                            .insts
+                            .push(VmInst::OpMove(OpMove { rs: id, rd: target }));
+                        (target, false)
                     } else {
-                        Ok((id, false))
-                    }
-                    .map(|(id, tmp)| {
-                        if let Some(target) = target {
-                            self.get_current_func()
-                                .insts
-                                .push(VmInst::OpMove(OpMove { rs: id, rd: target }));
-                            (target, false)
-                        } else {
-                            (id, tmp)
-                        }
+                        (id, false)
                     })
                 }
                 None => Err(ErrorCode::NameNotDefined(loc.clone(), name.clone())),
@@ -1148,20 +1304,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         match lhs {
             Expr::Id { loc: id_loc, name } => {
                 // declare variable
-                let id = if let Some((id, depth, loc, _)) = self.registers.lookup_variable(name) {
-                    // variable is captured
-                    // make a local copy and register capture info
-                    if depth > 0 {
-                        let local_id = self.registers.declare_variable(name, loc);
-                        self.registers.capture.push(Capture {
-                            rd: local_id,
-                            rs: id,
-                            depth,
-                        });
-                        local_id
-                    } else {
-                        id
-                    }
+                let id = if let Some((id, depth, _, _)) = self.registers.lookup_variable(name) {
+                    assert!(depth == 0);
+                    id
                 } else {
                     self.scopes.last_mut().unwrap().insert(name.clone());
                     self.registers.declare_variable(name, Some(id_loc.clone()))
@@ -1218,20 +1363,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     unreachable!()
                 };
                 let var_reg = match self.registers.lookup_variable(&name) {
-                    Some((id, depth, loc, _)) => {
-                        // variable is captured
-                        // make a local copy and register capture info
-                        if depth > 0 {
-                            let local_id = self.registers.declare_captured_variable(name, loc);
-                            self.registers.capture.push(Capture {
-                                rd: local_id,
-                                rs: id,
-                                depth,
-                            });
-                            Ok(local_id)
-                        } else {
-                            Ok(id)
-                        }
+                    Some((id, depth, _, _)) => {
+                        assert!(depth == 0);
+                        Ok(id)
                     }
                     None => Err(ErrorCode::NameNotDefined(loc, name)),
                 }?;
@@ -1385,8 +1519,13 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         target: Option<usize>,
     ) -> (usize, bool) {
         match op {
-            OpInfix::Assign => unreachable!(),
-            OpInfix::Range => todo!(),
+            OpInfix::Is => {
+                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpIs(OpIs { loc, lhs, rhs, rd }));
+                (rd, target.is_none())
+            }
             OpInfix::Or => {
                 let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
                 self.get_current_func()
@@ -1492,7 +1631,12 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     .push(VmInst::OpPow(OpPow { loc, lhs, rhs, rd }));
                 (rd, target.is_none())
             }
-            OpInfix::Comma | OpInfix::Member | OpInfix::DoubleColon | OpInfix::LArrow => {
+            OpInfix::Assign
+            | OpInfix::Range
+            | OpInfix::Comma
+            | OpInfix::Member
+            | OpInfix::DoubleColon
+            | OpInfix::LArrow => {
                 unreachable!()
             }
         }
@@ -1541,24 +1685,29 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         });
         self.registers.enter_function(func_id);
         for (para, loc) in parameters.iter() {
-            if let Some((_, _, loc_prev, define_in_scope)) = self.registers.lookup_variable(para) {
-                let is_extern = loc_prev.is_none();
-                return Err(ErrorCode::ParameterShadowing {
-                    previous: if define_in_scope { loc_prev } else { None },
-                    is_extern,
-                    parameter: loc.clone(),
-                    name: para.clone(),
-                });
-            } else {
-                self.registers.declare_variable(para, Some(loc.clone()));
-            }
+            self.registers.declare_variable(para, Some(loc.clone()));
         }
         match body {
-            Either::Left(expr) => self.scan_constant_expr(expr),
-            Either::Right(stmts) => stmts.iter().for_each(|stmt| self.scan_constant_stmt(stmt)),
+            Either::Left(expr) => self.scan_constant_capture_expr(expr, true),
+            Either::Right(stmts) => stmts
+                .iter()
+                .for_each(|stmt| self.scan_constant_capture_stmt(stmt)),
         }
 
         let result = match body {
+            Either::Left(Expr::Infix {
+                op: OpInfix::Assign,
+                loc,
+                lhs,
+                rhs,
+            }) => {
+                self.compile_assignment(lhs, rhs, loc.clone())
+                    .map_err(|err| {
+                        self.registers.leave_function();
+                        err
+                    })?;
+                (0, false)
+            }
             Either::Left(body) => self.compile_expr(body, false, None).map_err(|err| {
                 self.registers.leave_function();
                 err

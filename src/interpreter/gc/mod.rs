@@ -184,14 +184,13 @@ impl<Buffer: Write> Gc<Buffer> {
             stack.frames[stack.frames.len() + 1 - depth].ptr
         };
         let shared_reg = &mut self.call_stack.regs[frame + id];
-        let reg = std::mem::replace(shared_reg, StackReg::Reg(Reg::Unit));
-        match reg {
+        match shared_reg {
             StackReg::Reg(reg) => {
-                let id = self.escaped_pool.alloc(reg);
+                let id = self.escaped_pool.alloc(reg.clone());
                 *shared_reg = StackReg::Shared(id);
                 id
             }
-            StackReg::Shared(id) => id,
+            StackReg::Shared(id) => *id,
         }
     }
 
