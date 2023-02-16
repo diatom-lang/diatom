@@ -42,6 +42,7 @@ pub enum VmInst {
     OpJump,
     OpBranchTrue,
     OpBranchFalse,
+    OpIs,
     OpEq,
     OpNe,
     OpLt,

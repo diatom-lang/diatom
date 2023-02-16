@@ -3,7 +3,7 @@ use std::io::Write;
 use crate::{DiatomValue, Interpreter};
 
 pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
-    interpreter.add_extern_function("print".to_string(), |state, parameters, out| {
+    interpreter.add_extern_function("println".to_string(), |state, parameters, out| {
         let mut flag = true;
         for parameter in parameters {
             if flag {
@@ -16,6 +16,21 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
             write!(out, "{text}").map_err(|err| format!("IoError: {err}"))?;
         }
         writeln!(out).map_err(|err| format!("IoError: {err}"))?;
+        Ok(DiatomValue::Unit)
+    });
+
+    interpreter.add_extern_function("print".to_string(), |state, parameters, out| {
+        let mut flag = true;
+        for parameter in parameters {
+            if flag {
+                flag = false
+            } else {
+                write!(out, " ").map_err(|err| format!("IoError: {err}"))?;
+            }
+
+            let text = state.print(parameter);
+            write!(out, "{text}").map_err(|err| format!("IoError: {err}"))?;
+        }
         Ok(DiatomValue::Unit)
     });
 

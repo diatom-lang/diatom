@@ -325,6 +325,7 @@ impl Lexer {
             "fn" => Ok((Token::Key(Keyword::Fn), loc)),
             "begin" => Ok((Token::Key(Keyword::Begin), loc)),
             "require" => Ok((Token::Key(Keyword::Require), loc)),
+            "is" => Ok((Token::Op(Operator::Is), loc)),
             _ => Ok((Token::Id(name), loc)),
         }
     }

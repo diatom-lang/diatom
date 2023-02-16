@@ -31,7 +31,7 @@ const fn precedence_infix(op: OpInfix) -> (u16, u16) {
         Range => (5, 6),
         Or => (7, 8),
         And => (9, 10),
-        Eq | Ne | Le | Lt | Gt | Ge => (11, 12),
+        Eq | Ne | Le | Lt | Gt | Ge | Is => (11, 12),
         Plus | Minus => (13, 14),
         Mul | Div | DivFloor | Rem => (15, 16),
         Exp => (17, 18),
@@ -590,7 +590,7 @@ impl Parser {
                 }
             }
         }
-        let expr = self.consume_expr(iter, ast, 0, None);
+        let expr = self.consume_expr(iter, ast, 3, None);
         Expr::Fn {
             loc: start.start..iter.loc().end,
             parameters,
@@ -1085,6 +1085,7 @@ impl Parser {
                     Op(Range) => OpInfix::Range,
                     Op(Or) => OpInfix::Or,
                     Op(And) => OpInfix::And,
+                    Op(Is) => OpInfix::Is,
                     Op(Eq) => OpInfix::Eq,
                     Op(Ne) => OpInfix::Ne,
                     Op(Le) => OpInfix::Le,

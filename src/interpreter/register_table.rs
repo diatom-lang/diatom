@@ -39,6 +39,7 @@ pub struct RegisterTable {
     /// captured variables
     pub capture: Vec<Capture>,
     pub loops: Vec<Loop>,
+    pub symbols: usize,
 }
 
 impl RegisterTable {
@@ -52,7 +53,15 @@ impl RegisterTable {
             constant_table: AHashMap::from([(ConstantValue::Unit, 0)]),
             capture: vec![],
             loops: vec![],
+            symbols: 0,
         }
+    }
+
+    /// Generate an unique symbol
+    pub fn gen_sym(&mut self) -> String {
+        let sym = format!("#G{:0>3}", self.symbols);
+        self.symbols += 1;
+        sym
     }
 
     /// prepare n free register for function call

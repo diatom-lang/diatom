@@ -1,5 +1,5 @@
 meta_table = {
-    positive = (fn self i = i > 0),
+    positive = fn self i = i > 0,
     name = 'meta table'
 }
 

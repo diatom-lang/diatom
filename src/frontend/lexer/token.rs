@@ -71,6 +71,8 @@ pub enum Operator {
     Rem,
     /// ".."
     Range,
+    /// is
+    Is,
     /// "and"
     And,
     /// "or"
@@ -182,6 +184,7 @@ impl Display for Operator {
             Operator::Div => "/",
             Operator::Rem => "%",
             Operator::Range => "..",
+            Operator::Is => "is",
             Operator::And => "and",
             Operator::Or => "or",
             Operator::Not => "not",

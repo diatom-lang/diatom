@@ -1,6 +1,7 @@
 use crate::diagnostic::{Diagnoser, Diagnostic, DisplayableOsString, Loc, SharedFile};
 use std::ffi::OsString;
 
+#[derive(Clone)]
 pub enum Stmt {
     Expr {
         loc: Loc,
@@ -63,6 +64,7 @@ pub enum OpInfix {
     Member,
     DoubleColon,
     LArrow,
+    Is,
 }
 
 #[derive(Clone, Copy)]
@@ -77,6 +79,7 @@ pub enum OpPostfix {
     Call,
 }
 
+#[derive(Clone)]
 pub enum Expr {
     Block {
         loc: Loc,
@@ -173,6 +176,7 @@ impl Expr {
     }
 }
 
+#[derive(Clone)]
 pub enum Const {
     Unit,
     Int(i64),

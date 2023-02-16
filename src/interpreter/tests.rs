@@ -177,9 +177,9 @@ fn test_tuple() {
 
 #[test]
 fn test_method() {
-    test_ok!("a = {print = print} a::print$(1)", "1");
-    test_ok_ignore!("a = {print = print} a.print$(1)");
-    test_ok!("a = (1, print) a.1$(1)", "1");
+    test_ok!("a = {println = println} a::println$(1)", "1");
+    test_ok_ignore!("a = {println = println} a.println$(1)");
+    test_ok!("a = (1, println) a.1$(1)", "1");
 }
 
 #[test]
