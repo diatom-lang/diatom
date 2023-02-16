@@ -456,6 +456,14 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     .for_each(|stmt| self.scan_constant_capture_stmt(stmt));
             }
             Stmt::For { iterator, body, .. } => {
+                // For macro implicitly use `Option`
+                self.scan_constant_capture_expr(
+                    &Expr::Id {
+                        loc: 0..0,
+                        name: "Option".to_string(),
+                    },
+                    true,
+                );
                 self.scan_constant_capture_expr(iterator, true);
                 body.iter()
                     .for_each(|stmt| self.scan_constant_capture_stmt(stmt));
@@ -508,7 +516,17 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 self.scan_constant_capture_expr(lhs, should_scan_lhs);
                 self.scan_constant_capture_expr(rhs, false);
             }
-            Expr::Infix { lhs, rhs, .. } => {
+            Expr::Infix { lhs, rhs, op, .. } => {
+                // x..y implicitly use `Range`
+                if matches!(op, OpInfix::Range) {
+                    self.scan_constant_capture_expr(
+                        &Expr::Id {
+                            loc: 0..0,
+                            name: "Range".to_string(),
+                        },
+                        true,
+                    );
+                }
                 self.scan_constant_capture_expr(lhs, true);
                 self.scan_constant_capture_expr(rhs, true);
             }

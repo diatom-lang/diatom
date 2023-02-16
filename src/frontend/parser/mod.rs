@@ -642,7 +642,7 @@ impl Parser {
                 Some(token) => {
                     ast.add_diagnostic(to_diagnostic(
                         ErrorCode::UnexpectedToken(Some(token.clone()), None, None),
-                        iter.loc(),
+                        iter.next_loc(),
                     ));
                     iter.next();
                 }
