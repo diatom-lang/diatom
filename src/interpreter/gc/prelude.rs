@@ -32,7 +32,7 @@ pub fn init_int_meta<Buffer: IoWrite>(
             ));
         }
         match parameters[0] {
-            Reg::Int(i) => Ok(Reg::Int(i64::abs(i))),
+            Reg::Int(i) => Ok(Reg::Int(i64::wrapping_abs(i))),
             _ => Err("Expected type `Int`".to_string()),
         }
     }));
@@ -109,6 +109,21 @@ pub fn init_float_meta<Buffer: IoWrite>(
     }));
     meta.attributes
         .insert(key_pool.get_or_insert("int"), Reg::Ref(int));
+
+    let int = pool.alloc(new_f(|_, parameters: &[Reg], _| {
+        if parameters.len() != 1 {
+            return Err(format!(
+                "Expected 1 parameter while {} is provided",
+                parameters.len()
+            ));
+        }
+        match parameters[0] {
+            Reg::Float(f) => Ok(Reg::Float(f.round())),
+            _ => Err("Expected type `Float`".to_string()),
+        }
+    }));
+    meta.attributes
+        .insert(key_pool.get_or_insert("round"), Reg::Ref(int));
 
     let floor = pool.alloc(new_f(|_, parameters: &[Reg], _| {
         if parameters.len() != 1 {
@@ -212,7 +227,7 @@ pub fn init_list_meta<Buffer: IoWrite>(
             Reg::Ref(id) => match unsafe { state.gc.get_obj_unchecked_mut(id) } {
                 GcObject::List(l) => {
                     l.clear();
-                    Ok(Reg::Unit)
+                    Ok(Reg::Ref(id))
                 }
                 _ => Err(()),
             },
@@ -235,7 +250,7 @@ pub fn init_list_meta<Buffer: IoWrite>(
             Reg::Ref(id) => match unsafe { state.gc.get_obj_unchecked_mut(id) } {
                 GcObject::List(l) => {
                     l.reverse();
-                    Ok(Reg::Unit)
+                    Ok(Reg::Ref(id))
                 }
                 _ => Err(()),
             },
@@ -258,7 +273,7 @@ pub fn init_list_meta<Buffer: IoWrite>(
             Reg::Ref(id) => match unsafe { state.gc.get_obj_unchecked_mut(id) } {
                 GcObject::List(l) => {
                     l.push(parameters[1].clone());
-                    Ok(Reg::Unit)
+                    Ok(Reg::Ref(id))
                 }
                 _ => Err(()),
             },
@@ -291,7 +306,7 @@ pub fn init_list_meta<Buffer: IoWrite>(
                         l.len() - (idx.unsigned_abs() as usize)
                     };
                     l.insert(index, parameters[2].clone());
-                    Ok(Reg::Unit)
+                    Ok(Reg::Ref(*id))
                 }
                 _ => Err(()),
             },
@@ -323,8 +338,8 @@ pub fn init_list_meta<Buffer: IoWrite>(
                     } else {
                         l.len() - (idx.unsigned_abs() as usize)
                     };
-                    let reg = l.remove(index);
-                    Ok(reg)
+                    l.remove(index);
+                    Ok(Reg::Ref(*id))
                 }
                 _ => Err(()),
             },

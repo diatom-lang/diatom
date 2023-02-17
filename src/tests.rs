@@ -15,3 +15,19 @@ fn test_examples() {
             .expect("Example test failed");
     }
 }
+
+#[test]
+fn test_overflow() {
+    let mut interpreter = Interpreter::new(vec![]);
+    interpreter
+        .exec_repl("Int::MIN.abs$()", false)
+        .expect("Test failed");
+}
+
+#[test]
+fn test_for_macro() {
+    let mut interpreter = Interpreter::new(vec![]);
+    interpreter
+        .exec_repl("fn = begin for i in 1..5 do end end", false)
+        .expect("Test failed");
+}

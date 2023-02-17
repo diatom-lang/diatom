@@ -23,10 +23,8 @@ assert$( l$[-2] == -1 )
 
 -- remove an item from a specific location
 -- panic is index out of bound
--- removed item is returned
 item = l.remove$(0)
 assert$( l$[0] == 5 )
-assert$( item == 10 )
 
 l.clear$()
 assert$( l.len$() == 0 )
