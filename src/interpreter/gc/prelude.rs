@@ -32,7 +32,7 @@ pub fn init_int_meta<Buffer: IoWrite>(
             ));
         }
         match parameters[0] {
-            Reg::Int(i) => Ok(Reg::Int(i64::abs(i))),
+            Reg::Int(i) => Ok(Reg::Int(i64::wrapping_abs(i))),
             _ => Err("Expected type `Int`".to_string()),
         }
     }));
@@ -109,6 +109,21 @@ pub fn init_float_meta<Buffer: IoWrite>(
     }));
     meta.attributes
         .insert(key_pool.get_or_insert("int"), Reg::Ref(int));
+    
+    let int = pool.alloc(new_f(|_, parameters: &[Reg], _| {
+        if parameters.len() != 1 {
+            return Err(format!(
+                "Expected 1 parameter while {} is provided",
+                parameters.len()
+            ));
+        }
+        match parameters[0] {
+            Reg::Float(f) => Ok(Reg::Float(f.round())),
+            _ => Err("Expected type `Float`".to_string()),
+        }
+    }));
+    meta.attributes
+        .insert(key_pool.get_or_insert("round"), Reg::Ref(int));
 
     let floor = pool.alloc(new_f(|_, parameters: &[Reg], _| {
         if parameters.len() != 1 {
