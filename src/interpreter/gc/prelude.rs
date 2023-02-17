@@ -109,7 +109,7 @@ pub fn init_float_meta<Buffer: IoWrite>(
     }));
     meta.attributes
         .insert(key_pool.get_or_insert("int"), Reg::Ref(int));
-    
+
     let int = pool.alloc(new_f(|_, parameters: &[Reg], _| {
         if parameters.len() != 1 {
             return Err(format!(
@@ -227,7 +227,7 @@ pub fn init_list_meta<Buffer: IoWrite>(
             Reg::Ref(id) => match unsafe { state.gc.get_obj_unchecked_mut(id) } {
                 GcObject::List(l) => {
                     l.clear();
-                    Ok(Reg::Unit)
+                    Ok(Reg::Ref(id))
                 }
                 _ => Err(()),
             },
@@ -250,7 +250,7 @@ pub fn init_list_meta<Buffer: IoWrite>(
             Reg::Ref(id) => match unsafe { state.gc.get_obj_unchecked_mut(id) } {
                 GcObject::List(l) => {
                     l.reverse();
-                    Ok(Reg::Unit)
+                    Ok(Reg::Ref(id))
                 }
                 _ => Err(()),
             },
@@ -273,7 +273,7 @@ pub fn init_list_meta<Buffer: IoWrite>(
             Reg::Ref(id) => match unsafe { state.gc.get_obj_unchecked_mut(id) } {
                 GcObject::List(l) => {
                     l.push(parameters[1].clone());
-                    Ok(Reg::Unit)
+                    Ok(Reg::Ref(id))
                 }
                 _ => Err(()),
             },
@@ -306,7 +306,7 @@ pub fn init_list_meta<Buffer: IoWrite>(
                         l.len() - (idx.unsigned_abs() as usize)
                     };
                     l.insert(index, parameters[2].clone());
-                    Ok(Reg::Unit)
+                    Ok(Reg::Ref(*id))
                 }
                 _ => Err(()),
             },
@@ -338,8 +338,8 @@ pub fn init_list_meta<Buffer: IoWrite>(
                     } else {
                         l.len() - (idx.unsigned_abs() as usize)
                     };
-                    let reg = l.remove(index);
-                    Ok(reg)
+                    l.remove(index);
+                    Ok(Reg::Ref(*id))
                 }
                 _ => Err(()),
             },

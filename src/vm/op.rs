@@ -143,7 +143,15 @@ impl Instruction for OpCall {
                                     });
                                 }
                             }
-                            Reg::Ref(_) => todo!(),
+                            Reg::Ref(rid) => {
+                                if gc.get_obj(rid).is_none() {
+                                    return Err(VmError::InvalidRef {
+                                        loc: self.loc.clone(),
+                                        t: "Reference",
+                                        id: rid,
+                                    });
+                                }
+                            }
                             _ => (),
                         }
                         if let Some(write_back) = self.write_back {
