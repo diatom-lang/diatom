@@ -984,6 +984,11 @@ impl Parser {
 
         loop {
             let op = match iter.peek2() {
+                // Allow [1,2,] format
+                (Some(Op(Comma)), Some(Op(RPar | RBrk | RBrc))) => {
+                    iter.next();
+                    break;
+                }
                 (Some(Op(Call)), op) => {
                     let op = match op {
                         Some(Op(LPar)) => OpPostfix::Call,
