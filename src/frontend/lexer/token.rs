@@ -113,8 +113,8 @@ pub enum Operator {
     RBrc,
     /// "::"
     DoubleColon,
-    /// $
-    Call,
+    /// ;
+    SemiColon,
     /// @
     At,
     /// <-
@@ -205,7 +205,7 @@ impl Display for Operator {
             Operator::LBrc => "{",
             Operator::RBrc => "}",
             Operator::DoubleColon => "::",
-            Operator::Call => "$",
+            Operator::SemiColon => ";",
             Operator::At => "@",
             Operator::LArrow => "<-",
         };

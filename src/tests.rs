@@ -20,7 +20,7 @@ fn test_examples() {
 fn test_overflow() {
     let mut interpreter = Interpreter::new(vec![]);
     interpreter
-        .exec_repl("Int::MIN.abs$()")
+        .exec_repl("Int::MIN.abs()")
         .expect("Test failed");
 }
 

@@ -7,6 +7,6 @@ f =
             a = x
         end
     end
-f$()
-x2$(10)
-assert$(x1$() == 10)
+f()
+x2(10)
+assert(x1() == 10)

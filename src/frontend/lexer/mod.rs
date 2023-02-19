@@ -491,7 +491,7 @@ impl Lexer {
                     ']' => Ok((Token::Op(Operator::RBrk), loc)),
                     '{' => Ok((Token::Op(Operator::LBrc), loc)),
                     '}' => Ok((Token::Op(Operator::RBrc), loc)),
-                    '$' => Ok((Token::Op(Operator::Call), loc)),
+                    ';' => Ok((Token::Op(Operator::SemiColon), loc)),
                     '|' => Ok((Token::Op(Operator::BitOr), loc)),
                     '@' => Ok((Token::Op(Operator::At), loc)),
                     c => Err((ErrorCode::InvalidOp(c), loc)),
@@ -555,9 +555,9 @@ mod tests {
         test_helper("0xffabcde", 0xffabcde, false);
         test_helper("0O999", 0, false);
         test_helper("123y", 123, false);
-        // This must not be parsed as a float as '123..int$()' is ambiguous
-        // It can be '123. ' then call 'int$()' on a float
-        // Also may be a range from '123' to 'int$()'
+        // This must not be parsed as a float as '123..int()' is ambiguous
+        // It can be '123. ' then call 'int()' on a float
+        // Also may be a range from '123' to 'int()'
         test_helper("123.", 123, false);
     }
 
@@ -649,7 +649,7 @@ mod tests {
                 a == 0 then return 1 else return 0
                 end end
             ß = fac(5) å = ß**3//0x11f |> fac 
-            set = {'s', 'ma\u00E9', 65e52, 0b00110} dict = {}.insert(('key', 98)) 
+            set = {'s', 'ma\u00E9', 65e52, 0b00110}; dict = {}.insert(('key', 98)) 
             🐶🐱 <> "Doa\x09 and cat'?'" 
             "#;
         test_str(code, false);

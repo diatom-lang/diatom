@@ -80,7 +80,7 @@ fn test_closure() {
             a = a + 1
         end
     end
-    f$()
+    f()
     "#,
         ""
     );
@@ -91,7 +91,7 @@ fn test_closure() {
     f = fn x = begin 
        a = x
     end
-    f$(3)
+    f(3)
     a
     "#,
         "3"
@@ -108,9 +108,9 @@ fn test_closure() {
             a = x
         end
     end
-    f$()
-    x2$(10)
-    assert$(x1$() == 10)
+    f()
+    x2(10)
+    assert(x1() == 10)
     "#,
         ""
     );
@@ -153,10 +153,10 @@ fn test_recursive() {
             if n <= 1 then
                 n
             else
-                fib$(n-1) + fib$(n-2)
+                fib(n-1) + fib(n-2)
             end
         end
-        fib$(10)
+        fib(10)
     "#,
         "55"
     );
@@ -164,7 +164,7 @@ fn test_recursive() {
 
 #[test]
 fn test_compile_with_target() {
-    test_ok!("def add a b = a + b end add$(add$(1,2), begin 3 end)", "6");
+    test_ok!("def add a b = a + b end add(add(1,2), begin 3 end)", "6");
 }
 
 #[test]
@@ -175,9 +175,9 @@ fn test_tuple() {
 
 #[test]
 fn test_method() {
-    test_ok!("a = {println = println} a::println$(1)", "1");
-    test_ok_ignore!("a = {println = println} a.println$(1)");
-    test_ok!("a = (1, println) a.1$(1)", "1");
+    test_ok!("a = {println = println} a::println(1)", "1");
+    test_ok_ignore!("a = {println = println} a.println(1)");
+    test_ok!("a = (1, println) a.1(1)", "1");
 }
 
 #[test]
@@ -186,18 +186,18 @@ fn test_meta_table() {
         r#"
         meta_table = {name = 'abc'}
         table = {} <- meta_table
-        assert$(table.name == 'abc')
+        assert(table.name == 'abc')
     "#
     );
 }
 
 #[test]
 fn test_list() {
-    test_ok!("a = [1,2,3] a$[0]", "1");
-    test_ok!("a = [1,2,3] a$[2]", "3");
-    test_ok!("a = [1,2,3] a$[-1]", "3");
-    test_ok!("a = [1,2,3] a$[-3]", "1");
-    test_err!("a = [1,2,3] a$[-4]");
-    test_err!("a = [1,2,3] a$[3]");
-    test_err!("a = [] a$[0]");
+    test_ok!("a = [1,2,3] a[0]", "1");
+    test_ok!("a = [1,2,3] a[2]", "3");
+    test_ok!("a = [1,2,3] a[-1]", "3");
+    test_ok!("a = [1,2,3] a[-3]", "1");
+    test_err!("a = [1,2,3] a[-4]");
+    test_err!("a = [1,2,3] a[3]");
+    test_err!("a = [] a[0]");
 }

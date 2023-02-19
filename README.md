@@ -84,15 +84,14 @@ Work in progress.
 ## Feature Showcase
 
 #### Functional style std-lib
-<img width="547" alt="Screenshot 2023-02-19 at 5 26 45 PM" src="https://user-images.githubusercontent.com/63455223/219940116-b313caed-f86b-474d-94fc-2618d196377e.png">
+<img width="890" alt="Screenshot 2023-02-19 at 10 23 38 PM" src="https://user-images.githubusercontent.com/63455223/219954981-47d4e2c9-cbac-4f5d-af07-43556ed36ec9.png">
 
 #### Pretty error reporting and trace-back
-<img width="762" alt="Screenshot 2023-02-19 at 5 26 17 PM" src="https://user-images.githubusercontent.com/63455223/219940145-044e9094-f840-4929-a5b2-0405955bf4d4.png">
+<img width="885" alt="Screenshot 2023-02-19 at 10 00 53 PM" src="https://user-images.githubusercontent.com/63455223/219954955-1c6b4e10-2549-4184-a39a-70f71fcde29a.png">
 
 #### Expression based syntax
-<img width="792" alt="Screenshot 2023-02-19 at 5 29 19 PM" src="https://user-images.githubusercontent.com/63455223/219940155-f5295365-869a-41d9-826d-279ca4b7b0a0.png">
+<img width="889" alt="Screenshot 2023-02-19 at 10 25 16 PM" src="https://user-images.githubusercontent.com/63455223/219954993-c5d4f493-3d40-474e-a777-27d2f207511e.png">
 
 #### Interactive REPL console with **syntax highlight**
- <img width="757" alt="Screenshot 2023-02-19 at 5 35 11 PM" src="https://user-images.githubusercontent.com/63455223/219940243-9572869b-5089-464e-a233-4dca3ea306a2.png">
-
+<img width="890" alt="Screenshot 2023-02-19 at 10 26 39 PM" src="https://user-images.githubusercontent.com/63455223/219955007-f2ebaebc-1265-4cf1-95f1-297825e5fed7.png">
 

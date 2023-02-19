@@ -8,4 +8,4 @@ f =
             'x<=4'
         end
 
-assert$(f$(0) == 'x<=4')
+assert(f(0) == 'x<=4')

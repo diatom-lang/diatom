@@ -126,7 +126,7 @@ pub struct Func {
 /// let mut interpreter = Interpreter::with_color(std::io::stdout());
 /// // Execute source code
 /// let output = interpreter.exec(
-///     "print$('Hello, world!')",
+///     "print('Hello, world!')",
 ///     Default::default()
 ///     ).unwrap();
 /// ```
@@ -156,7 +156,7 @@ pub struct Func {
 /// });
 ///
 /// // change value to 5
-/// interpreter.exec("set_value$(5)", Default::default()).unwrap();
+/// interpreter.exec("set_value(5)", Default::default()).unwrap();
 /// assert_eq!(value.get(), 5);
 /// ```
 pub struct Interpreter<Buffer: IoWrite> {
@@ -258,7 +258,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     ///     }
     /// );
     ///
-    /// interpreter.exec("hello_world$()", Default::default()).unwrap();
+    /// interpreter.exec("hello_world()", Default::default()).unwrap();
     /// let output = interpreter.replace_buffer(Vec::<u8>::new());
     /// let output = String::from_utf8(output).unwrap();
     /// assert_eq!(output, "Hello, world!")
@@ -753,7 +753,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 body,
             } => {
                 let iter = self.registers.gen_sym();
-                // iter = iterator.__iter$()
+                // iter = iterator.__iter()
                 let loop_init_expr = Expr::Infix {
                     loc: iterator.get_loc(),
                     op: OpInfix::Assign,
@@ -784,7 +784,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 let mut loop_body = vec![];
                 let loop_sym = self.registers.gen_sym();
                 // loop body
-                // loop_sym = iter.__next$()
+                // loop_sym = iter.__next()
                 loop_body.push(Stmt::Expr {
                     loc: loc.clone(),
                     expr: Expr::Infix {
@@ -973,7 +973,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 lhs,
                 rhs,
             } => {
-                // Range$(lhs, rhs)
+                // Range(lhs, rhs)
                 let expr = Expr::Call {
                     loc: loc.clone(),
                     lhs: Box::new(Expr::Id {
@@ -985,7 +985,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 self.compile_expr(&expr, false, target)
             }
             Expr::OpenRange { loc, lhs } => {
-                // Range$(lhs, rhs)
+                // Range(lhs, rhs)
                 let rhs = Expr::Const {
                     loc: loc.clone(),
                     value: Const::Int(i64::MAX),
