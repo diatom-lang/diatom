@@ -1,7 +1,8 @@
+use crossterm::tty::IsTty;
 use diatom::Interpreter;
 use std::{fs, io, path::PathBuf};
 
-use clap::Parser;
+use clap::{ColorChoice, Parser};
 
 #[cfg(feature = "console")]
 mod console;
@@ -19,9 +20,8 @@ pub use console::Console;
 {all-args}{after-help}
 ")]
 struct Args {
-    #[arg(long)]
-    /// Disable colored output
-    no_color: bool,
+    #[arg(long, default_value_t = ColorChoice::Auto)]
+    color: ColorChoice,
     #[arg(short, long)]
     /// Show decompiled bytecode instead of execution
     inspect: bool,
@@ -32,10 +32,21 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
+    let color = match args.color {
+        ColorChoice::Auto => io::stdout().is_tty(),
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+    };
+    let mut interpreter = if color {
+        Interpreter::with_color(io::stdout())
+    } else {
+        Interpreter::new(io::stdout())
+    };
+
     match (&args.path, args.inspect) {
         #[cfg(feature = "console")]
         (None, inspect) => {
-            let mut console = Console::new(!args.no_color);
+            let mut console = Console::new(interpreter);
             console.run(inspect);
         }
         #[cfg(not(feature = "console"))]
@@ -44,16 +55,14 @@ fn main() {
         }
         (Some(path), false) => {
             let code = fs::read_to_string(path).expect("Error: File can not be read!");
-            let mut interpreter = Interpreter::new(io::stdout());
-            match interpreter.exec(code, path.as_os_str(), !args.no_color) {
+            match interpreter.exec(code, path.as_os_str()) {
                 Ok(_) => (),
                 Err(s) => print!("{s}"),
             };
         }
         (Some(path), true) => {
             let code = fs::read_to_string(path).expect("Error: File can not be read!");
-            let mut interpreter = Interpreter::new(io::stdout());
-            let result = match interpreter.decompile(code, path.as_os_str(), !args.no_color) {
+            let result = match interpreter.decompile(code, path.as_os_str()) {
                 Ok(s) | Err(s) => s,
             };
             print!("{result}");

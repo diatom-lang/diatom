@@ -1,20 +1,27 @@
 use std::str::Chars;
 
-use crate::diagnostic::Loc;
+use crate::file_manager::Loc;
 
 use super::Token;
 
 pub struct FileIterator<'a> {
     offset: usize,
     iterator: Chars<'a>,
+    fid: usize,
 }
 
 impl<'a> FileIterator<'a> {
-    pub fn new(file_content: &'a str) -> Self {
+    pub fn new(file: &'a str, fid: usize) -> Self {
         Self {
             offset: 0,
-            iterator: file_content.chars(),
+            iterator: file.chars(),
+            fid,
         }
+    }
+
+    /// Return file id
+    pub fn fid(&self) -> usize {
+        self.fid
     }
 
     /// Return next character. Useful to lookahead.
@@ -63,7 +70,11 @@ impl<'a> TokenIterator<'a> {
     pub fn new(vec: &'a [(Token, Loc)]) -> Self {
         TokenIterator {
             iter: vec.iter(),
-            loc: 0..0,
+            loc: Loc {
+                start: 0,
+                end: 0,
+                fid: usize::MAX,
+            },
         }
     }
 

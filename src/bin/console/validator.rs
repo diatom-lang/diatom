@@ -7,7 +7,7 @@ pub struct DiatomValidator;
 
 impl Validator for DiatomValidator {
     fn validate(&self, line: &str) -> ValidationResult {
-        if Interpreter::new(vec![]).verify_input_completeness(line) {
+        if Interpreter::<Vec<u8>>::verify_input_completeness(line) {
             ValidationResult::Complete
         } else {
             ValidationResult::Incomplete

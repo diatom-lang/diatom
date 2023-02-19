@@ -1,6 +1,6 @@
 use ahash::AHashMap;
 
-use crate::diagnostic::Loc;
+use crate::file_manager::Loc;
 
 use super::FutureJump;
 
@@ -30,8 +30,8 @@ pub struct Loop {
 #[derive(Clone)]
 pub struct RegisterTable {
     pub prev: Option<Box<RegisterTable>>,
-    /// name, location, is_defined_in_current_repl
-    pub variables: AHashMap<String, (usize, Option<Loc>, bool)>,
+    /// name, location
+    pub variables: AHashMap<String, (usize, Option<Loc>)>,
     free: Vec<usize>,
     pub assigned: usize,
     pub func_id: usize,
@@ -73,8 +73,7 @@ impl RegisterTable {
 
     pub fn declare_variable(&mut self, name: impl AsRef<str>, loc: Option<Loc>) -> usize {
         let id = self.declare_intermediate();
-        self.variables
-            .insert(name.as_ref().to_string(), (id, loc, true));
+        self.variables.insert(name.as_ref().to_string(), (id, loc));
         id
     }
 
@@ -84,19 +83,14 @@ impl RegisterTable {
     pub fn declare_captured_variable(&mut self, name: impl AsRef<str>, loc: Option<Loc>) -> usize {
         let id = self.assigned;
         self.assigned += 1;
-        self.variables
-            .insert(name.as_ref().to_string(), (id, loc, true));
+        self.variables.insert(name.as_ref().to_string(), (id, loc));
         id
     }
     /// (reg_id, depth, loc)
-    fn lookup_variable_(
-        &self,
-        name: &str,
-        depth: usize,
-    ) -> Option<(usize, usize, Option<Loc>, bool)> {
+    fn lookup_variable_(&self, name: &str, depth: usize) -> Option<(usize, usize, Option<Loc>)> {
         let var = self.variables.get(name);
         match var {
-            Some((id, loc, define_in_scope)) => Some((*id, depth, loc.clone(), *define_in_scope)),
+            Some((id, loc)) => Some((*id, depth, loc.clone())),
             None => match &self.prev {
                 Some(prev) => prev.lookup_variable_(name, depth + 1),
                 None => None,
@@ -104,11 +98,8 @@ impl RegisterTable {
         }
     }
 
-    /// Return (reg_id, depth, loc, is_defined_in_current_repl)
-    pub fn lookup_variable(
-        &self,
-        name: impl AsRef<str>,
-    ) -> Option<(usize, usize, Option<Loc>, bool)> {
+    /// Return (reg_id, depth, loc)
+    pub fn lookup_variable(&self, name: impl AsRef<str>) -> Option<(usize, usize, Option<Loc>)> {
         self.lookup_variable_(name.as_ref(), 0)
     }
 
@@ -145,17 +136,5 @@ impl RegisterTable {
         let prev = *std::mem::take(&mut self.prev).unwrap();
         let pop = std::mem::replace(self, prev);
         pop.capture
-    }
-
-    /// Invalidate variable definition location
-    ///
-    /// Use this function when move to a new repl ast
-    pub fn invalidate_define(&mut self) {
-        self.variables
-            .iter_mut()
-            .for_each(|(_, value)| value.2 = false);
-        if let Some(rt) = self.prev.as_mut() {
-            rt.invalidate_define()
-        }
     }
 }

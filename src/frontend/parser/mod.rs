@@ -3,25 +3,20 @@ mod error;
 #[cfg(test)]
 mod tests;
 
-use crate::diagnostic::{DisplayableOsString, Loc, SharedFile};
+use crate::file_manager::{Diagnostic, FileManager, Loc};
 
-use self::error::{to_diagnostic, ErrorCode};
+use self::error::ErrorCode;
 
 use super::{
     lexer::{Keyword, Operator, Token},
     util::TokenIterator,
     Lexer,
 };
-use ahash::AHashMap;
-use ast::{Ast, Const, Expr, OpInfix, OpPostfix, OpPrefix, Stmt};
-use lazy_static::lazy_static;
-use regex::Regex;
-use std::{
-    ffi::{OsStr, OsString},
-    fs,
-    mem::Discriminant,
-    path::{Path, PathBuf},
-};
+
+use ast::{Const, Expr, OpInfix, OpPostfix, OpPrefix, Stmt};
+use codespan_reporting::diagnostic::Label;
+use either::Either;
+use std::{ffi::OsStr, mem::Discriminant};
 
 const fn precedence_infix(op: OpInfix) -> (u16, u16) {
     use OpInfix::*;
@@ -59,7 +54,10 @@ macro_rules! expr_start_pattern {
                 | Keyword::Begin
                 | Keyword::True
                 | Keyword::False,
-        ) | Token::Op(_)
+        ) | Token::Op(Operator::LBrc)
+            | Token::Op(Operator::LBrk)
+            | Token::Op(Operator::LPar)
+            | Token::Op(Operator::Minus)
             | Token::Id(_)
             | Token::Integer(_)
             | Token::Float(_)
@@ -68,173 +66,44 @@ macro_rules! expr_start_pattern {
 }
 
 /// The parser for Diatom.
-pub struct Parser {
-    search_path: Vec<PathBuf>,
-    relative_search_path: Option<PathBuf>,
-    modules: AHashMap<OsString, Ast>,
+pub struct Parser<'a> {
+    file_manager: &'a mut FileManager,
+    fid: usize,
 }
 
-impl Parser {
-    pub fn new() -> Self {
+impl<'a> Parser<'a> {
+    pub fn new(file_manager: &'a mut FileManager) -> Self {
         Self {
-            search_path: vec![],
-            relative_search_path: None,
-            modules: AHashMap::new(),
+            file_manager,
+            fid: 0,
         }
     }
 
-    /// add module search path
-    pub fn _with_path(mut self, path: PathBuf) -> Self {
-        self.search_path.push(path);
-        self
-    }
-
-    /// Get all loaded modules
-    pub fn _modules(&self) -> &AHashMap<OsString, Ast> {
-        &self.modules
-    }
-
-    /// Parse a string and append to current parse tree
-    ///
-    /// This function does not modify search path
-    pub fn parse_str(&mut self, path: &OsStr, content: &str) -> Ast {
-        let content = SharedFile::from_str(content);
-        let mut ast = Ast::new(path.to_os_string(), content);
-        let token_stream = Lexer::lex(&mut ast);
-        let mut iter = token_stream.iter();
-
-        while iter.peek().is_some() {
-            let stmt = self.consume_stmt(&mut iter, &mut ast, None);
-            ast.statements.push(stmt);
-        }
-        ast
-    }
-
-    /// Parse a file and temporarily add its root to search path
-    ///
-    /// Note that this function assumes the path is a valid path to the file
-    fn parse_file(&mut self, path: &OsStr, content: SharedFile) -> Ast {
-        let mut ast = Ast::new(path.to_os_string(), content);
-        let token_stream = Lexer::lex(&mut ast);
-        let mut iter = token_stream.iter();
-        let prev_relative_path = self.relative_search_path.replace(
-            Path::new(path)
-                .parent()
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Internal error: Call parse file without a valid path! path: {}",
-                        path.to_str().unwrap_or("Can not display")
-                    )
-                })
-                .to_path_buf(),
-        );
-
-        while iter.peek().is_some() {
-            let stmt = self.consume_stmt(&mut iter, &mut ast, None);
-            ast.statements.push(stmt);
-        }
-        self.relative_search_path = prev_relative_path;
-        ast
-    }
-
-    fn consume_require(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Expr {
-        use Token::*;
-        iter.next();
-        let start = iter.loc();
-        let mod_paths = if let Some(Str(s)) = iter.peek() {
-            let s = s.clone();
-            iter.next();
-            lazy_static! {
-                static ref RE: Regex = Regex::new("^[\\.\\-0-9a-zA-Z_]*$").unwrap();
+    /// Parse a file or input from other source
+    pub fn parse_file(&mut self, file: Either<(&OsStr, impl Into<String>), &OsStr>) -> Vec<Stmt> {
+        let token_stream = match file {
+            Either::Left((path, content)) => {
+                let fid = self.file_manager.add_file(path, content.into());
+                self.fid = fid;
+                Lexer::lex(self.file_manager, fid)
             }
-            let s_split = s.split('.').map(|x| x.to_string()).collect::<Vec<_>>();
-            if !RE.is_match(&s) || s_split.is_empty() || s.starts_with('.') | s.ends_with('.') {
-                ast.add_diagnostic(to_diagnostic(ErrorCode::InvalidModuleString, iter.loc()));
-                return Expr::Error;
-            };
-            s_split
-        } else {
-            ast.add_diagnostic(to_diagnostic(
-                ErrorCode::RequireWrongArgument,
-                iter.next_loc(),
-            ));
-            return Expr::Error;
+            Either::Right(_) => todo!(),
         };
-        // search for file
-        let mut search_path = self.search_path.clone();
-        if let Some(path) = &self.relative_search_path {
-            search_path.insert(0, path.clone());
+        let mut iter = token_stream.iter();
+        let mut stmts = vec![];
+
+        while iter.peek().is_some() {
+            let stmt = self.consume_stmt(&mut iter, None);
+            stmts.push(stmt);
         }
-        for mut path in search_path {
-            mod_paths.iter().for_each(|s| path.push(s));
-            fn check_path(path: &Path) -> Option<SharedFile> {
-                let path = match fs::canonicalize(path) {
-                    Ok(path) => path,
-                    Err(_) => return None,
-                };
-
-                SharedFile::new(path.as_os_str()).ok()
-            }
-
-            let mut file;
-            let mut file_path = path.clone();
-            file_path.set_extension("dm");
-            file = check_path(file_path.as_path());
-
-            if file.is_none() {
-                path.push("mod.dm");
-                file = check_path(path.as_path());
-            } else {
-                path = file_path;
-            }
-
-            let content = match file {
-                Some(file) => file,
-                None => continue,
-            };
-
-            // Check if module is cached
-            if self.modules.get(path.as_os_str()).is_none() {
-                // Prevent infinite recursion
-                self.modules.insert(
-                    path.as_os_str().to_os_string(),
-                    Ast::new(OsString::new(), SharedFile::from_str("")),
-                );
-                let mod_ast = self.parse_file(path.as_os_str(), content);
-                if mod_ast.diagnoser.error_count() > 0 {
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::InvalidModule, iter.loc()));
-                    self.modules.remove(path.as_os_str());
-                } else {
-                    self.modules
-                        .insert(path.as_os_str().to_os_string(), mod_ast);
-                }
-            }
-
-            return Expr::Module {
-                loc: start.start..iter.loc().end,
-                path: DisplayableOsString::new(path.as_os_str().to_os_string()),
-            };
-        }
-
-        ast.add_diagnostic(to_diagnostic(
-            ErrorCode::ModuleNotFound(
-                mod_paths
-                    .last()
-                    .expect("At least one should exists")
-                    .clone(),
-            ),
-            iter.loc(),
-        ));
-
-        Expr::Error
+        stmts
     }
 
-    fn consume_stmt(
-        &mut self,
-        iter: &mut TokenIterator,
-        ast: &mut Ast,
-        not_take_on_error: Option<Token>,
-    ) -> Stmt {
+    fn consume_require(&mut self, _iter: &mut TokenIterator) -> Expr {
+        todo!()
+    }
+
+    fn consume_stmt(&mut self, iter: &mut TokenIterator, not_take_on_error: Option<Token>) -> Stmt {
         use Keyword::*;
         use Token::*;
         let start = iter.next_loc();
@@ -251,10 +120,10 @@ impl Parser {
                 iter.next();
                 match iter.peek() {
                     Some(expr_start_pattern!()) => {
-                        let expr = self.consume_expr(iter, ast, 0, not_take_on_error);
+                        let expr = self.consume_expr(iter, 0, not_take_on_error);
                         let end = iter.loc();
                         Stmt::Return {
-                            loc: start.start..end.end,
+                            loc: start + end,
                             value: Some(expr),
                         }
                     }
@@ -264,28 +133,25 @@ impl Parser {
                     },
                 }
             }
-            Some(Key(Def)) => self.consume_def(iter, ast),
+            Some(Key(Def)) => self.consume_def(iter),
             Some(expr_start_pattern!()) => {
-                let expr = self.consume_expr(iter, ast, 0, not_take_on_error);
+                let expr = self.consume_expr(iter, 0, not_take_on_error);
                 let end = iter.loc();
                 Stmt::Expr {
-                    loc: start.start..end.end,
+                    loc: start + end,
                     expr,
                 }
             }
-            Some(Key(Loop | Until)) => self.consume_loop(iter, ast),
-            Some(Key(For)) => self.consume_for(iter, ast),
+            Some(Key(Loop | Until)) => self.consume_loop(iter),
+            Some(Key(For)) => self.consume_for(iter),
             Some(token) => {
                 let token = token.clone();
                 iter.next();
-                ast.add_diagnostic(to_diagnostic(
-                    ErrorCode::UnexpectedToken(Some(token), None, None),
-                    start,
-                ));
+                self.add_diagnostic(ErrorCode::UnexpectedToken(Some(token), None, None), start);
                 Stmt::Error
             }
             None => {
-                ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, start));
+                self.add_diagnostic(ErrorCode::UnexpectedEof, start);
                 Stmt::Error
             }
         }
@@ -298,7 +164,6 @@ impl Parser {
     fn consume_to_op(
         &mut self,
         iter: &mut TokenIterator,
-        ast: &mut Ast,
         expected: Operator,
         previous: Option<(Token, Loc)>,
     ) -> bool {
@@ -318,10 +183,10 @@ impl Parser {
         } else {
             let t = iter.next().cloned();
             let loc_now = iter.loc();
-            ast.add_diagnostic(to_diagnostic(
+            self.add_diagnostic(
                 ErrorCode::UnexpectedToken(t, Some(Token::Op(expected)), previous),
                 loc_now,
-            ));
+            );
         }
         loop {
             if test_match(op_type, iter) {
@@ -331,7 +196,7 @@ impl Parser {
             match iter.next() {
                 Some(_) => (),
                 None => {
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
                     return true;
                 }
             }
@@ -345,7 +210,6 @@ impl Parser {
     fn consume_to_key(
         &mut self,
         iter: &mut TokenIterator,
-        ast: &mut Ast,
         expected: Keyword,
         previous: Option<(Token, Loc)>,
     ) -> bool {
@@ -365,10 +229,10 @@ impl Parser {
         } else {
             let t = iter.next().cloned();
             let loc_now = iter.loc();
-            ast.add_diagnostic(to_diagnostic(
+            self.add_diagnostic(
                 ErrorCode::UnexpectedToken(t, Some(Token::Key(expected)), previous),
                 loc_now,
-            ));
+            );
         }
         loop {
             if test_match(key_type, iter) {
@@ -378,35 +242,35 @@ impl Parser {
             match iter.next() {
                 Some(_) => (),
                 None => {
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
                     return true;
                 }
             }
         }
     }
 
-    fn consume_condition_then(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Option<Expr> {
+    fn consume_condition_then(&mut self, iter: &mut TokenIterator) -> Option<Expr> {
         use Keyword::*;
         use Token::*;
         let start = iter.loc();
         // match `condition`
-        let condition = self.consume_expr(iter, ast, 0, Some(Key(Then)));
+        let condition = self.consume_expr(iter, 0, Some(Key(Then)));
         // match `then`
-        if !self.consume_to_key(iter, ast, Then, Some((Key(If), start))) {
+        if !self.consume_to_key(iter, Then, Some((Key(If), start))) {
             Some(condition)
         } else {
             None
         }
     }
 
-    fn consume_if(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Expr {
+    fn consume_if(&mut self, iter: &mut TokenIterator) -> Expr {
         use Keyword::*;
         use Token::*;
         iter.next();
         let start = iter.loc();
         let mut conditional = vec![];
         let mut condition;
-        match self.consume_condition_then(iter, ast) {
+        match self.consume_condition_then(iter) {
             Some(expr) => condition = expr,
             None => {
                 return Expr::Error;
@@ -418,7 +282,7 @@ impl Parser {
             match iter.peek() {
                 Some(Key(Elsif)) => {
                     iter.next();
-                    match self.consume_condition_then(iter, ast) {
+                    match self.consume_condition_then(iter) {
                         Some(expr) => {
                             conditional.push((condition, block));
                             condition = expr;
@@ -439,18 +303,18 @@ impl Parser {
                                 iter.next();
                                 let end = iter.loc();
                                 return Expr::If {
-                                    loc: start.start..end.end,
+                                    loc: start + end,
                                     conditional,
                                     default: Some(block),
                                 };
                             }
                             Some(_) => {
-                                let stmt = self.consume_stmt(iter, ast, Some(Key(End)));
+                                let stmt = self.consume_stmt(iter, Some(Key(End)));
                                 block.push(stmt);
                             }
                             None => {
                                 let end = iter.loc();
-                                ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, end));
+                                self.add_diagnostic(ErrorCode::UnexpectedEof, end);
                                 return Expr::Error;
                             }
                         }
@@ -461,39 +325,39 @@ impl Parser {
                     iter.next();
                     let end = iter.loc();
                     return Expr::If {
-                        loc: start.start..end.end,
+                        loc: start + end,
                         conditional,
                         default: None,
                     };
                 }
                 Some(_) => {
-                    let stmt = self.consume_stmt(iter, ast, Some(Key(Else)));
+                    let stmt = self.consume_stmt(iter, Some(Key(Else)));
                     block.push(stmt);
                 }
                 None => {
                     let end = iter.loc();
-                    ast.add_diagnostic(to_diagnostic(
+                    self.add_diagnostic(
                         ErrorCode::UnexpectedToken(None, Some(Key(Else)), Some((Key(If), start))),
                         end,
-                    ));
+                    );
                     return Expr::Error;
                 }
             }
         }
     }
 
-    fn consume_for(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Stmt {
+    fn consume_for(&mut self, iter: &mut TokenIterator) -> Stmt {
         use Keyword::*;
         use Token::*;
         iter.next();
         let start = iter.loc();
-        let vars = self.consume_expr(iter, ast, 0, Some(Key(In)));
+        let vars = self.consume_expr(iter, 0, Some(Key(In)));
         // Consume "in"
-        if self.consume_to_key(iter, ast, In, Some((Key(For), start.clone()))) {
+        if self.consume_to_key(iter, In, Some((Key(For), start.clone()))) {
             return Stmt::Error;
         };
-        let iterator = self.consume_expr(iter, ast, 0, Some(Key(Do)));
-        if self.consume_to_key(iter, ast, Do, Some((Key(For), start.clone()))) {
+        let iterator = self.consume_expr(iter, 0, Some(Key(Do)));
+        if self.consume_to_key(iter, Do, Some((Key(For), start.clone()))) {
             return Stmt::Error;
         };
         let mut body = vec![];
@@ -502,22 +366,22 @@ impl Parser {
                 Some(Key(End)) => {
                     iter.next();
                     return Stmt::For {
-                        loc: start.start..iter.loc().end,
+                        loc: start + iter.loc(),
                         loop_variable: Box::new(vars),
                         iterator: Box::new(iterator),
                         body,
                     };
                 }
-                Some(_) => body.push(self.consume_stmt(iter, ast, Some(Key(End)))),
+                Some(_) => body.push(self.consume_stmt(iter, Some(Key(End)))),
                 None => {
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
                     return Stmt::Error;
                 }
             }
         }
     }
 
-    fn consume_loop(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Stmt {
+    fn consume_loop(&mut self, iter: &mut TokenIterator) -> Stmt {
         use Keyword::*;
         use Token::*;
         let key = iter.next().cloned();
@@ -525,11 +389,11 @@ impl Parser {
         let condition = match key {
             Some(Key(Loop)) => None,
             Some(Key(Until)) => {
-                let stmt = self.consume_expr(iter, ast, 0, None);
+                let stmt = self.consume_expr(iter, 0, None);
                 if matches!(iter.peek(), None) {
                     return Stmt::Error;
                 };
-                if self.consume_to_key(iter, ast, Do, Some((Key(Until), start.clone()))) {
+                if self.consume_to_key(iter, Do, Some((Key(Until), start.clone()))) {
                     return Stmt::Error;
                 };
                 Some(stmt)
@@ -542,21 +406,21 @@ impl Parser {
                 Some(Key(End)) => {
                     iter.next();
                     return Stmt::Loop {
-                        loc: start.start..iter.loc().end,
+                        loc: start + iter.loc(),
                         condition,
                         body,
                     };
                 }
-                Some(_) => body.push(self.consume_stmt(iter, ast, Some(Key(End)))),
+                Some(_) => body.push(self.consume_stmt(iter, Some(Key(End)))),
                 None => {
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
                     return Stmt::Error;
                 }
             }
         }
     }
 
-    fn consume_fn(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Expr {
+    fn consume_fn(&mut self, iter: &mut TokenIterator) -> Expr {
         use Keyword::*;
         use Operator::*;
         use Token::*;
@@ -574,58 +438,37 @@ impl Parser {
                     break;
                 }
                 Some(token) => {
-                    ast.add_diagnostic(to_diagnostic(
+                    self.add_diagnostic(
                         ErrorCode::UnexpectedToken(
                             Some(token.clone()),
                             Some(Id("<parameter>".to_string())),
                             Some((Key(Fn), start.clone())),
                         ),
                         iter.loc(),
-                    ));
+                    );
                     iter.next();
                 }
                 None => {
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
                     return Expr::Error;
                 }
             }
         }
-        let expr = self.consume_expr(iter, ast, 3, None);
+        let expr = self.consume_expr(iter, 3, None);
         Expr::Fn {
-            loc: start.start..iter.loc().end,
+            loc: start + iter.loc(),
             parameters,
             body: Box::new(expr),
         }
     }
 
-    fn consume_def(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Stmt {
+    fn consume_def(&mut self, iter: &mut TokenIterator) -> Stmt {
         use Keyword::*;
         use Operator::*;
         use Token::*;
         iter.next();
         let start = iter.loc();
-        let name = match iter.peek() {
-            Some(Id(name)) => {
-                let name = name.clone();
-                iter.next();
-                Some(name)
-            }
-            Some(token) => {
-                ast.add_diagnostic(to_diagnostic(
-                    ErrorCode::UnexpectedToken(
-                        Some(token.clone()),
-                        Some(Id("<function name>".to_string())),
-                        Some((Key(Def), start.clone())),
-                    ),
-                    start.clone(),
-                ));
-                None
-            }
-            None => {
-                ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
-                return Stmt::Error;
-            }
-        };
+        let variable = self.consume_expr(iter, 23, None);
         let mut parameters = vec![];
         loop {
             match iter.peek() {
@@ -640,14 +483,14 @@ impl Parser {
                     break;
                 }
                 Some(token) => {
-                    ast.add_diagnostic(to_diagnostic(
+                    self.add_diagnostic(
                         ErrorCode::UnexpectedToken(Some(token.clone()), None, None),
                         iter.next_loc(),
-                    ));
+                    );
                     iter.next();
                 }
                 None => {
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
                     return Stmt::Error;
                 }
             }
@@ -657,27 +500,23 @@ impl Parser {
             match iter.peek() {
                 Some(Key(End)) => {
                     iter.next();
-                    return if let Some(name) = name {
-                        Stmt::Def {
-                            loc: start.start..iter.loc().end,
-                            name,
-                            parameters,
-                            body,
-                        }
-                    } else {
-                        Stmt::Error
+                    return Stmt::Def {
+                        loc: start + iter.loc(),
+                        variable: Box::new(variable),
+                        parameters,
+                        body,
                     };
                 }
-                Some(_) => body.push(self.consume_stmt(iter, ast, Some(Token::Key(Keyword::End)))),
+                Some(_) => body.push(self.consume_stmt(iter, Some(Token::Key(Keyword::End)))),
                 None => {
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, iter.loc()));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
                     return Stmt::Error;
                 }
             }
         }
     }
 
-    fn consume_block(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Expr {
+    fn consume_block(&mut self, iter: &mut TokenIterator) -> Expr {
         iter.next();
         let start = iter.loc();
         let mut body: Vec<Stmt> = vec![];
@@ -687,24 +526,24 @@ impl Parser {
                     iter.next();
                     let end = iter.loc();
                     return Expr::Block {
-                        loc: start.start..end.end,
+                        loc: start + end,
                         body,
                     };
                 }
                 Some(_) => {
-                    let stmt = self.consume_stmt(iter, ast, Some(Token::Key(Keyword::End)));
+                    let stmt = self.consume_stmt(iter, Some(Token::Key(Keyword::End)));
                     body.push(stmt);
                 }
                 None => {
                     let end = iter.loc();
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, end));
+                    self.add_diagnostic(ErrorCode::UnexpectedEof, end);
                     return Expr::Error;
                 }
             }
         }
     }
 
-    fn consume_table(&mut self, iter: &mut TokenIterator, ast: &mut Ast) -> Expr {
+    fn consume_table(&mut self, iter: &mut TokenIterator) -> Expr {
         use Operator::*;
         use Token::*;
         iter.next();
@@ -714,13 +553,13 @@ impl Parser {
             iter.next();
             let end = iter.loc();
             return Expr::Const {
-                loc: start.start..end.end,
+                loc: start + end,
                 value: Const::Table(vec![]),
             };
         }
-        let mut key_vals: Vec<(String, Expr, std::ops::Range<usize>)> = vec![];
-        let mut content = self.consume_expr(iter, ast, 0, Some(Op(RBrc)));
-        if self.consume_to_op(iter, ast, RBrc, Some((Op(LBrc), start.clone()))) {
+        let mut key_vals: Vec<(String, Expr, Loc)> = vec![];
+        let mut content = self.consume_expr(iter, 0, Some(Op(RBrc)));
+        if self.consume_to_op(iter, RBrc, Some((Op(LBrc), start.clone()))) {
             return Expr::Error;
         };
 
@@ -736,20 +575,17 @@ impl Parser {
                     let (name, name_loc) = match lhs {
                         Expr::Id { loc, name } => (name, loc),
                         _ => {
-                            ast.add_diagnostic(to_diagnostic(
-                                ErrorCode::InvalidTableKey,
-                                lhs.get_loc(),
-                            ));
+                            self.add_diagnostic(ErrorCode::InvalidTableKey, lhs.get_loc());
                             return Expr::Error;
                         }
                     };
                     if let Some((name, _, prev_loc)) =
                         key_vals.iter().find(|(prev, _, _)| prev == &name)
                     {
-                        ast.add_diagnostic(to_diagnostic(
+                        self.add_diagnostic(
                             ErrorCode::DuplicateKey(prev_loc.clone(), name.clone()),
                             name_loc,
-                        ));
+                        );
                         return Expr::Error;
                     }
                     key_vals.push((name, *rhs, loc));
@@ -772,26 +608,23 @@ impl Parser {
                             let (name, name_loc) = match lhs {
                                 Expr::Id { loc, name } => (name, loc),
                                 _ => {
-                                    ast.add_diagnostic(to_diagnostic(
-                                        ErrorCode::InvalidTableKey,
-                                        lhs.get_loc(),
-                                    ));
+                                    self.add_diagnostic(ErrorCode::InvalidTableKey, lhs.get_loc());
                                     return Expr::Error;
                                 }
                             };
                             if let Some((name, _, prev_loc)) =
                                 key_vals.iter().find(|(prev, _, _)| prev == &name)
                             {
-                                ast.add_diagnostic(to_diagnostic(
+                                self.add_diagnostic(
                                     ErrorCode::DuplicateKey(prev_loc.clone(), name.clone()),
                                     name_loc,
-                                ));
+                                );
                                 return Expr::Error;
                             }
                             key_vals.push((name, *rhs, loc));
                         }
                         _ => {
-                            ast.add_diagnostic(to_diagnostic(ErrorCode::InvalidTableFormat, loc));
+                            self.add_diagnostic(ErrorCode::InvalidTableFormat, loc);
                             return Expr::Error;
                         }
                     }
@@ -799,10 +632,7 @@ impl Parser {
                 }
                 Expr::Error => return content,
                 _ => {
-                    ast.add_diagnostic(to_diagnostic(
-                        ErrorCode::InvalidTableFormat,
-                        content.get_loc(),
-                    ));
+                    self.add_diagnostic(ErrorCode::InvalidTableFormat, content.get_loc());
                     return Expr::Error;
                 }
             }
@@ -811,7 +641,7 @@ impl Parser {
         let end = iter.loc();
         key_vals.reverse();
         Expr::Const {
-            loc: start.start..end.end,
+            loc: start + end,
             value: Const::Table(key_vals),
         }
     }
@@ -824,7 +654,6 @@ impl Parser {
     fn consume_expr(
         &mut self,
         iter: &mut TokenIterator,
-        ast: &mut Ast,
         min_precedence: u16,
         not_take_on_error: Option<Token>,
     ) -> Expr {
@@ -841,7 +670,7 @@ impl Parser {
                     name: s,
                 }
             }
-            Some(Key(Fn)) => self.consume_fn(iter, ast),
+            Some(Key(Fn)) => self.consume_fn(iter),
             Some(Str(s)) => {
                 let s = s.clone();
                 iter.next();
@@ -883,8 +712,8 @@ impl Parser {
                         value: Const::Unit,
                     }
                 } else {
-                    let lhs = self.consume_expr(iter, ast, 0, Some(Op(RPar)));
-                    if self.consume_to_op(iter, ast, RPar, Some((Op(LPar), start.clone()))) {
+                    let lhs = self.consume_expr(iter, 0, Some(Op(RPar)));
+                    if self.consume_to_op(iter, RPar, Some((Op(LPar), start.clone()))) {
                         return Expr::Error;
                     };
                     Expr::Parentheses {
@@ -900,18 +729,17 @@ impl Parser {
                     _ => unreachable!(),
                 };
                 iter.next();
-                let rhs =
-                    self.consume_expr(iter, ast, precedence_prefix(), not_take_on_error.clone());
+                let rhs = self.consume_expr(iter, precedence_prefix(), not_take_on_error.clone());
                 let end = iter.loc();
                 Expr::Prefix {
-                    loc: start.start..end.end,
+                    loc: start.clone() + end,
                     op,
                     rhs: Box::new(rhs),
                 }
             }
-            Some(Key(If)) => self.consume_if(iter, ast),
-            Some(Key(Begin)) => self.consume_block(iter, ast),
-            Some(Key(Require)) => self.consume_require(iter, ast),
+            Some(Key(If)) => self.consume_if(iter),
+            Some(Key(Begin)) => self.consume_block(iter),
+            Some(Key(Require)) => self.consume_require(iter),
             Some(Op(LBrk)) => {
                 iter.next();
                 let previous_loc = iter.loc();
@@ -919,7 +747,7 @@ impl Parser {
                 if let Some(Op(RBrk)) = iter.peek() {
                     iter.next();
                 } else {
-                    let mut parameters = self.consume_expr(iter, ast, 0, Some(Op(RBrk)));
+                    let mut parameters = self.consume_expr(iter, 0, Some(Op(RBrk)));
                     loop {
                         match parameters {
                             Expr::Infix {
@@ -939,16 +767,16 @@ impl Parser {
                     }
                     // reverse to normal order
                     exprs.reverse();
-                    if self.consume_to_op(iter, ast, RBrk, Some((Op(LBrk), previous_loc))) {
+                    if self.consume_to_op(iter, RBrk, Some((Op(LBrk), previous_loc))) {
                         return Expr::Error;
                     };
                 }
                 Expr::Const {
-                    loc: start.start..iter.loc().end,
+                    loc: start.clone() + iter.loc(),
                     value: Const::List(exprs),
                 }
             }
-            Some(Op(LBrc)) => self.consume_table(iter, ast),
+            Some(Op(LBrc)) => self.consume_table(iter),
             Some(token) => {
                 let should_not_consume = if let Some(t_avoid) = not_take_on_error {
                     match (token, t_avoid) {
@@ -965,25 +793,36 @@ impl Parser {
                 };
                 if should_not_consume {
                     // Note that `start` is actually the location of this token
-                    ast.add_diagnostic(to_diagnostic(ErrorCode::MissingExpr(iter.loc()), start));
+                    self.add_diagnostic(ErrorCode::MissingExpr(iter.loc()), start);
                 } else {
                     let token = token.clone();
                     iter.next();
-                    ast.add_diagnostic(to_diagnostic(
-                        ErrorCode::UnexpectedToken(Some(token), None, None),
-                        start,
-                    ));
+                    self.add_diagnostic(ErrorCode::UnexpectedToken(Some(token), None, None), start);
                 }
                 return Expr::Error;
             }
             None => {
-                ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, start));
+                self.add_diagnostic(ErrorCode::UnexpectedEof, start);
                 return Expr::Error;
             }
         };
 
         loop {
             let op = match iter.peek2() {
+                // Allow (1..) format
+                (Some(Op(Range)), Some(next)) if !matches!(next, expr_start_pattern!()) => {
+                    iter.next();
+                    lhs = Expr::OpenRange {
+                        loc: start.clone() + iter.loc(),
+                        lhs: Box::new(lhs),
+                    };
+                    continue;
+                }
+                // Allow [1,2,] format
+                (Some(Op(Comma)), Some(Op(RPar | RBrk | RBrc))) => {
+                    iter.next();
+                    break;
+                }
                 (Some(Op(Call)), op) => {
                     let op = match op {
                         Some(Op(LPar)) => OpPostfix::Call,
@@ -994,20 +833,20 @@ impl Parser {
                             let loc = iter.loc();
                             iter.next();
                             let loc_token = iter.loc();
-                            ast.add_diagnostic(to_diagnostic(
+                            self.add_diagnostic(
                                 ErrorCode::UnexpectedToken(
                                     Some(token),
                                     None,
                                     Some((Op(Call), loc)),
                                 ),
                                 loc_token,
-                            ));
+                            );
                             return lhs;
                         }
                         None => {
                             iter.next();
                             let loc = iter.loc();
-                            ast.add_diagnostic(to_diagnostic(ErrorCode::UnexpectedEof, loc));
+                            self.add_diagnostic(ErrorCode::UnexpectedEof, loc);
                             return lhs;
                         }
                     };
@@ -1022,8 +861,7 @@ impl Parser {
                                 if let Some(Op(RPar)) = iter.peek() {
                                     iter.next();
                                 } else {
-                                    let mut parameters =
-                                        self.consume_expr(iter, ast, 0, Some(Op(RPar)));
+                                    let mut parameters = self.consume_expr(iter, 0, Some(Op(RPar)));
                                     loop {
                                         match parameters {
                                             Expr::Infix {
@@ -1045,7 +883,6 @@ impl Parser {
                                     exprs.reverse();
                                     if self.consume_to_op(
                                         iter,
-                                        ast,
                                         RPar,
                                         Some((Op(LPar), previous_loc)),
                                     ) {
@@ -1053,7 +890,7 @@ impl Parser {
                                     };
                                 }
                                 lhs = Expr::Call {
-                                    loc: start.start..iter.loc().end,
+                                    loc: start.clone() + iter.loc(),
                                     lhs: Box::new(lhs),
                                     parameters: exprs,
                                 };
@@ -1063,13 +900,12 @@ impl Parser {
                                 iter.next();
                                 iter.next();
                                 let match_loc = iter.loc();
-                                let expr = self.consume_expr(iter, ast, 0, Some(Op(RBrk)));
-                                if self.consume_to_op(iter, ast, RBrk, Some((Op(LBrk), match_loc)))
-                                {
+                                let expr = self.consume_expr(iter, 0, Some(Op(RBrk)));
+                                if self.consume_to_op(iter, RBrk, Some((Op(LBrk), match_loc))) {
                                     return Expr::Error;
                                 };
                                 lhs = Expr::Index {
-                                    loc: start.start..iter.loc().end,
+                                    loc: start.clone() + iter.loc(),
                                     lhs: Box::new(lhs),
                                     rhs: Box::new(expr),
                                 };
@@ -1115,10 +951,10 @@ impl Parser {
 
             iter.next();
 
-            let rhs = self.consume_expr(iter, ast, precedence.1, not_take_on_error.clone());
+            let rhs = self.consume_expr(iter, precedence.1, not_take_on_error.clone());
 
             lhs = Expr::Infix {
-                loc: start.start..iter.loc().end,
+                loc: start.clone() + iter.loc(),
                 op,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
@@ -1127,10 +963,81 @@ impl Parser {
 
         lhs
     }
-}
 
-impl Default for Parser {
-    fn default() -> Self {
-        Self::new()
+    pub fn add_diagnostic(&mut self, error: ErrorCode, loc: Loc) {
+        let eof = matches!(
+            error,
+            ErrorCode::UnexpectedEof | ErrorCode::UnexpectedToken(None, _, _)
+        );
+        let diag = match error {
+        ErrorCode::UnexpectedToken(met, expected, to_match) => {
+            let mut diagnostic = Diagnostic::error().with_code("E1000");
+            if let Some(t) = met {
+                diagnostic = diagnostic
+                    .with_message(format!("Unexpected token `{t}`"))
+                    .with_labels(vec![Label::primary(self.fid, loc)]);
+            } else {
+                diagnostic = diagnostic
+                    .with_message("End of file while parsing")
+                    .with_labels(vec![Label::primary(self.fid, loc)]);
+            }
+            if let Some(t) = expected {
+                diagnostic = diagnostic.with_notes(vec![format!("Consider add a `{t}` here")]);
+            }
+            if let Some((t, loc)) = to_match {
+                diagnostic = diagnostic.with_labels(vec![
+                    Label::secondary(self.fid, loc).with_message(format!("Due to `{t}` here"))
+                ]);
+            }
+            diagnostic
+        }
+        ErrorCode::UnexpectedEof => Diagnostic::error()
+            .with_code("E1001")
+            .with_message("Unexpected end of file here")
+            .with_labels(vec![Label::primary(self.fid, loc)]),
+        ErrorCode::MissingExpr(loc_pre) => Diagnostic::error()
+            .with_code("E1002")
+            .with_message("Missing expression here")
+            .with_labels(vec![
+                Label::primary(self.fid, loc),
+                Label::secondary(self.fid, loc_pre).with_message("Previous token here"),
+            ]),
+        ErrorCode::InvalidTableKey => Diagnostic::error()
+            .with_code("E1003")
+            .with_message("Table key must be an identifier")
+            .with_labels(vec![Label::primary(self.fid, loc)]),
+        ErrorCode::_RequireWrongArgument => Diagnostic::error()
+            .with_code("E1004")
+            .with_message("Module must be a string literal")
+            .with_labels(vec![Label::primary(self.fid, loc)]),
+        ErrorCode::_InvalidModuleString => Diagnostic::error()
+            .with_code("E1005")
+            .with_message("Invalid character in module string")
+            .with_labels(vec![Label::primary(self.fid, loc)])
+            .with_notes(vec![
+                "Module string can only contains '.', '-' and [0-9a-zA-Z_].".to_string(),
+                "Module String must not be empty.".to_string(),
+            ]),
+        ErrorCode::_ModuleNotFound(s) => Diagnostic::error()
+            .with_code("E1006")
+            .with_message("Module can not be found")
+            .with_labels(vec![Label::primary(self.fid, loc)])
+            .with_notes(vec![format!("Looking for `{s}.dm` or `{s}/mod.dm`")]),
+        ErrorCode::_InvalidModule => Diagnostic::error()
+            .with_code("E1007")
+            .with_message("Error encountered while parsing module")
+            .with_labels(vec![Label::primary(self.fid, loc)]),
+        ErrorCode::InvalidTableFormat => Diagnostic::error()
+            .with_code("E1008")
+            .with_message("Invalid syntax in table")
+            .with_labels(vec![Label::primary(self.fid, loc)])
+            .with_notes(vec!["Table should look like `{<identifier>=<expression>, <identifier>=<expression>, ...}`".to_string()]),
+        ErrorCode::DuplicateKey(prev_loc, name) => Diagnostic::error()
+            .with_code("E1009")
+            .with_message(format!("Duplicate table key `{name}`"))
+            .with_labels(vec![Label::primary(self.fid, loc), Label::secondary(self.fid, prev_loc).with_message("Also defined here")]),
+    };
+
+        self.file_manager.add_diagnostic(diag, eof);
     }
 }

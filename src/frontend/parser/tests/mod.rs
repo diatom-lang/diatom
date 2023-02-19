@@ -1,30 +1,30 @@
 use super::*;
 
 fn test_str(code: &str, should_fail: bool) {
-    let mut resource_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    resource_path.push("src/frontend/parser/tests/resources");
-    let mut parser = Parser::new()._with_path(resource_path);
-    let ast = parser.parse_str(OsStr::new(file!()), code);
-    if !should_fail && ast.diagnoser.error_count() > 0 {
-        print!("{}", ast.diagnoser.render(true));
+    let mut file_manager = FileManager::new();
+    let mut parser = Parser::new(&mut file_manager);
+    let _ = parser.parse_file(Either::Left((OsStr::new("<test>"), code)));
+    if !should_fail && file_manager.error_count() > 0 {
+        print!("{}", file_manager.render(true));
     }
     if should_fail {
-        assert!(ast.diagnoser.error_count() > 0);
+        assert!(file_manager.error_count() > 0);
     } else {
-        assert!(ast.diagnoser.error_count() == 0);
+        assert!(file_manager.error_count() == 0);
     }
 }
 
 #[test]
 fn test_expr_postfix_ambiguous() {
     let code = "0,a $ (1,2,3) (3,4)$[2-1]+0.333//[0, 1, 2]$[1][v]";
-    let mut parser = Parser::new();
-    let ast = parser.parse_str(OsStr::new(file!()), code);
-    if ast.diagnoser.error_count() > 0 {
-        print!("{}", ast.diagnoser.render(true));
+    let mut file_manager = FileManager::new();
+    let mut parser = Parser::new(&mut file_manager);
+    let ast = parser.parse_file(Either::Left((OsStr::new("<test>"), code)));
+    if file_manager.error_count() > 0 {
+        print!("{}", file_manager.render(true));
     }
-    assert_eq!(ast.diagnoser.error_count(), 0);
-    assert_eq!(ast.statements.len(), 3);
+    assert_eq!(file_manager.error_count(), 0);
+    assert_eq!(ast.len(), 3);
 }
 
 #[test]
@@ -33,6 +33,9 @@ fn test_valid() {
     test_str("a$(1, 2, [2, 2])", false);
     test_str("[]", false);
     test_str("", false);
+    test_str("(1..) [2.., 1..]", false);
+    test_str("(1..)", false);
+    test_str("def f = 1.. end", false);
 }
 
 #[test]
@@ -66,6 +69,8 @@ fn test_def() {
     test_str("def a+1 end", true);
     test_str("def a a = a+1 end", false);
     test_str("def x a b c = a+b+1 fn x = x end", false);
+    test_str("def x.a a b c = a+b+1 fn x = x end", false);
+    test_str("def x::a a b c = a+b+1 fn x = x end", false);
 }
 
 #[test]
@@ -109,17 +114,4 @@ fn test_table() {
     test_str("{}", false);
     test_str("{ a = 1, b= 3, c= 'abc'}", false);
     test_str("{loop = 1}", true);
-}
-
-#[test]
-fn test_require() {
-    test_str("require 'a+'", true);
-    test_str("require 'c'", true);
-    test_str("require '\\'", true);
-    test_str("require 'asdfase'", true);
-    test_str("require 'a'", false);
-    test_str("require 'a-'", false);
-    test_str("require 'b.b1'", false);
-    test_str("require 'b'", false);
-    test_str("require 'circular'", false);
 }

@@ -11,7 +11,7 @@ fn test_examples() {
         let code = example.contents_utf8().unwrap();
         let mut interpreter = Interpreter::new(vec![]);
         interpreter
-            .exec(code, example.path().as_os_str(), false)
+            .exec(code, example.path().as_os_str())
             .expect("Example test failed");
     }
 }
@@ -20,7 +20,7 @@ fn test_examples() {
 fn test_overflow() {
     let mut interpreter = Interpreter::new(vec![]);
     interpreter
-        .exec_repl("Int::MIN.abs$()", false)
+        .exec_repl("Int::MIN.abs$()")
         .expect("Test failed");
 }
 
@@ -28,6 +28,6 @@ fn test_overflow() {
 fn test_for_macro() {
     let mut interpreter = Interpreter::new(vec![]);
     interpreter
-        .exec_repl("fn = begin for i in 1..5 do end end", false)
+        .exec_repl("fn = begin for i in 1..5 do end end")
         .expect("Test failed");
 }

@@ -84,4 +84,8 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
             Err("Unreachable code reached".to_string())
         }
     });
+
+    interpreter.add_extern_function("todo".to_string(), |_, _, _| {
+        Err("Not implemented yet".to_string())
+    });
 }

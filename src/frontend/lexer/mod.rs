@@ -5,14 +5,11 @@ use lazy_static::lazy_static;
 use regex::Regex;
 pub use token::{Keyword, Operator, Token};
 
-use crate::diagnostic::Loc;
+use crate::file_manager::{FileManager, Loc};
 
 use self::error::{to_diagnostic, ErrorCode};
 
-use super::{
-    util::{FileIterator, TokenIterator},
-    Ast,
-};
+use super::util::{FileIterator, TokenIterator};
 
 #[derive(Default)]
 pub struct TokenStream {
@@ -37,10 +34,10 @@ impl TokenStream {
 pub struct Lexer;
 
 impl Lexer {
-    pub fn lex(ast: &mut Ast) -> TokenStream {
+    pub fn lex(file_manager: &mut FileManager, fid: usize) -> TokenStream {
         let mut token_stream = TokenStream::default();
-        let content = ast.file_content.clone();
-        let mut iter = FileIterator::new(content.as_ref());
+        let file = file_manager.get_file(fid);
+        let mut iter = FileIterator::new(&file, fid);
         // Ignore shebang (#!...) at the beginning of the file
         if let (Some('#'), Some('!')) = iter.peek2() {
             loop {
@@ -86,7 +83,8 @@ impl Lexer {
                         match result {
                             Ok(x) => token_stream.push(x),
                             Err((error, loc)) => {
-                                ast.add_diagnostic(to_diagnostic(error, loc));
+                                let diag = to_diagnostic(error, loc);
+                                file_manager.add_diagnostic(diag.0, diag.1);
                             }
                         }
                     }
@@ -261,10 +259,21 @@ impl Lexer {
                 }
                 iter.next();
             }
-            return Err((ErrorCode::InvalidNum(error_s), start..iter.offset()));
+            return Err((
+                ErrorCode::InvalidNum(error_s),
+                Loc {
+                    start,
+                    end: iter.offset(),
+                    fid: iter.fid(),
+                },
+            ));
         };
         let end = iter.offset();
-        let loc = start..end;
+        let loc = Loc {
+            start,
+            end,
+            fid: iter.fid(),
+        };
 
         let float_flag = !RE_INT.is_match(&num);
 
@@ -301,7 +310,11 @@ impl Lexer {
             }
             iter.next();
         }
-        let loc = start..iter.offset();
+        let loc = Loc {
+            start,
+            end: iter.offset(),
+            fid: iter.fid(),
+        };
         match name.as_str() {
             "and" => Ok((Token::Op(Operator::And), loc)),
             "or" => Ok((Token::Op(Operator::Or), loc)),
@@ -388,22 +401,41 @@ impl Lexer {
                         Err(()) => invalid = true,
                     },
                     '\'' if is_single_quote => {
+                        let loc = Loc {
+                            start,
+                            end: iter.offset(),
+                            fid: iter.fid(),
+                        };
                         if !invalid {
-                            return Ok((Token::Str(result), start..iter.offset()));
+                            return Ok((Token::Str(result), loc));
                         } else {
-                            return Err((ErrorCode::InvalidEscapeSequence, start..iter.offset()));
+                            return Err((ErrorCode::InvalidEscapeSequence, loc));
                         }
                     }
                     '"' if !is_single_quote => {
+                        let loc = Loc {
+                            start,
+                            end: iter.offset(),
+                            fid: iter.fid(),
+                        };
                         if !invalid {
-                            return Ok((Token::Str(result), start..iter.offset()));
+                            return Ok((Token::Str(result), loc));
                         } else {
-                            return Err((ErrorCode::InvalidEscapeSequence, start..iter.offset()));
+                            return Err((ErrorCode::InvalidEscapeSequence, loc));
                         }
                     }
                     c => result.push(c),
                 },
-                None => return Err((ErrorCode::OpenQuote, start..iter.offset())),
+                None => {
+                    return Err((
+                        ErrorCode::OpenQuote,
+                        Loc {
+                            start,
+                            end: iter.offset(),
+                            fid: iter.fid(),
+                        },
+                    ))
+                }
             }
         }
     }
@@ -414,8 +446,11 @@ impl Lexer {
             let start = iter.offset();
             iter.next();
             iter.next();
-            let end = iter.offset();
-            start..end
+            Loc {
+                start,
+                end: iter.offset(),
+                fid: iter.fid(),
+            }
         }
         match iter.peek2() {
             (Some('/'), Some('/')) => {
@@ -434,7 +469,11 @@ impl Lexer {
             (Some(c), _) => {
                 let start = iter.offset();
                 iter.next();
-                let loc = start..iter.offset();
+                let loc = Loc {
+                    start,
+                    end: iter.offset(),
+                    fid: iter.fid(),
+                };
                 match c {
                     '+' => Ok((Token::Op(Operator::Plus), loc)),
                     '-' => Ok((Token::Op(Operator::Minus), loc)),
@@ -465,16 +504,12 @@ impl Lexer {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
-
-    use crate::diagnostic::SharedFile;
-
     use super::*;
 
     #[test]
     fn test_consume_int() {
         fn test_helper(s: &str, i: i64, should_fail: bool) {
-            let mut iter = FileIterator::new(s);
+            let mut iter = FileIterator::new(s, 0);
             let result = Lexer::consume_num(&mut iter);
             if should_fail {
                 assert!(
@@ -529,7 +564,7 @@ mod tests {
     #[test]
     fn test_consume_float() {
         fn test_helper(s: &str, i: f64, should_fail: bool) {
-            let mut iter = FileIterator::new(s);
+            let mut iter = FileIterator::new(s, 0);
             let result = Lexer::consume_num(&mut iter);
             if should_fail {
                 assert!(
@@ -554,7 +589,7 @@ mod tests {
     #[test]
     fn test_consume_string() {
         fn test_helper(s: &str, i: &str, should_fail: bool) {
-            let mut iter = FileIterator::new(s);
+            let mut iter = FileIterator::new(s, 0);
             let result = Lexer::consume_string(&mut iter);
             if should_fail {
                 assert!(
@@ -588,20 +623,20 @@ mod tests {
     }
 
     fn test_str(code: &str, should_fail: bool) {
-        let file = SharedFile::from_str(code);
-        let mut ast = Ast::new(OsString::from(file!()), file);
-        let token_stream = Lexer::lex(&mut ast);
+        let mut file_manager = FileManager::new();
+        let fid = file_manager.add_file("<test>", code.to_string());
+        let token_stream = Lexer::lex(&mut file_manager, fid);
         for token in token_stream.iter() {
             println!("{token:?}");
         }
 
-        if !should_fail && ast.diagnoser.error_count() > 0 {
-            println!("{}", ast.diagnoser.render(true));
+        if !should_fail && file_manager.error_count() > 0 {
+            println!("{}", file_manager.render(false));
         }
         if should_fail {
-            assert!(ast.diagnoser.error_count() > 0);
+            assert!(file_manager.error_count() > 0);
         } else {
-            assert!(ast.diagnoser.error_count() == 0);
+            assert!(file_manager.error_count() == 0);
         }
     }
 

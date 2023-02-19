@@ -1,9 +1,7 @@
 use crate::{
-    diagnostic::Loc,
-    interpreter::{
-        gc::{Gc, GcObject, Reg, Table},
-        Capture,
-    },
+    file_manager::Loc,
+    gc::{Gc, GcObject, Reg, Table},
+    interpreter::Capture,
     IoWrite, State,
 };
 use std::{collections::BTreeMap, fmt::Write};

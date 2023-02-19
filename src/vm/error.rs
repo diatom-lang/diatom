@@ -1,6 +1,6 @@
 use codespan_reporting::diagnostic::Label;
 
-use crate::diagnostic::{Diagnostic, Loc};
+use crate::file_manager::{Diagnostic, Loc};
 
 pub enum VmError {
     /// Yield control back to host
@@ -67,85 +67,85 @@ impl From<VmError> for Diagnostic {
                 .with_message(format!(
                     "`{op}` can not be applied between `{t1}` and `{t2}`"
                 ))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::OpPrefixNotApplicable(loc, op, t) => Diagnostic::error()
                 .with_code("E3002")
                 .with_message(format!("`{op}` can not be applied to `{t}`"))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::InvalidCondition(loc, t) => Diagnostic::error()
                 .with_code("E3003")
                 .with_message(format!("Expect a bool value as condition, got a `{t}`"))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::NotCallable(loc, t) => Diagnostic::error()
                 .with_code("E3004")
                 .with_message(format!("Type `{t}` is not callable"))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::ParameterLengthNotMatch { loc, expected, got } => Diagnostic::error()
                 .with_code("E3005")
                 .with_message(format!(
                     "Function takes {expected} parameters but {got} is provided"
                 ))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::Panic { loc, reason, notes } => Diagnostic::error()
                 .with_code("E3006")
                 .with_message("Main function panic durning execution")
-                .with_labels(vec![Label::primary((), loc).with_message(reason)])
+                .with_labels(vec![Label::primary(loc.fid, loc).with_message(reason)])
                 .with_notes(notes),
             VmError::InvalidRef { loc, t, id } => Diagnostic::error()
                 .with_code("E3007")
                 .with_message(format!(
                     "External function returns an invalid reference to {t}@{id}"
                 ))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::IoError { loc, error } => {
                 let mut error = Diagnostic::error()
                     .with_code("E3008")
                     .with_message(format!("Io Error: {error}"));
                 if let Some(loc) = loc {
-                    error = error.with_labels(vec![Label::primary((), loc)]);
+                    error = error.with_labels(vec![Label::primary(loc.fid, loc)]);
                 }
                 error
             }
             VmError::CanNotSetAttr { loc, t } => Diagnostic::error()
                 .with_code("E3009")
                 .with_message(format!("Can not set type `{t}`'s attribute'"))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::NoSuchKey { loc, attr } => Diagnostic::error()
                 .with_code("E3010")
                 .with_message(format!(
                     "Table or its meta table does not contain key `{attr}`"
                 ))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::NotATable { loc, t } => Diagnostic::error()
                 .with_code("E3011")
                 .with_message(format!(
                     "Read attribute from type `{t}` which is not a table"
                 ))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::NotATuple { loc, t } => Diagnostic::error()
                 .with_code("E3012")
                 .with_message(format!("Read content from type `{t}` which is not a tuple"))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::TupleOutOfBound { loc, bound, access } => Diagnostic::error()
                 .with_code("E3013")
                 .with_message(format!(
                     "Tuple has {bound} item(s) while attempting to get an item at {access}"
                 ))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::InvalidMetaTable { loc, t } => Diagnostic::error()
                 .with_code("E3014")
                 .with_message(format!("Attempt to use type `{t}` as meta table"))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::IndexOutOfBound { loc, bound, index } => Diagnostic::error()
                 .with_code("E3015")
                 .with_message(format!(
                     "List has {bound} item(s) while attempting to get an item at {index}"
                 ))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
             VmError::CanNotIndex { loc, t1, t2 } => Diagnostic::error()
                 .with_code("E3016")
                 .with_message(format!("Type `{t1}` can not be indexed by type `{t2}`"))
-                .with_labels(vec![Label::primary((), loc)]),
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
         }
     }
 }
