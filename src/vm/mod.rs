@@ -103,7 +103,7 @@ impl Vm {
                         .into_iter()
                         .map(|Ip { func_id, inst }| {
                             let op = &byte_code[func_id].insts[inst - 1];
-                            if let VmInst::OpCall( OpCall { loc, .. } )= op {
+                            if let VmInst::OpCall(OpCall { loc, .. }) = op {
                                 loc.clone()
                             } else {
                                 unreachable!()

@@ -15,7 +15,7 @@ impl<'a> FileIterator<'a> {
         Self {
             offset: 0,
             iterator: file.chars(),
-            fid
+            fid,
         }
     }
 

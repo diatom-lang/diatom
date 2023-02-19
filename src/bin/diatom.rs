@@ -34,9 +34,7 @@ fn main() {
 
     let mut interpreter = Interpreter::new(io::stdout());
     let color = match args.color {
-        ColorChoice::Auto => {
-            io::stdout().is_tty()
-        }
+        ColorChoice::Auto => io::stdout().is_tty(),
         ColorChoice::Always => true,
         ColorChoice::Never => false,
     };

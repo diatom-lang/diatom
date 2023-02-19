@@ -14,6 +14,7 @@ use std::{
 pub type Diagnostic = diagnostic::Diagnostic<usize>;
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Loc {
     pub start: usize,
     pub end: usize,
@@ -115,7 +116,8 @@ impl FileManager {
     }
 
     pub fn add_file(&mut self, path: impl Into<OsString>, content: String) -> usize {
-        self.files.add(DisplayableOsString::new(path), SharedFile::new(content))
+        self.files
+            .add(DisplayableOsString::new(path), SharedFile::new(content))
     }
 
     pub fn get_file(&self, fid: usize) -> Rc<String> {

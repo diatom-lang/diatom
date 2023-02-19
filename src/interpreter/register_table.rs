@@ -73,8 +73,7 @@ impl RegisterTable {
 
     pub fn declare_variable(&mut self, name: impl AsRef<str>, loc: Option<Loc>) -> usize {
         let id = self.declare_intermediate();
-        self.variables
-            .insert(name.as_ref().to_string(), (id, loc));
+        self.variables.insert(name.as_ref().to_string(), (id, loc));
         id
     }
 
@@ -84,16 +83,11 @@ impl RegisterTable {
     pub fn declare_captured_variable(&mut self, name: impl AsRef<str>, loc: Option<Loc>) -> usize {
         let id = self.assigned;
         self.assigned += 1;
-        self.variables
-            .insert(name.as_ref().to_string(), (id, loc));
+        self.variables.insert(name.as_ref().to_string(), (id, loc));
         id
     }
     /// (reg_id, depth, loc)
-    fn lookup_variable_(
-        &self,
-        name: &str,
-        depth: usize,
-    ) -> Option<(usize, usize, Option<Loc>)> {
+    fn lookup_variable_(&self, name: &str, depth: usize) -> Option<(usize, usize, Option<Loc>)> {
         let var = self.variables.get(name);
         match var {
             Some((id, loc)) => Some((*id, depth, loc.clone())),
@@ -105,10 +99,7 @@ impl RegisterTable {
     }
 
     /// Return (reg_id, depth, loc)
-    pub fn lookup_variable(
-        &self,
-        name: impl AsRef<str>,
-    ) -> Option<(usize, usize, Option<Loc>)> {
+    pub fn lookup_variable(&self, name: impl AsRef<str>) -> Option<(usize, usize, Option<Loc>)> {
         self.lookup_variable_(name.as_ref(), 0)
     }
 

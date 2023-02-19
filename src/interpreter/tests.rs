@@ -3,9 +3,7 @@ use super::*;
 macro_rules! test_ok {
     ($code: literal, $output_expected: literal) => {
         let mut interpreter = Interpreter::new(Vec::<u8>::new());
-        interpreter
-            .exec_repl($code, false)
-            .expect("Execution failed!");
+        interpreter.exec_repl($code).expect("Execution failed!");
 
         let output = interpreter.replace_buffer(Vec::<u8>::new());
         let mut output = String::from_utf8(output).unwrap();
@@ -18,9 +16,7 @@ macro_rules! test_ok {
 macro_rules! test_ok_ignore {
     ($code: literal) => {
         let mut interpreter = Interpreter::new(Vec::<u8>::new());
-        interpreter
-            .exec_repl($code, false)
-            .expect("Execution failed!");
+        interpreter.exec_repl($code).expect("Execution failed!");
 
         let output = interpreter.replace_buffer(Vec::<u8>::new());
         let mut output = String::from_utf8(output).unwrap();
@@ -33,7 +29,7 @@ macro_rules! test_err {
     ($code: literal) => {
         let mut interpreter = Interpreter::new(Vec::<u8>::new());
         let _ = interpreter
-            .exec($code, OsStr::new("<test>"), false)
+            .exec($code, OsStr::new("<test>"))
             .expect_err("Execution failed!");
     };
 }

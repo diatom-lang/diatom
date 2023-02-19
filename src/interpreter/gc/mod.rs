@@ -212,9 +212,7 @@ impl<Buffer: Write> Gc<Buffer> {
         let prev = unsafe { stack.regs.get_unchecked_mut(n) };
         match prev {
             StackReg::Reg(r) => *r = reg,
-            StackReg::Shared(id) => {
-                *unsafe { self.escaped_pool.get_unchecked_mut(*id) } = reg
-            },
+            StackReg::Shared(id) => *unsafe { self.escaped_pool.get_unchecked_mut(*id) } = reg,
         }
     }
 

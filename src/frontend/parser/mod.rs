@@ -3,7 +3,7 @@ mod error;
 #[cfg(test)]
 mod tests;
 
-use crate::file_manager::{FileManager, Loc, Diagnostic};
+use crate::file_manager::{Diagnostic, FileManager, Loc};
 
 use self::error::ErrorCode;
 
@@ -16,10 +16,7 @@ use super::{
 use ast::{Const, Expr, OpInfix, OpPostfix, OpPrefix, Stmt};
 use codespan_reporting::diagnostic::Label;
 use either::Either;
-use std::{
-    ffi::OsStr,
-    mem::Discriminant,
-};
+use std::{ffi::OsStr, mem::Discriminant};
 
 const fn precedence_infix(op: OpInfix) -> (u16, u16) {
     use OpInfix::*;
@@ -68,12 +65,15 @@ macro_rules! expr_start_pattern {
 /// The parser for Diatom.
 pub struct Parser<'a> {
     file_manager: &'a mut FileManager,
-    fid: usize
+    fid: usize,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(file_manager: &'a mut FileManager) -> Self {
-        Self { file_manager, fid: 0 }
+        Self {
+            file_manager,
+            fid: 0,
+        }
     }
 
     /// Parse a file or input from other source
@@ -144,10 +144,7 @@ impl<'a> Parser<'a> {
             Some(token) => {
                 let token = token.clone();
                 iter.next();
-                self.add_diagnostic(
-                    ErrorCode::UnexpectedToken(Some(token), None, None),
-                    start,
-                );
+                self.add_diagnostic(ErrorCode::UnexpectedToken(Some(token), None, None), start);
                 Stmt::Error
             }
             None => {
@@ -600,10 +597,7 @@ impl<'a> Parser<'a> {
                     let (name, name_loc) = match lhs {
                         Expr::Id { loc, name } => (name, loc),
                         _ => {
-                            self.add_diagnostic(
-                                ErrorCode::InvalidTableKey,
-                                lhs.get_loc(),
-                            );
+                            self.add_diagnostic(ErrorCode::InvalidTableKey, lhs.get_loc());
                             return Expr::Error;
                         }
                     };
@@ -636,10 +630,7 @@ impl<'a> Parser<'a> {
                             let (name, name_loc) = match lhs {
                                 Expr::Id { loc, name } => (name, loc),
                                 _ => {
-                                    self.add_diagnostic(
-                                        ErrorCode::InvalidTableKey,
-                                        lhs.get_loc(),
-                                    );
+                                    self.add_diagnostic(ErrorCode::InvalidTableKey, lhs.get_loc());
                                     return Expr::Error;
                                 }
                             };
@@ -663,10 +654,7 @@ impl<'a> Parser<'a> {
                 }
                 Expr::Error => return content,
                 _ => {
-                    self.add_diagnostic(
-                        ErrorCode::InvalidTableFormat,
-                        content.get_loc(),
-                    );
+                    self.add_diagnostic(ErrorCode::InvalidTableFormat, content.get_loc());
                     return Expr::Error;
                 }
             }
@@ -831,10 +819,7 @@ impl<'a> Parser<'a> {
                 } else {
                     let token = token.clone();
                     iter.next();
-                    self.add_diagnostic(
-                        ErrorCode::UnexpectedToken(Some(token), None, None),
-                        start,
-                    );
+                    self.add_diagnostic(ErrorCode::UnexpectedToken(Some(token), None, None), start);
                 }
                 return Expr::Error;
             }

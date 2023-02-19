@@ -504,14 +504,12 @@ impl Lexer {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
-
     use super::*;
 
     #[test]
     fn test_consume_int() {
         fn test_helper(s: &str, i: i64, should_fail: bool) {
-            let mut iter = FileIterator::new(s);
+            let mut iter = FileIterator::new(s, 0);
             let result = Lexer::consume_num(&mut iter);
             if should_fail {
                 assert!(
@@ -566,7 +564,7 @@ mod tests {
     #[test]
     fn test_consume_float() {
         fn test_helper(s: &str, i: f64, should_fail: bool) {
-            let mut iter = FileIterator::new(s);
+            let mut iter = FileIterator::new(s, 0);
             let result = Lexer::consume_num(&mut iter);
             if should_fail {
                 assert!(
@@ -591,7 +589,7 @@ mod tests {
     #[test]
     fn test_consume_string() {
         fn test_helper(s: &str, i: &str, should_fail: bool) {
-            let mut iter = FileIterator::new(s);
+            let mut iter = FileIterator::new(s, 0);
             let result = Lexer::consume_string(&mut iter);
             if should_fail {
                 assert!(
@@ -625,20 +623,20 @@ mod tests {
     }
 
     fn test_str(code: &str, should_fail: bool) {
-        let file = SharedFile::from_str(code);
-        let mut ast = Ast::new(OsString::from(file!()), file);
-        let token_stream = Lexer::lex(&mut ast);
+        let mut file_manager = FileManager::new();
+        let fid = file_manager.add_file("<test>", code.to_string());
+        let token_stream = Lexer::lex(&mut file_manager, fid);
         for token in token_stream.iter() {
             println!("{token:?}");
         }
 
-        if !should_fail && ast.diagnoser.error_count() > 0 {
-            println!("{}", ast.diagnoser.render(true));
+        if !should_fail && file_manager.error_count() > 0 {
+            println!("{}", file_manager.render(false));
         }
         if should_fail {
-            assert!(ast.diagnoser.error_count() > 0);
+            assert!(file_manager.error_count() > 0);
         } else {
-            assert!(ast.diagnoser.error_count() == 0);
+            assert!(file_manager.error_count() == 0);
         }
     }
 

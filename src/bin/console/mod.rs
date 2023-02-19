@@ -1,8 +1,4 @@
-use std::{
-    env,
-    ffi::OsStr,
-    io::Stdout,
-};
+use std::{env, ffi::OsStr, io::Stdout};
 
 use crate::Interpreter;
 

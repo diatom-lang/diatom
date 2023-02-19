@@ -236,7 +236,6 @@ pub fn init_list_meta<Buffer: IoWrite>(
     meta.attributes
         .insert(key_pool.get_or_insert("is_empty"), Reg::Ref(is_empty));
 
-
     let clear = pool.alloc(new_f(|state, parameters: &[Reg], _| {
         if parameters.len() != 1 {
             return Err(format!(

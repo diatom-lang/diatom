@@ -124,11 +124,13 @@ pub struct Func {
 ///
 /// // Create a new instance of interpreter
 /// let mut interpreter = Interpreter::new(std::io::stdout());
+/// // Enable colored output
+/// interpreter = interpreter.with_color();
 /// // Execute source code
 /// let output = interpreter.exec(
 ///     "print$('Hello, world!')",
-///     Default::default(),
-///     false).unwrap();
+///     Default::default()
+///     ).unwrap();
 /// ```
 ///
 /// ## 2. Add call back to the interpreter
@@ -156,7 +158,7 @@ pub struct Func {
 /// });
 ///
 /// // change value to 5
-/// interpreter.exec("set_value$(5)", Default::default(), false).unwrap();
+/// interpreter.exec("set_value$(5)", Default::default()).unwrap();
 /// assert_eq!(value.get(), 5);
 /// ```
 pub struct Interpreter<Buffer: IoWrite> {
@@ -258,7 +260,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     ///     }
     /// );
     ///
-    /// interpreter.exec("hello_world$()", Default::default(), false).unwrap();
+    /// interpreter.exec("hello_world$()", Default::default()).unwrap();
     /// let output = interpreter.replace_buffer(Vec::<u8>::new());
     /// let output = String::from_utf8(output).unwrap();
     /// assert_eq!(output, "Hello, world!")
@@ -289,11 +291,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// Show decompiled byte code for given source code.
     ///
     /// If compilation failed, `Err` will be returned.
-    pub fn decompile(
-        &mut self,
-        code: impl AsRef<str>,
-        source: &OsStr,
-    ) -> Result<String, String> {
+    pub fn decompile(&mut self, code: impl AsRef<str>, source: &OsStr) -> Result<String, String> {
         self.compile(code, source)?;
         let mut decompiled = String::new();
         for Func {
@@ -319,11 +317,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         std::mem::replace(&mut self.out, buffer)
     }
 
-    fn compile(
-        &mut self,
-        code: impl AsRef<str>,
-        source: &OsStr,
-    ) -> Result<(), String> {
+    fn compile(&mut self, code: impl AsRef<str>, source: &OsStr) -> Result<(), String> {
         self.file_manager.clear_diagnoses();
         let mut parser = Parser::new(&mut self.file_manager);
         let ast = parser.parse_file(Either::Left((source, code.as_ref())));
@@ -370,11 +364,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// * Return the output of the program
     /// * If compilation failed or error occurs durning execution, an `Err(String)` that
     /// illustrates the error is returned.
-    pub fn exec(
-        &mut self,
-        code: impl AsRef<str>,
-        source: &OsStr,
-    ) -> Result<(), String> {
+    pub fn exec(&mut self, code: impl AsRef<str>, source: &OsStr) -> Result<(), String> {
         self.compile(code, source)?;
         match self.vm.exec(&self.byte_code, &mut self.gc, &mut self.out) {
             (VmError::Yield(_), _) => Ok(()),
