@@ -33,7 +33,7 @@ pub enum Stmt {
     /// Define a function
     Def {
         loc: Loc,
-        name: String,
+        variable: Box<Expr>,
         parameters: Vec<(String, Loc)>,
         body: Vec<Stmt>,
     },
@@ -110,6 +110,10 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+    OpenRange {
+        loc: Loc,
+        lhs: Box<Expr>,
+    },
     Fn {
         loc: Loc,
         parameters: Vec<(String, Loc)>,
@@ -137,39 +141,19 @@ pub enum Expr {
 impl Expr {
     pub fn get_loc(&self) -> Loc {
         match self {
-            Expr::Block { loc, body: _ } => loc,
-            Expr::If {
-                loc,
-                conditional: _,
-                default: _,
-            } => loc,
-            Expr::Prefix { loc, op: _, rhs: _ } => loc,
-            Expr::Call {
-                loc,
-                lhs: _,
-                parameters: _,
-            } => loc,
-            Expr::Index {
-                loc,
-                lhs: _,
-                rhs: _,
-            } => loc,
-            Expr::Infix {
-                loc,
-                op: _,
-                lhs: _,
-                rhs: _,
-            } => loc,
-            Expr::Fn {
-                loc,
-                parameters: _,
-                body: _,
-            } => loc,
-            Expr::Id { loc, name: _ } => loc,
-            Expr::Parentheses { loc, content: _ } => loc,
-            Expr::Const { loc, value: _ } => loc,
-            Expr::_Module { loc, path: _ } => loc,
+            Expr::Block { loc, .. } => loc,
+            Expr::If { loc, .. } => loc,
+            Expr::Prefix { loc, .. } => loc,
+            Expr::Call { loc, .. } => loc,
+            Expr::Index { loc, .. } => loc,
+            Expr::Infix { loc, .. } => loc,
+            Expr::Fn { loc, .. } => loc,
+            Expr::Id { loc, .. } => loc,
+            Expr::Parentheses { loc, .. } => loc,
+            Expr::Const { loc, .. } => loc,
+            Expr::_Module { loc, .. } => loc,
             Expr::Error => unreachable!(),
+            Expr::OpenRange { loc, .. } => loc,
         }
         .clone()
     }

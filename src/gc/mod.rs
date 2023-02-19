@@ -5,7 +5,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::State;
+use crate::{vm::Ip, State};
 
 mod key_pool;
 mod pool;
@@ -14,8 +14,6 @@ use key_pool::KeyPool;
 use pool::Pool;
 
 use self::prelude::{init_float_meta, init_int_meta, init_list_meta};
-
-use super::Ip;
 
 pub struct Table {
     pub attributes: BTreeMap<usize, Reg>,

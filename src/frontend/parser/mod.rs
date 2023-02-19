@@ -54,7 +54,10 @@ macro_rules! expr_start_pattern {
                 | Keyword::Begin
                 | Keyword::True
                 | Keyword::False,
-        ) | Token::Op(_)
+        ) | Token::Op(Operator::LBrc)
+            | Token::Op(Operator::LBrk)
+            | Token::Op(Operator::LPar)
+            | Token::Op(Operator::Minus)
             | Token::Id(_)
             | Token::Integer(_)
             | Token::Float(_)
@@ -465,28 +468,7 @@ impl<'a> Parser<'a> {
         use Token::*;
         iter.next();
         let start = iter.loc();
-        let name = match iter.peek() {
-            Some(Id(name)) => {
-                let name = name.clone();
-                iter.next();
-                Some(name)
-            }
-            Some(token) => {
-                self.add_diagnostic(
-                    ErrorCode::UnexpectedToken(
-                        Some(token.clone()),
-                        Some(Id("<function name>".to_string())),
-                        Some((Key(Def), start.clone())),
-                    ),
-                    start.clone(),
-                );
-                None
-            }
-            None => {
-                self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
-                return Stmt::Error;
-            }
-        };
+        let variable = self.consume_expr(iter, 23, None);
         let mut parameters = vec![];
         loop {
             match iter.peek() {
@@ -518,15 +500,11 @@ impl<'a> Parser<'a> {
             match iter.peek() {
                 Some(Key(End)) => {
                     iter.next();
-                    return if let Some(name) = name {
-                        Stmt::Def {
-                            loc: start + iter.loc(),
-                            name,
-                            parameters,
-                            body,
-                        }
-                    } else {
-                        Stmt::Error
+                    return Stmt::Def {
+                        loc: start + iter.loc(),
+                        variable: Box::new(variable),
+                        parameters,
+                        body,
                     };
                 }
                 Some(_) => body.push(self.consume_stmt(iter, Some(Token::Key(Keyword::End)))),
@@ -831,6 +809,15 @@ impl<'a> Parser<'a> {
 
         loop {
             let op = match iter.peek2() {
+                // Allow (1..) format
+                (Some(Op(Range)), Some(next)) if !matches!(next, expr_start_pattern!()) => {
+                    iter.next();
+                    lhs = Expr::OpenRange {
+                        loc: start.clone() + iter.loc(),
+                        lhs: Box::new(lhs),
+                    };
+                    continue;
+                }
                 // Allow [1,2,] format
                 (Some(Op(Comma)), Some(Op(RPar | RBrk | RBrc))) => {
                     iter.next();

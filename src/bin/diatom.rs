@@ -32,15 +32,16 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let mut interpreter = Interpreter::new(io::stdout());
     let color = match args.color {
         ColorChoice::Auto => io::stdout().is_tty(),
         ColorChoice::Always => true,
         ColorChoice::Never => false,
     };
-    if color {
-        interpreter = interpreter.with_color();
-    }
+    let mut interpreter = if color {
+        Interpreter::with_color(io::stdout())
+    } else {
+        Interpreter::new(io::stdout())
+    };
 
     match (&args.path, args.inspect) {
         #[cfg(feature = "console")]

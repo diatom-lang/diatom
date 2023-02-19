@@ -1,8 +1,4 @@
-use crate::{
-    file_manager::Loc,
-    interpreter::{Func, Gc},
-    IoWrite,
-};
+use crate::{file_manager::Loc, gc::Gc, interpreter::Func, IoWrite};
 
 use self::{error::VmError, op::*};
 

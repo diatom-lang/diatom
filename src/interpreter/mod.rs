@@ -1,3 +1,5 @@
+use crate::gc::{Gc, GcObject, Reg};
+use crate::stdlib::load_std;
 use std::cell::RefCell;
 use std::fmt::Write;
 use std::{ffi::OsStr, rc::Rc};
@@ -7,7 +9,6 @@ use codespan_reporting::diagnostic::Label;
 use either::Either;
 
 mod error;
-pub mod gc;
 mod prelude;
 mod register_table;
 
@@ -30,15 +31,13 @@ use crate::{
             OpGt, OpIDiv, OpJump, OpLoadConstant, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot, OpOr,
             OpPow, OpRem, OpRet, OpSub, OpYield,
         },
-        Instruction, Ip, Vm, VmInst,
+        Instruction, Vm, VmInst,
     },
     DiatomValue, IoWrite,
 };
 pub use api::State;
-pub use gc::{GcObject, Reg};
 
 use error::ErrorCode;
-pub use gc::Gc;
 use prelude::impl_prelude;
 pub use register_table::Capture;
 use register_table::{ConstantValue, Loop, RegisterTable};
@@ -123,9 +122,8 @@ pub struct Func {
 /// use diatom::Interpreter;
 ///
 /// // Create a new instance of interpreter
-/// let mut interpreter = Interpreter::new(std::io::stdout());
 /// // Enable colored output
-/// interpreter = interpreter.with_color();
+/// let mut interpreter = Interpreter::with_color(std::io::stdout());
 /// // Execute source code
 /// let output = interpreter.exec(
 ///     "print$('Hello, world!')",
@@ -175,6 +173,10 @@ pub struct Interpreter<Buffer: IoWrite> {
 impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// Create a new interpreter instance
     pub fn new(buffer: Buffer) -> Self {
+        Self::init(buffer, false)
+    }
+
+    fn init(buffer: Buffer, color: bool) -> Self {
         let main = Func {
             name: "main".to_string(),
             parameters: 0,
@@ -188,7 +190,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             gc: Gc::new(),
             out: buffer,
             file_manager: FileManager::new(),
-            color: false,
+            color,
         };
         // Initialize int and float meta table
         let int = interpreter.registers.declare_variable("Int", None);
@@ -208,17 +210,13 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             .write_reg(list, Reg::Ref(interpreter.gc.list_meta()));
 
         impl_prelude(&mut interpreter);
-        interpreter
-            .exec(include_str!("std.dm"), OsStr::new("std.dm"))
-            .map_err(|s| print!("{s}"))
-            .expect("Internal Error: Panic while executing diatom standard library.");
+        load_std(&mut interpreter);
         interpreter
     }
 
     /// Enable ansi colored error message
-    pub fn with_color(mut self) -> Self {
-        self.color = true;
-        self
+    pub fn with_color(buffer: Buffer) -> Self {
+        Self::init(buffer, true)
     }
 
     /// Register an external rust function
@@ -485,7 +483,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 body.iter()
                     .for_each(|stmt| self.scan_constant_capture_stmt(stmt));
             }
-            Stmt::Def { .. } => (),
+            Stmt::Def { variable, .. } => self.scan_constant_capture_expr(variable, true),
             Stmt::Error => unreachable!(),
         }
     }
@@ -522,6 +520,10 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             Expr::Index { lhs, rhs, .. } => {
                 self.scan_constant_capture_expr(lhs, true);
                 self.scan_constant_capture_expr(rhs, true);
+            }
+            Expr::OpenRange { lhs, .. } => {
+                self.scan_constant_capture_expr(lhs, true);
+                self.scan_constant_capture(&Const::Int(i64::MAX));
             }
             Expr::Infix {
                 lhs,
@@ -876,38 +878,31 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             }
             Stmt::Def {
                 loc,
-                name,
+                variable,
                 parameters,
                 body,
             } => {
-                // declare variable
-                let id = if let Some((id, depth, _)) = self.registers.lookup_variable(name) {
-                    assert!(depth == 0);
-                    id
-                } else {
-                    self.scopes.last_mut().unwrap().insert(name.clone());
-                    self.registers.declare_variable(name, Some(loc.clone()))
-                };
-
-                let (func_id, parameters, capture, reg_size) =
-                    self.compile_closure(Some(name), parameters, either::Right(body), loc.clone())?;
-                let reg_f_id = self.registers.declare_intermediate();
-                self.get_current_func()
-                    .insts
-                    .push(VmInst::OpMakeClosure(OpMakeClosure {
+                let expr = Expr::Infix {
+                    loc: loc.clone(),
+                    op: OpInfix::Assign,
+                    lhs: variable.clone(),
+                    rhs: Box::new(Expr::Fn {
                         loc: loc.clone(),
-                        func_id,
-                        parameters,
-                        rd: reg_f_id,
-                        capture,
-                        reg_size,
-                    }));
-
-                self.registers.free_intermediate(reg_f_id);
-                self.get_current_insts().push(VmInst::OpMove(OpMove {
-                    rs: reg_f_id,
-                    rd: id,
-                }));
+                        parameters: parameters.clone(),
+                        body: Box::new(Expr::Block {
+                            loc: loc.clone(),
+                            body: body.clone(),
+                        }),
+                    }),
+                };
+                self.compile_stmt(
+                    &Stmt::Expr {
+                        loc: loc.clone(),
+                        expr,
+                    },
+                    discard,
+                    target,
+                )?;
             }
             Stmt::Error => unreachable!(),
         }
@@ -986,6 +981,22 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                         name: "Range".to_string(),
                     }),
                     parameters: vec![lhs.as_ref().clone(), rhs.as_ref().clone()],
+                };
+                self.compile_expr(&expr, false, target)
+            }
+            Expr::OpenRange { loc, lhs } => {
+                // Range$(lhs, rhs)
+                let rhs = Expr::Const {
+                    loc: loc.clone(),
+                    value: Const::Int(i64::MAX),
+                };
+                let expr = Expr::Call {
+                    loc: loc.clone(),
+                    lhs: Box::new(Expr::Id {
+                        loc: loc.clone(),
+                        name: "Range".to_string(),
+                    }),
+                    parameters: vec![lhs.as_ref().clone(), rhs],
                 };
                 self.compile_expr(&expr, false, target)
             }

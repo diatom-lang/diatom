@@ -33,6 +33,9 @@ fn test_valid() {
     test_str("a$(1, 2, [2, 2])", false);
     test_str("[]", false);
     test_str("", false);
+    test_str("(1..) [2.., 1..]", false);
+    test_str("(1..)", false);
+    test_str("def f = 1.. end", false);
 }
 
 #[test]
@@ -66,6 +69,8 @@ fn test_def() {
     test_str("def a+1 end", true);
     test_str("def a a = a+1 end", false);
     test_str("def x a b c = a+b+1 fn x = x end", false);
+    test_str("def x.a a b c = a+b+1 fn x = x end", false);
+    test_str("def x::a a b c = a+b+1 fn x = x end", false);
 }
 
 #[test]
