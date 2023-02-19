@@ -16,7 +16,7 @@ fn test_str(code: &str, should_fail: bool) {
 
 #[test]
 fn test_expr_postfix_ambiguous() {
-    let code = "0,a $ (1,2,3) (3,4)$[2-1]+0.333//[0, 1, 2]$[1][v]";
+    let code = "0,a(1,2,3); (3,4)[2-1]+0.333//[0, 1, 2][1]; [v]";
     let mut file_manager = FileManager::new();
     let mut parser = Parser::new(&mut file_manager);
     let ast = parser.parse_file(Either::Left((OsStr::new("<test>"), code)));
@@ -29,28 +29,29 @@ fn test_expr_postfix_ambiguous() {
 
 #[test]
 fn test_valid() {
-    test_str("a$()", false);
-    test_str("a$(1, 2, [2, 2])", false);
+    test_str("a()", false);
+    test_str("a(1, 2, [2, 2])", false);
     test_str("[]", false);
     test_str("", false);
     test_str("(1..) [2.., 1..]", false);
     test_str("(1..)", false);
     test_str("def f = 1.. end", false);
+    test_str(";;a+1; def a = fn =1; end;;;", false);
 }
 
 #[test]
 fn test_invalid() {
     test_str(">> <<", true);
-    test_str("a$[]", true);
+    test_str("a[]", true);
     test_str("[1 2,]", true);
     test_str("[1 2]", true);
-    test_str("a$([1 2], [])", true);
+    test_str("a([1 2], [])", true);
 }
 
 #[test]
 fn test_if() {
     test_str(
-        "if a then b elsif c then 0.92 a = 0 b$[0,1,2] else end",
+        "if a then b elsif c then 0.92 a = 0 b[0,1,2] else end",
         false,
     );
     test_str("if a then else () end", false);

@@ -3,4 +3,4 @@ begin
     b = false
     a = b
 end
-assert$(a == false)
+assert(a == false)

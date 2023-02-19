@@ -106,8 +106,12 @@ impl<'a> Parser<'a> {
     fn consume_stmt(&mut self, iter: &mut TokenIterator, not_take_on_error: Option<Token>) -> Stmt {
         use Keyword::*;
         use Token::*;
+        while let Some(Token::Op(Operator::SemiColon)) = iter.peek() {
+            iter.next();
+            continue;
+        }
         let start = iter.next_loc();
-        match iter.peek() {
+        let stmt = match iter.peek() {
             Some(Key(Break)) => {
                 iter.next();
                 Stmt::Break { loc: start }
@@ -154,7 +158,12 @@ impl<'a> Parser<'a> {
                 self.add_diagnostic(ErrorCode::UnexpectedEof, start);
                 Stmt::Error
             }
+        };
+        while let Some(Token::Op(Operator::SemiColon)) = iter.peek() {
+            iter.next();
+            continue;
         }
+        stmt
     }
 
     /// Consume an iterator to an expected operator or EOF
@@ -809,6 +818,7 @@ impl<'a> Parser<'a> {
 
         loop {
             let op = match iter.peek2() {
+                (Some(Op(SemiColon)), _) => return lhs,
                 // Allow (1..) format
                 (Some(Op(Range)), Some(next)) if !matches!(next, expr_start_pattern!()) => {
                     iter.next();
@@ -823,38 +833,16 @@ impl<'a> Parser<'a> {
                     iter.next();
                     break;
                 }
-                (Some(Op(Call)), op) => {
+                (Some(Op(op @ (LBrk | LPar))), _) => {
                     let op = match op {
-                        Some(Op(LPar)) => OpPostfix::Call,
-                        Some(Op(LBrk)) => OpPostfix::Index,
-                        Some(token) => {
-                            let token = token.clone();
-                            iter.next();
-                            let loc = iter.loc();
-                            iter.next();
-                            let loc_token = iter.loc();
-                            self.add_diagnostic(
-                                ErrorCode::UnexpectedToken(
-                                    Some(token),
-                                    None,
-                                    Some((Op(Call), loc)),
-                                ),
-                                loc_token,
-                            );
-                            return lhs;
-                        }
-                        None => {
-                            iter.next();
-                            let loc = iter.loc();
-                            self.add_diagnostic(ErrorCode::UnexpectedEof, loc);
-                            return lhs;
-                        }
+                        LPar => OpPostfix::Call,
+                        LBrk => OpPostfix::Index,
+                        _ => unreachable!(),
                     };
                     let precedence = precedence_postfix();
                     if precedence > min_precedence {
                         match op {
                             OpPostfix::Call => {
-                                iter.next();
                                 iter.next();
                                 let previous_loc = iter.loc();
                                 let mut exprs = vec![];
@@ -897,7 +885,6 @@ impl<'a> Parser<'a> {
                                 continue;
                             }
                             OpPostfix::Index => {
-                                iter.next();
                                 iter.next();
                                 let match_loc = iter.loc();
                                 let expr = self.consume_expr(iter, 0, Some(Op(RBrk)));

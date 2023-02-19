@@ -5,6 +5,6 @@ meta_table = {
 
 table = {key = 'key'} <- meta_table
 
-assert$(table.name == 'meta table')
-assert$(table.key == 'key')
-assert$(table.positive$(10))
+assert(table.name == 'meta table')
+assert(table.key == 'key')
+assert(table.positive(10))

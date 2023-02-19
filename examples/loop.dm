@@ -2,7 +2,7 @@ a = 0
 until a >= 100 do
     a = a + 1
 end
-assert$(a == 100)
+assert(a == 100)
 
 a = 0
 loop
@@ -13,5 +13,5 @@ loop
         break
     end
 end
-assert$(a == 100)
+assert(a == 100)
 
