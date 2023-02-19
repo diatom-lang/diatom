@@ -57,6 +57,10 @@ cd diatom
 cargo run --release # Run interactive console
 ```
 
+#### Syntax highlight
+- Vim/Neovim plugin: [diatom.vim](https://github.com/diatom-lang/diatom.vim)
+
+
 ## Reference & Grammar
 
 #### The Reference Book
