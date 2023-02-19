@@ -1,5 +1,5 @@
 use crate::{
-    diagnostic::Loc,
+    file_manager::Loc,
     interpreter::{
         gc::{Gc, GcObject, Reg, Table},
         Capture,

@@ -12,7 +12,7 @@
 //! See examples in [Interpreter].
 //!
 
-mod diagnostic;
+mod file_manager;
 mod frontend;
 mod interpreter;
 mod vm;

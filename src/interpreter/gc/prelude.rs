@@ -216,6 +216,27 @@ pub fn init_list_meta<Buffer: IoWrite>(
     meta.attributes
         .insert(key_pool.get_or_insert("len"), Reg::Ref(len));
 
+    let is_empty = pool.alloc(new_f(|state, parameters: &[Reg], _| {
+        if parameters.len() != 1 {
+            return Err(format!(
+                "Expected 1 parameter while {} is provided",
+                parameters.len()
+            ));
+        }
+        match parameters[0] {
+            Reg::Ref(id) => match unsafe { state.gc.get_obj_unchecked_mut(id) } {
+                GcObject::List(l) => Ok(Reg::Bool(l.is_empty())),
+                _ => Err(()),
+            },
+            _ => Err(()),
+        }
+        .map_err(|_| "Expected type `List` to operate".to_string())
+    }));
+
+    meta.attributes
+        .insert(key_pool.get_or_insert("is_empty"), Reg::Ref(is_empty));
+
+
     let clear = pool.alloc(new_f(|state, parameters: &[Reg], _| {
         if parameters.len() != 1 {
             return Err(format!(

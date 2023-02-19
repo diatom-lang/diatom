@@ -3,6 +3,7 @@ use std::fmt::Write;
 use std::{ffi::OsStr, rc::Rc};
 
 use ahash::AHashSet;
+use codespan_reporting::diagnostic::Label;
 use either::Either;
 
 mod error;
@@ -11,15 +12,16 @@ mod prelude;
 mod register_table;
 
 mod api;
+use crate::file_manager::FileManager;
 use crate::vm::op::{
     OpGe, OpGetTable, OpGetTuple, OpIndex, OpIs, OpLe, OpLt, OpMakeList, OpMakeTable, OpMakeTuple,
     OpNe, OpSetMeta, OpSetTable, OpSetTuple,
 };
 use crate::{
-    diagnostic::{Diagnostic, Loc},
+    file_manager::{Diagnostic, Loc},
     frontend::{
         parser::ast::{Const, Expr, OpInfix, OpPrefix, Stmt},
-        Ast, Parser,
+        Parser,
     },
     vm::{
         error::VmError,
@@ -164,6 +166,7 @@ pub struct Interpreter<Buffer: IoWrite> {
     vm: Vm,
     gc: Gc<Buffer>,
     out: Buffer,
+    file_manager: FileManager,
 }
 
 impl<Buffer: IoWrite> Interpreter<Buffer> {
@@ -181,6 +184,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             vm: Vm::new(),
             gc: Gc::new(),
             out: buffer,
+            file_manager: FileManager::new(),
         };
         // Initialize int and float meta table
         let int = interpreter.registers.declare_variable("Int", None);
@@ -267,10 +271,11 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// Check if input is completeness
     ///
     /// Incomplete input usually contains unclosed parentheses, quotes or open expression.
-    pub fn verify_input_completeness(&self, code: impl AsRef<str>) -> bool {
-        let mut parser = Parser::new();
-        let ast = parser.parse_str(OsStr::new("<interactive>"), code.as_ref());
-        !ast.input_can_continue()
+    pub fn verify_input_completeness(code: impl AsRef<str>) -> bool {
+        let mut file_manager = FileManager::new();
+        let mut parser = Parser::new(&mut file_manager);
+        let _ = parser.parse_file(Either::Left((OsStr::new(""), code.as_ref())));
+        !file_manager.input_can_continue()
     }
 
     /// Show decompiled byte code for given source code.
@@ -312,11 +317,12 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         code: impl AsRef<str>,
         source: &OsStr,
         color: bool,
-    ) -> Result<Ast, String> {
-        let mut parser = Parser::new();
-        let mut ast = parser.parse_str(source, code.as_ref());
-        if ast.diagnoser.error_count() > 0 {
-            return Err(ast.diagnoser.render(color));
+    ) -> Result<(), String> {
+        self.file_manager.clear_diagnoses();
+        let mut parser = Parser::new(&mut self.file_manager);
+        let mut ast = parser.parse_file(Either::Left((source, code.as_ref())));
+        if self.file_manager.error_count() > 0 {
+            return Err(self.file_manager.render(color));
         }
 
         let registers_prev = self.registers.clone();
@@ -327,7 +333,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         let return_value = self.compile_ast(&mut ast).map_err(|_| {
             // restore variable table if compile failed
             self.registers = registers_prev;
-            ast.diagnoser.render(color)
+            self.file_manager.render(color)
         })?;
 
         // return after main
@@ -343,8 +349,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             }),
         );
 
-        self.registers.invalidate_define();
-        Ok(ast)
+        Ok(())
     }
 
     /// Run a piece of diatom source code
@@ -365,13 +370,20 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         source: &OsStr,
         color: bool,
     ) -> Result<(), String> {
-        let mut ast = self.compile(code, source, color)?;
+        self.compile(code, source, color)?;
         match self.vm.exec(&self.byte_code, &mut self.gc, &mut self.out) {
-            VmError::Yield(_) => Ok(()),
-            error_code => {
-                let diagnostic = Diagnostic::from(error_code);
-                ast.diagnoser.push(diagnostic);
-                Err(ast.diagnoser.render(color))
+            (VmError::Yield(_), _) => Ok(()),
+            (error, trace) => {
+                self.file_manager.add_diagnostic(error.into(), false);
+                trace.into_iter().for_each(|loc| {
+                    self.file_manager.add_diagnostic(
+                        Diagnostic::error()
+                            .with_message("Traceback: Panic while invoking")
+                            .with_labels(vec![Label::primary(loc.fid, loc)]),
+                        false,
+                    )
+                });
+                Err(self.file_manager.render(color))
             }
         }
     }
@@ -380,10 +392,10 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     ///
     /// If return value is unit, then it will not be printed.
     pub fn exec_repl(&mut self, code: impl AsRef<str>, color: bool) -> Result<(), String> {
-        let mut ast = self.compile(code, OsStr::new("<interactive>"), color)?;
+        self.compile(code, OsStr::new("<interactive>"), color)?;
         match self.vm.exec(&self.byte_code, &mut self.gc, &mut self.out) {
-            VmError::Yield(None) => Ok(()),
-            VmError::Yield(Some(reg_id)) => {
+            (VmError::Yield(None), _) => Ok(()),
+            (VmError::Yield(Some(reg_id)), _) => {
                 let reg = self.gc.read_reg(reg_id);
                 match reg {
                     Reg::Unit => Ok(()),
@@ -394,37 +406,43 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                                 loc: None,
                                 error: err,
                             };
-                            let diagnostic = Diagnostic::from(error_code);
-                            ast.diagnoser.push(diagnostic);
-                            ast.diagnoser.render(color)
+                            self.file_manager.add_diagnostic(error_code.into(), false);
+                            self.file_manager.render(color)
                         })
                     }
                 }
             }
-            error_code => {
-                let diagnostic = Diagnostic::from(error_code);
-                ast.diagnoser.push(diagnostic);
-                Err(ast.diagnoser.render(color))
+            (error, trace) => {
+                trace.into_iter().rev().for_each(|loc| {
+                    self.file_manager.add_diagnostic(
+                        Diagnostic::error()
+                            .with_message("Trace back")
+                            .with_labels(vec![Label::primary(loc.fid, loc)]),
+                        false,
+                    )
+                });
+                self.file_manager.add_diagnostic(error.into(), false);
+                Err(self.file_manager.render(color))
             }
         }
     }
 
     /// if compile succeeded, return last expression's reg id
-    fn compile_ast(&mut self, ast: &mut Ast) -> Result<Option<usize>, ()> {
+    fn compile_ast(&mut self, ast: &[Stmt]) -> Result<Option<usize>, ()> {
         let mut return_value = None;
         let mut has_error = false;
 
         // Scan all constant
-        ast.statements
-            .iter()
+        ast.iter()
             .for_each(|stmt| self.scan_constant_capture_stmt(stmt));
 
-        for (i, stmt) in ast.statements.iter().enumerate() {
-            match self.compile_stmt(stmt, i != ast.statements.len() - 1, None) {
+        for (i, stmt) in ast.iter().enumerate() {
+            match self.compile_stmt(stmt, i != ast.len() - 1, None) {
                 Ok(ret) => return_value = ret,
                 Err(code) => {
                     has_error = true;
-                    ast.diagnoser.push(Diagnostic::from(code));
+                    self.file_manager
+                        .add_diagnostic(Diagnostic::from(code), false);
                 }
             }
         }
@@ -459,7 +477,11 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 // For macro implicitly use `Option`
                 self.scan_constant_capture_expr(
                     &Expr::Id {
-                        loc: 0..0,
+                        loc: Loc {
+                            start: 0,
+                            end: 0,
+                            fid: usize::MAX,
+                        },
                         name: "Option".to_string(),
                     },
                     true,
@@ -521,7 +543,11 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 if matches!(op, OpInfix::Range) {
                     self.scan_constant_capture_expr(
                         &Expr::Id {
-                            loc: 0..0,
+                            loc: Loc {
+                                start: 0,
+                                end: 0,
+                                fid: usize::MAX,
+                            },
                             name: "Range".to_string(),
                         },
                         true,
@@ -532,7 +558,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             }
             Expr::Fn { .. } => (),
             Expr::Id { name, .. } if scan_capture => {
-                if let Some((id, depth, loc, _)) = self.registers.lookup_variable(name) {
+                if let Some((id, depth, loc)) = self.registers.lookup_variable(name) {
                     // variable is captured
                     // make a local copy and register capture info
                     if depth > 0 {
@@ -548,7 +574,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             Expr::Id { .. } => (),
             Expr::Parentheses { content, .. } => self.scan_constant_capture_expr(content, true),
             Expr::Const { value, .. } => self.scan_constant_capture(value),
-            Expr::Module { .. } => todo!(),
+            Expr::_Module { .. } => todo!(),
             Expr::Error => unreachable!(),
         }
     }
@@ -860,7 +886,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 body,
             } => {
                 // declare variable
-                let id = if let Some((id, depth, _, _)) = self.registers.lookup_variable(name) {
+                let id = if let Some((id, depth, _)) = self.registers.lookup_variable(name) {
                     assert!(depth == 0);
                     id
                 } else {
@@ -1051,7 +1077,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 Ok(ret)
             }
             Expr::Id { loc, name } => match self.registers.lookup_variable(name) {
-                Some((id, depth, _, _)) => {
+                Some((id, depth, _)) => {
                     assert!(depth == 0);
                     Ok(if let Some(target) = target {
                         self.get_current_func()
@@ -1314,7 +1340,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     }));
                 Ok((rd, target.is_none()))
             }
-            Expr::Module { loc: _, path: _ } => todo!(),
+            Expr::_Module { loc: _, path: _ } => todo!(),
         }
     }
 
@@ -1322,7 +1348,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         match lhs {
             Expr::Id { loc: id_loc, name } => {
                 // declare variable
-                let id = if let Some((id, depth, _, _)) = self.registers.lookup_variable(name) {
+                let id = if let Some((id, depth, _)) = self.registers.lookup_variable(name) {
                     assert!(depth == 0);
                     id
                 } else {
@@ -1381,7 +1407,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     unreachable!()
                 };
                 let var_reg = match self.registers.lookup_variable(&name) {
-                    Some((id, depth, _, _)) => {
+                    Some((id, depth, _)) => {
                         assert!(depth == 0);
                         Ok(id)
                     }

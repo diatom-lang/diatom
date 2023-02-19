@@ -1,4 +1,5 @@
 use crate::{
+    file_manager::Loc,
     interpreter::{Func, Gc},
     IoWrite,
 };
@@ -88,7 +89,7 @@ impl Vm {
         byte_code: &[Func],
         gc: &mut Gc<Buffer>,
         out: &mut Buffer,
-    ) -> VmError {
+    ) -> (VmError, Vec<Loc>) {
         loop {
             let Ip { func_id, inst } = self.ip;
             debug_assert!(byte_code.len() > func_id);
@@ -97,8 +98,19 @@ impl Vm {
             self.ip = match unsafe { func.insts.get_unchecked(inst) }
                 .exec(self.ip, gc, out)
                 .map_err(|err| {
-                    gc.clean_call_stack();
-                    err
+                    let trace = gc.clean_call_stack();
+                    let trace = trace
+                        .into_iter()
+                        .map(|Ip { func_id, inst }| {
+                            let op = &byte_code[func_id].insts[inst - 1];
+                            if let VmInst::OpCall( OpCall { loc, .. } )= op {
+                                loc.clone()
+                            } else {
+                                unreachable!()
+                            }
+                        })
+                        .collect();
+                    (err, trace)
                 }) {
                 Ok(ip) => ip,
                 Err(err) => return err,

@@ -1,5 +1,4 @@
-use crate::diagnostic::{Diagnoser, Diagnostic, DisplayableOsString, Loc, SharedFile};
-use std::ffi::OsString;
+use crate::file_manager::{DisplayableOsString, Loc};
 
 #[derive(Clone)]
 pub enum Stmt {
@@ -128,7 +127,7 @@ pub enum Expr {
         loc: Loc,
         value: Const,
     },
-    Module {
+    _Module {
         loc: Loc,
         path: DisplayableOsString,
     },
@@ -169,7 +168,7 @@ impl Expr {
             Expr::Id { loc, name: _ } => loc,
             Expr::Parentheses { loc, content: _ } => loc,
             Expr::Const { loc, value: _ } => loc,
-            Expr::Module { loc, path: _ } => loc,
+            Expr::_Module { loc, path: _ } => loc,
             Expr::Error => unreachable!(),
         }
         .clone()
@@ -185,41 +184,4 @@ pub enum Const {
     Bool(bool),
     List(Vec<Expr>),
     Table(Vec<(String, Expr, Loc)>),
-}
-
-/// Abstract syntax tree on a given file
-pub struct Ast {
-    pub statements: Vec<Stmt>,
-    pub file_content: SharedFile,
-    pub diagnoser: Diagnoser,
-    has_eof_error: bool,
-    has_non_eof_error: bool,
-}
-
-impl Ast {
-    pub fn new(path: OsString, content: SharedFile) -> Self {
-        Self {
-            statements: vec![],
-            file_content: content.clone(),
-            diagnoser: Diagnoser::new(path, content),
-            has_eof_error: false,
-            has_non_eof_error: false,
-        }
-    }
-
-    pub fn input_can_continue(&self) -> bool {
-        self.has_eof_error && !self.has_non_eof_error
-    }
-
-    pub fn add_diagnostic(&mut self, diag: (Diagnostic, bool)) {
-        if diag.1 {
-            self.has_eof_error = true;
-        } else if diag.0.severity >= codespan_reporting::diagnostic::Severity::Error
-            && !self.has_eof_error
-        // prevent other error triggered by eof being recorded
-        {
-            self.has_non_eof_error = true;
-        }
-        self.diagnoser.push(diag.0);
-    }
 }

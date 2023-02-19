@@ -284,8 +284,13 @@ impl<Buffer: Write> Gc<Buffer> {
         self.list_meta
     }
 
-    pub fn clean_call_stack(&mut self) {
-        self.call_stack.frames.truncate(1);
+    pub fn clean_call_stack(&mut self) -> Vec<Ip>{
+        let mut trace = vec![];
+        while !self.call_stack.frames.is_empty() {
+            trace.push(self.call_stack.fp.return_addr);
+            self.pop_call_stack();
+        }
+        trace
     }
 
     pub fn print(&self, reg: &Reg) -> String {
