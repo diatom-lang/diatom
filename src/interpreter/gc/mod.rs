@@ -75,6 +75,7 @@ pub struct Gc<Buffer: Write> {
     escaped_pool: Pool<Reg>,
     string_pool: Pool<String>,
     call_stack: CallStack,
+    up_values: Vec<BTreeSet<usize>>,
     key_pool: KeyPool,
     int_meta: usize,
     float_meta: usize,
@@ -106,6 +107,7 @@ impl<Buffer: Write> Gc<Buffer> {
                     write_back: None,
                 },
             },
+            up_values: vec![BTreeSet::new()],
             string_pool: Default::default(),
             obj_pool,
             escaped_pool: Default::default(),
@@ -170,27 +172,32 @@ impl<Buffer: Write> Gc<Buffer> {
         let reg = unsafe { self.call_stack.regs.get_unchecked(n) };
         match reg {
             StackReg::Reg(reg) => reg,
-            StackReg::Shared(id) => unsafe { self.escaped_pool.get_unchecked(*id) },
+            StackReg::Shared(id) => {
+                let reg = unsafe { self.escaped_pool.get_unchecked(*id) };
+                reg
+            }
         }
     }
 
     pub fn share_reg(&mut self, id: usize, depth: usize) -> usize {
         debug_assert!(id != 0);
         let stack = &mut self.call_stack;
+        let stack_len = stack.frames.len() + 1;
         debug_assert!(depth > 0);
         let frame = if depth == 1 {
             stack.fp.ptr
         } else {
-            stack.frames[stack.frames.len() + 1 - depth].ptr
+            stack.frames[stack_len - depth].ptr
         };
         let shared_reg = &mut self.call_stack.regs[frame + id];
         match shared_reg {
             StackReg::Reg(reg) => {
-                let id = self.escaped_pool.alloc(reg.clone());
-                *shared_reg = StackReg::Shared(id);
-                id
+                let sid = self.escaped_pool.alloc(reg.clone());
+                *shared_reg = StackReg::Shared(sid);
+                self.up_values[stack_len - depth].insert(frame + id);
+                sid
             }
-            StackReg::Shared(id) => *id,
+            StackReg::Shared(sid) => *sid,
         }
     }
 
@@ -205,7 +212,9 @@ impl<Buffer: Write> Gc<Buffer> {
         let prev = unsafe { stack.regs.get_unchecked_mut(n) };
         match prev {
             StackReg::Reg(r) => *r = reg,
-            StackReg::Shared(id) => *unsafe { self.escaped_pool.get_unchecked_mut(*id) } = reg,
+            StackReg::Shared(id) => {
+                *unsafe { self.escaped_pool.get_unchecked_mut(*id) } = reg.clone()
+            },
         }
     }
 
@@ -228,6 +237,12 @@ impl<Buffer: Write> Gc<Buffer> {
             },
         );
         stack.frames.push(fp_old);
+        if stack.frames.len() + 1 > self.up_values.len() {
+            self.up_values.push(BTreeSet::new());
+        } else {
+            debug_assert!(self.up_values.len() > stack.frames.len());
+            unsafe { self.up_values.get_unchecked_mut(stack.frames.len()).clear() }
+        }
 
         if let GcObject::Closure {
             captured, reg_size, ..
@@ -251,6 +266,15 @@ impl<Buffer: Write> Gc<Buffer> {
     pub fn pop_call_stack(&mut self) -> (Ip, Option<usize>) {
         let stack = &mut self.call_stack;
         debug_assert!(!stack.frames.is_empty());
+        let stack_len = stack.frames.len();
+        debug_assert!(self.up_values.len() > stack_len);
+        unsafe { self.up_values.get_unchecked_mut(stack_len) }
+            .iter()
+            .for_each(|reg| {
+                debug_assert!(stack.regs.len() > *reg);
+                *unsafe { stack.regs.get_unchecked_mut(*reg) } = StackReg::Reg(Reg::Unit);
+            });
+
         let fp = unsafe { stack.frames.pop().unwrap_unchecked() };
 
         let Frame {
@@ -269,6 +293,7 @@ impl<Buffer: Write> Gc<Buffer> {
         } else {
             debug_assert!(false)
         }
+
         (return_addr, write_back)
     }
 
@@ -284,7 +309,7 @@ impl<Buffer: Write> Gc<Buffer> {
         self.list_meta
     }
 
-    pub fn clean_call_stack(&mut self) -> Vec<Ip>{
+    pub fn clean_call_stack(&mut self) -> Vec<Ip> {
         let mut trace = vec![];
         while !self.call_stack.frames.is_empty() {
             trace.push(self.call_stack.fp.return_addr);
