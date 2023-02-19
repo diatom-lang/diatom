@@ -167,6 +167,7 @@ pub struct Interpreter<Buffer: IoWrite> {
     gc: Gc<Buffer>,
     out: Buffer,
     file_manager: FileManager,
+    color: bool,
 }
 
 impl<Buffer: IoWrite> Interpreter<Buffer> {
@@ -185,6 +186,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             gc: Gc::new(),
             out: buffer,
             file_manager: FileManager::new(),
+            color: false,
         };
         // Initialize int and float meta table
         let int = interpreter.registers.declare_variable("Int", None);
@@ -205,10 +207,16 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
 
         impl_prelude(&mut interpreter);
         interpreter
-            .exec(include_str!("std.dm"), OsStr::new("std.dm"), true)
+            .exec(include_str!("std.dm"), OsStr::new("std.dm"))
             .map_err(|s| print!("{s}"))
             .expect("Internal Error: Panic while executing diatom standard library.");
         interpreter
+    }
+
+    /// Enable ansi colored error message
+    pub fn with_color(mut self) -> Self {
+        self.color = true;
+        self
     }
 
     /// Register an external rust function
@@ -285,9 +293,8 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         &mut self,
         code: impl AsRef<str>,
         source: &OsStr,
-        color: bool,
     ) -> Result<String, String> {
-        self.compile(code, source, color)?;
+        self.compile(code, source)?;
         let mut decompiled = String::new();
         for Func {
             name,
@@ -316,13 +323,12 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         &mut self,
         code: impl AsRef<str>,
         source: &OsStr,
-        color: bool,
     ) -> Result<(), String> {
         self.file_manager.clear_diagnoses();
         let mut parser = Parser::new(&mut self.file_manager);
-        let mut ast = parser.parse_file(Either::Left((source, code.as_ref())));
+        let ast = parser.parse_file(Either::Left((source, code.as_ref())));
         if self.file_manager.error_count() > 0 {
-            return Err(self.file_manager.render(color));
+            return Err(self.file_manager.render(self.color));
         }
 
         let registers_prev = self.registers.clone();
@@ -330,10 +336,10 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         self.byte_code[0].insts.clear();
         self.vm.reset_ip();
 
-        let return_value = self.compile_ast(&mut ast).map_err(|_| {
+        let return_value = self.compile_ast(&ast).map_err(|_| {
             // restore variable table if compile failed
             self.registers = registers_prev;
-            self.file_manager.render(color)
+            self.file_manager.render(self.color)
         })?;
 
         // return after main
@@ -368,9 +374,8 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         &mut self,
         code: impl AsRef<str>,
         source: &OsStr,
-        color: bool,
     ) -> Result<(), String> {
-        self.compile(code, source, color)?;
+        self.compile(code, source)?;
         match self.vm.exec(&self.byte_code, &mut self.gc, &mut self.out) {
             (VmError::Yield(_), _) => Ok(()),
             (error, trace) => {
@@ -383,7 +388,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                         false,
                     )
                 });
-                Err(self.file_manager.render(color))
+                Err(self.file_manager.render(self.color))
             }
         }
     }
@@ -391,8 +396,8 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// Execute and print last statement's return value
     ///
     /// If return value is unit, then it will not be printed.
-    pub fn exec_repl(&mut self, code: impl AsRef<str>, color: bool) -> Result<(), String> {
-        self.compile(code, OsStr::new("<interactive>"), color)?;
+    pub fn exec_repl(&mut self, code: impl AsRef<str>) -> Result<(), String> {
+        self.compile(code, OsStr::new("<interactive>"))?;
         match self.vm.exec(&self.byte_code, &mut self.gc, &mut self.out) {
             (VmError::Yield(None), _) => Ok(()),
             (VmError::Yield(Some(reg_id)), _) => {
@@ -407,7 +412,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                                 error: err,
                             };
                             self.file_manager.add_diagnostic(error_code.into(), false);
-                            self.file_manager.render(color)
+                            self.file_manager.render(self.color)
                         })
                     }
                 }
@@ -422,7 +427,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     )
                 });
                 self.file_manager.add_diagnostic(error.into(), false);
-                Err(self.file_manager.render(color))
+                Err(self.file_manager.render(self.color))
             }
         }
     }

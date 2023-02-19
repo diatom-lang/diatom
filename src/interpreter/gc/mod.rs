@@ -213,7 +213,7 @@ impl<Buffer: Write> Gc<Buffer> {
         match prev {
             StackReg::Reg(r) => *r = reg,
             StackReg::Shared(id) => {
-                *unsafe { self.escaped_pool.get_unchecked_mut(*id) } = reg.clone()
+                *unsafe { self.escaped_pool.get_unchecked_mut(*id) } = reg
             },
         }
     }

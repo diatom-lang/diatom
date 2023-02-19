@@ -1,7 +1,7 @@
 use std::{
     env,
     ffi::OsStr,
-    io::{self, Stdout},
+    io::Stdout,
 };
 
 use crate::Interpreter;
@@ -15,15 +15,11 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// An interactive console for Diatom
 pub struct Console {
     interpreter: Interpreter<Stdout>,
-    color: bool,
 }
 
 impl Console {
-    pub fn new(color: bool) -> Self {
-        Self {
-            interpreter: Interpreter::new(io::stdout()),
-            color,
-        }
+    pub fn new(interpreter: Interpreter<Stdout>) -> Self {
+        Self { interpreter }
     }
 
     /// Run this console
@@ -76,15 +72,14 @@ impl Console {
             match sig {
                 Ok(Signal::Success(buffer)) => {
                     if inspect {
-                        match self.interpreter.decompile(
-                            buffer,
-                            OsStr::new("<interactive>"),
-                            self.color,
-                        ) {
+                        match self
+                            .interpreter
+                            .decompile(buffer, OsStr::new("<interactive>"))
+                        {
                             Ok(s) => print!("{s}"),
                             Err(s) => eprint!("{s}"),
                         }
-                    } else if let Err(e) = self.interpreter.exec_repl(buffer, self.color) {
+                    } else if let Err(e) = self.interpreter.exec_repl(buffer) {
                         eprint!("{e}")
                     };
                 }
