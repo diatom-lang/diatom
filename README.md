@@ -64,7 +64,7 @@ cargo run --release # Run interactive console
 ## Reference & Grammar
 
 #### The Reference Book
-The Diatom Reference is available at [here](https://diatom-lang.github.io/reference/) (out-dated currently). 
+The Diatom Reference (with examples) is available at [here](https://diatom-lang.github.io/reference/). 
 
 #### Examples
 For standard library function and built-in types and methods checks [examples](examples/). These examples are checked by unit tests and will never out of date.

@@ -58,6 +58,7 @@ fn test_binary_op() {
 #[test]
 fn test_assignment() {
     test_ok!("a = 5 b = 1 a", "5");
+    test_err!("a + 3 = 5");
 }
 
 #[test]
@@ -141,6 +142,7 @@ fn test_table() {
     test_err!("{a = 1, a = 1}");
     test_err!("a.b");
     test_err!("a.'hello'");
+    test_err!("a <- {}");
 }
 
 #[test]
