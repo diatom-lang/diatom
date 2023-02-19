@@ -33,7 +33,7 @@ lazy_static! {
     static ref KEY_VALUE_STYLE: Style = Style::new().fg(Color::Yellow);
     static ref NUM_STYLE: Style = Style::new().fg(Color::Green);
     static ref STR_STYLE: Style = Style::new().fg(Color::LightMagenta);
-    static ref FUNC_STYLE: Style = Style::new().fg(Color::Blue); 
+    static ref FUNC_STYLE: Style = Style::new().fg(Color::Blue);
     static ref DEFAULT_STYLE: Style = Style::default();
     // Match valid integer or float point number
     static ref RE_NUM: Regex =
