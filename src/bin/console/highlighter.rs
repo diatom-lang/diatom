@@ -10,6 +10,8 @@ const KEYWORDS: [&str; 21] = [
 
 const KEY_VALUES: [&str; 3] = ["true", "false", "self"];
 
+const BUILT_IN_FUNC: [&str; 5] = ["println", "print", "panic", "unreachable", "todo"];
+
 #[derive(Default)]
 pub struct DiatomHighlighter;
 
@@ -21,12 +23,17 @@ fn is_key_value(s: &str) -> bool {
     KEY_VALUES.iter().any(|k| *k == s)
 }
 
+fn is_func(s: &str) -> bool {
+    BUILT_IN_FUNC.iter().any(|k| *k == s)
+}
+
 lazy_static! {
     static ref COMMENT_STYLE: Style = Style::new().fg(Color::DarkGray);
     static ref KEY_STYLE: Style = Style::new().fg(Color::LightRed);
     static ref KEY_VALUE_STYLE: Style = Style::new().fg(Color::Yellow);
     static ref NUM_STYLE: Style = Style::new().fg(Color::Green);
     static ref STR_STYLE: Style = Style::new().fg(Color::LightMagenta);
+    static ref FUNC_STYLE: Style = Style::new().fg(Color::Blue); 
     static ref DEFAULT_STYLE: Style = Style::default();
     // Match valid integer or float point number
     static ref RE_NUM: Regex =
@@ -57,6 +64,8 @@ impl Highlighter for DiatomHighlighter {
                     styled_text.push((*KEY_STYLE, id.to_string()));
                 } else if is_key_value(id) {
                     styled_text.push((*KEY_VALUE_STYLE, id.to_string()));
+                } else if is_func(id) {
+                    styled_text.push((*FUNC_STYLE, id.to_string()));
                 } else {
                     styled_text.push((*DEFAULT_STYLE, id.to_string()));
                 }
