@@ -81,4 +81,18 @@ To use latest build, add this repo to your `Cargo.toml`. Latest build documentat
 
 Work in progress.
 
+## Feature Showcase
+
+#### Functional style std-lib
+<img width="547" alt="Screenshot 2023-02-19 at 5 26 45 PM" src="https://user-images.githubusercontent.com/63455223/219940116-b313caed-f86b-474d-94fc-2618d196377e.png">
+
+#### Pretty error reporting and trace-back
+<img width="762" alt="Screenshot 2023-02-19 at 5 26 17 PM" src="https://user-images.githubusercontent.com/63455223/219940145-044e9094-f840-4929-a5b2-0405955bf4d4.png">
+
+#### Expression based syntax
+<img width="792" alt="Screenshot 2023-02-19 at 5 29 19 PM" src="https://user-images.githubusercontent.com/63455223/219940155-f5295365-869a-41d9-826d-279ca4b7b0a0.png">
+
+#### Interactive REPL console with **syntax highlight**
+ <img width="757" alt="Screenshot 2023-02-19 at 5 35 11 PM" src="https://user-images.githubusercontent.com/63455223/219940243-9572869b-5089-464e-a233-4dca3ea306a2.png">
+
 
