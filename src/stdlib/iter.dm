@@ -259,5 +259,20 @@ def Iter.enum self =
     enum
 end
 
-        
-            
+-- take_until
+def Iter.take_until self f =
+    take_until = {
+        underlay = self,
+    } <- Iter
+    def take_until.__next self =
+        next = self.underlay.__next$()
+        if next is Option::None then
+            next
+        elsif f$(next.value) then
+            Option::None
+        else
+            next
+        end
+    end
+    take_until
+end
