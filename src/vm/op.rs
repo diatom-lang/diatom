@@ -736,7 +736,7 @@ pub struct OpIndex {
 }
 
 impl Instruction for OpIndex {
-    #[cfg_attr(feature = "profile", inline(never))]
+    #[inline(never)]
     fn exec<Buffer: IoWrite>(
         &self,
         ip: Ip,
@@ -787,6 +787,72 @@ impl Instruction for OpIndex {
             decompiled,
             "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
             "power", self.lhs, self.rhs, self.rd
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpSetIndex {
+    pub loc: Loc,
+    pub rs: usize,
+    pub idx: usize,
+    pub rd: usize,
+}
+
+impl Instruction for OpSetIndex {
+    #[inline(never)]
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let rd = gc.read_reg(self.rd).clone();
+        let idx = gc.read_reg(self.idx).clone();
+        let rs = gc.read_reg(self.rs).clone();
+        match (&rd, &idx) {
+            (Reg::Ref(rid), Reg::Int(idx)) => {
+                let idx = *idx;
+                if let GcObject::List(l) = unsafe { gc.get_obj_unchecked_mut(*rid) } {
+                    if (idx >= 0 && idx as usize >= l.len())
+                        || (idx < 0 && idx.unsigned_abs() as usize > l.len())
+                    {
+                        return Err(VmError::IndexOutOfBound {
+                            loc: self.loc.clone(),
+                            bound: l.len(),
+                            index: idx,
+                        });
+                    } else {
+                        if idx >= 0 {
+                            l[idx.unsigned_abs() as usize] = rs;
+                        } else {
+                            let len = l.len();
+                            l[len - (idx.unsigned_abs() as usize)] = rs;
+                        };
+                        Ok(())
+                    }
+                } else {
+                    Err(())
+                }
+            }
+            _ => Err(()),
+        }
+        .map_err(|_| VmError::CanNotIndex {
+            loc: self.loc.clone(),
+            t1: get_type(&rd, gc),
+            t2: get_type(&idx, gc),
+        })?;
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Reg#{}[Reg#{}] = Reg#{}",
+            "power", self.rd, self.idx, self.rs
         )
         .unwrap()
     }

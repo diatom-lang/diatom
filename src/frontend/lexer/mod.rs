@@ -52,11 +52,14 @@ impl Lexer {
             match iter.peek2() {
                 (Some('-'), Some('-')) => {
                     // Ignore comment
+                    iter.next();
+                    iter.next();
                     loop {
                         let c = iter.peek();
                         match c {
                             Some(c) => {
                                 if c == '\n' {
+                                    iter.next();
                                     break;
                                 };
                             }

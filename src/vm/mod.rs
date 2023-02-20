@@ -55,6 +55,7 @@ pub enum VmInst {
     OpSetTable,
     OpGetTuple,
     OpSetTuple,
+    OpSetIndex,
     OpMakeTable,
     OpSetMeta,
     OpMakeTuple,

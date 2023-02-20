@@ -58,6 +58,7 @@ fn test_binary_op() {
 #[test]
 fn test_assignment() {
     test_ok!("a = 5 b = 1 a", "5");
+    test_ok!("l = [1,2,3] l[0] = 10 l[0]", "10");
     test_err!("a + 3 = 5");
 }
 

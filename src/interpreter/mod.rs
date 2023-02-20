@@ -16,7 +16,7 @@ mod api;
 use crate::file_manager::FileManager;
 use crate::vm::op::{
     OpGe, OpGetTable, OpGetTuple, OpIndex, OpIs, OpLe, OpLt, OpMakeList, OpMakeTable, OpMakeTuple,
-    OpNe, OpSetMeta, OpSetTable, OpSetTuple,
+    OpNe, OpSetIndex, OpSetMeta, OpSetTable, OpSetTuple,
 };
 use crate::{
     file_manager::{Diagnostic, Loc},
@@ -104,7 +104,7 @@ impl FutureJump {
 }
 
 pub struct Func {
-    pub name: String,
+    pub id: usize,
     pub parameters: usize,
     pub insts: Vec<VmInst>,
 }
@@ -178,7 +178,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
 
     fn init(buffer: Buffer, color: bool) -> Self {
         let main = Func {
-            name: "main".to_string(),
+            id: 0,
             parameters: 0,
             insts: vec![],
         };
@@ -293,12 +293,12 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         self.compile(code, source)?;
         let mut decompiled = String::new();
         for Func {
-            name,
+            id,
             parameters,
             insts,
         } in self.byte_code.iter()
         {
-            writeln!(decompiled, "Function: {name}\nParameters: {parameters}").unwrap();
+            writeln!(decompiled, "Function: Func@{id}\nParameters: {parameters}").unwrap();
             writeln!(decompiled, "Body:").unwrap();
             let pad = insts.len().ilog10() as usize + 1;
             for (n, inst) in insts.iter().enumerate() {
@@ -636,12 +636,12 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 loc: _,
                 expr:
                     Expr::Infix {
-                        loc,
                         op: OpInfix::Assign,
                         lhs,
                         rhs,
+                        ..
                     },
-            } => self.compile_assignment(lhs, rhs, loc.clone())?,
+            } => self.compile_assignment(lhs, rhs)?,
             Stmt::Expr { loc: _, expr } => {
                 let (reg_id, tmp) = self.compile_expr(expr, discard, target)?;
                 return_value = Some((reg_id, tmp));
@@ -1327,12 +1327,8 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 parameters,
                 body,
             } => {
-                let (func_id, parameters, capture, reg_size) = self.compile_closure(
-                    Option::<String>::None,
-                    parameters,
-                    either::Left(body),
-                    loc.clone(),
-                )?;
+                let (func_id, parameters, capture, reg_size) =
+                    self.compile_closure(parameters, either::Left(body), loc.clone())?;
                 let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
                 self.get_current_func()
                     .insts
@@ -1350,7 +1346,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         }
     }
 
-    fn compile_assignment(&mut self, lhs: &Expr, rhs: &Expr, loc: Loc) -> Result<(), ErrorCode> {
+    fn compile_assignment(&mut self, lhs: &Expr, rhs: &Expr) -> Result<(), ErrorCode> {
         match lhs {
             Expr::Id { loc: id_loc, name } => {
                 // declare variable
@@ -1367,113 +1363,71 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 }
                 Ok(())
             }
-            expr @ Expr::Infix {
-                op: OpInfix::Member,
-                ..
+            Expr::Index {
+                lhs: rd,
+                rhs: idx,
+                loc,
             } => {
-                let mut expr = expr;
-                enum Attr {
-                    Name(String),
-                    Index(usize),
+                let (rd_id, rd_tmp) = self.compile_expr(rd, false, None)?;
+                let (idx_id, idx_tmp) = self.compile_expr(idx, false, None)?;
+                let (rs_id, rs_tmp) = self.compile_expr(rhs, false, None)?;
+                if rd_tmp {
+                    self.registers.free_intermediate(rd_id);
                 }
-                let mut attrs = vec![];
-                loop {
-                    match expr {
-                        Expr::Id { loc, name } => {
-                            attrs.push((Attr::Name(name.clone()), loc));
-                            break;
-                        }
-                        Expr::Infix {
-                            loc,
-                            op: OpInfix::Member,
-                            lhs,
-                            rhs,
-                        } => match rhs.as_ref() {
-                            Expr::Id { loc, name } => {
-                                attrs.push((Attr::Name(name.clone()), loc));
-                                expr = lhs;
-                            }
-                            Expr::Const {
-                                loc,
-                                value: Const::Int(i),
-                            } => {
-                                assert!(*i >= 0);
-                                attrs.push((Attr::Index(*i as usize), loc));
-                                expr = lhs;
-                            }
-                            _ => return Err(ErrorCode::CannotAssign(loc.clone())),
-                        },
-                        _ => return Err(ErrorCode::CannotAssign(expr.get_loc())),
-                    }
+                if idx_tmp {
+                    self.registers.free_intermediate(idx_id);
                 }
-                let name = attrs.pop().unwrap();
-                let name = if let (Attr::Name(name), _) = name {
-                    name
-                } else {
-                    unreachable!()
-                };
-                let var_reg = match self.registers.lookup_variable(&name) {
-                    Some((id, depth, _)) => {
-                        assert!(depth == 0);
-                        Ok(id)
+                if rs_tmp {
+                    self.registers.free_intermediate(rs_id);
+                }
+                self.get_current_insts()
+                    .push(VmInst::OpSetIndex(OpSetIndex {
+                        loc: loc.clone(),
+                        rs: rs_id,
+                        idx: idx_id,
+                        rd: rd_id,
+                    }));
+                Ok(())
+            }
+            Expr::Infix {
+                op: OpInfix::Member,
+                lhs: rd,
+                rhs: idx,
+                loc,
+            } => {
+                let (rd_id, rd_tmp) = self.compile_expr(rd, false, None)?;
+                let (rs_id, rs_tmp) = self.compile_expr(rhs, false, None)?;
+                if rd_tmp {
+                    self.registers.free_intermediate(rd_id);
+                }
+                if rs_tmp {
+                    self.registers.free_intermediate(rs_id);
+                }
+                match idx.as_ref() {
+                    Expr::Id { name, .. } => {
+                        let name = self.gc.get_or_insert_table_key(name);
+                        self.get_current_insts()
+                            .push(VmInst::OpSetTable(OpSetTable {
+                                loc: loc.clone(),
+                                rs: rs_id,
+                                rd: rd_id,
+                                attr: name,
+                            }));
                     }
-                    None => Err(ErrorCode::NameNotDefined(loc, name)),
-                }?;
-
-                attrs.reverse();
-                let last = attrs.len() - 1;
-                let mut rd = None;
-                for (i, (attr, loc)) in attrs.into_iter().enumerate() {
-                    if i == last {
-                        let (rs, tmp) = self.compile_expr(rhs, false, None)?;
-                        if tmp {
-                            self.registers.free_intermediate(rs);
-                        }
-                        let rd = rd
-                            .map(|rd| {
-                                self.registers.free_intermediate(rd);
-                                rd
-                            })
-                            .unwrap_or(var_reg);
-                        let op = match attr {
-                            Attr::Name(attr) => VmInst::OpSetTable(OpSetTable {
+                    Expr::Const {
+                        value: Const::Int(i),
+                        ..
+                    } => {
+                        assert!(*i >= 0);
+                        self.get_current_insts()
+                            .push(VmInst::OpSetTuple(OpSetTuple {
                                 loc: loc.clone(),
-                                rs,
-                                rd,
-                                attr: self.gc.get_or_insert_table_key(attr),
-                            }),
-                            Attr::Index(idx) => VmInst::OpSetTuple(OpSetTuple {
-                                loc: loc.clone(),
-                                rs,
-                                rd,
-                                idx,
-                            }),
-                        };
-                        self.get_current_insts().push(op);
-                    } else {
-                        let rs = if let Some(rs) = rd {
-                            rs
-                        } else {
-                            rd = Some(self.registers.declare_intermediate());
-                            var_reg
-                        };
-                        let rd = rd.unwrap();
-                        let op = match attr {
-                            Attr::Name(attr) => VmInst::OpGetTable(OpGetTable {
-                                loc: loc.clone(),
-                                rs,
-                                rd,
-                                attr: self.gc.get_or_insert_table_key(attr),
-                            }),
-                            Attr::Index(idx) => VmInst::OpGetTuple(OpGetTuple {
-                                loc: loc.clone(),
-                                rs,
-                                rd,
-                                idx,
-                            }),
-                        };
-                        self.get_current_insts().push(op);
+                                rs: rs_id,
+                                rd: rd_id,
+                                idx: *i as usize,
+                            }));
                     }
+                    expr => return Err(ErrorCode::CannotAssign(expr.get_loc())),
                 }
                 Ok(())
             }
@@ -1720,16 +1674,13 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// Return (func_id, parameters len, captured_regs, reg_size)
     fn compile_closure(
         &mut self,
-        name: Option<impl AsRef<str>>,
         parameters: &[(String, Loc)],
         body: Either<&Expr, &[Stmt]>,
         loc: Loc,
     ) -> std::result::Result<(usize, usize, Vec<Capture>, usize), ErrorCode> {
         let func_id = self.byte_code.len();
         self.byte_code.push(Func {
-            name: name
-                .map(|name| format!("{}@{func_id}", name.as_ref()))
-                .unwrap_or_else(|| format!("Anonymous@{func_id}")),
+            id: func_id,
             parameters: parameters.len(),
             insts: vec![],
         });
@@ -1747,15 +1698,14 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         let result = match body {
             Either::Left(Expr::Infix {
                 op: OpInfix::Assign,
-                loc,
                 lhs,
                 rhs,
+                ..
             }) => {
-                self.compile_assignment(lhs, rhs, loc.clone())
-                    .map_err(|err| {
-                        self.registers.leave_function();
-                        err
-                    })?;
+                self.compile_assignment(lhs, rhs).map_err(|err| {
+                    self.registers.leave_function();
+                    err
+                })?;
                 (0, false)
             }
             Either::Left(body) => self.compile_expr(body, false, None).map_err(|err| {
