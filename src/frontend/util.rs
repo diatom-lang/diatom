@@ -54,8 +54,8 @@ impl<'a> Iterator for FileIterator<'a> {
     type Item = char;
     fn next(&mut self) -> Option<Self::Item> {
         let next_item = self.iterator.next();
-        if next_item.is_some() {
-            self.offset += 1
+        if let Some(c) = next_item {
+            self.offset += c.len_utf8()
         };
         next_item
     }
