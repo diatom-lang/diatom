@@ -18,7 +18,6 @@ pub enum ConstantValue {
 pub struct Capture {
     pub rd: usize,
     pub rs: usize,
-    pub depth: usize,
 }
 
 #[derive(Clone)]
