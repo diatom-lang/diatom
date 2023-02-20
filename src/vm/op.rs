@@ -171,7 +171,7 @@ impl Instruction for OpCall {
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
-            "{: >FORMAT_PAD$}    Reg#{} $ Reg#{}..{} -> {}",
+            "{: >FORMAT_PAD$}    Reg#{}(Reg#{}..{}) -> {}",
             "call",
             self.reg_id,
             self.start,
@@ -242,8 +242,8 @@ impl Instruction for OpMakeClosure {
     ) -> Result<Ip, VmError> {
         let mut captured_regs = vec![];
 
-        for Capture { rd, rs, depth } in self.capture.iter() {
-            let reg = gc.share_reg(*rs, *depth);
+        for Capture { rd, rs } in self.capture.iter() {
+            let reg = gc.share_reg(*rs);
             captured_regs.push((*rd, reg));
         }
 
@@ -268,10 +268,10 @@ impl Instruction for OpMakeClosure {
             "closure", self.func_id, self.rd
         )
         .unwrap();
-        for Capture { rd, rs, depth } in self.capture.iter() {
+        for Capture { rd, rs } in self.capture.iter() {
             writeln!(
                 decompiled,
-                "    {: >FORMAT_PAD$}    Reg#{rd} <- Reg@-{depth}#{rs}",
+                "    {: >FORMAT_PAD$}    Reg#{rd} <- Reg@#{rs}",
                 ""
             )
             .unwrap()
@@ -785,7 +785,7 @@ impl Instruction for OpIndex {
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
-            "{: >FORMAT_PAD$}    Reg#{} Reg#{} -> Reg#{}",
+            "{: >FORMAT_PAD$}    Reg#{}[Reg#{}] -> Reg#{}",
             "power", self.lhs, self.rhs, self.rd
         )
         .unwrap()
@@ -1527,7 +1527,7 @@ impl Instruction for OpSetTuple {
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
-            "{: >FORMAT_PAD$}   Reg#{} -> Reg#{}.{}",
+            "{: >FORMAT_PAD$}    Reg#{} -> Reg#{}.{}",
             "set_tuple", self.rs, self.rd, self.idx
         )
         .unwrap()
@@ -1578,7 +1578,7 @@ impl Instruction for OpSetTable {
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
-            "{: >FORMAT_PAD$}   Reg#{} -> Reg#{}.{}",
+            "{: >FORMAT_PAD$}    Reg#{} -> Reg#{}.{}",
             "set_table",
             self.rs,
             self.rd,
@@ -1711,7 +1711,7 @@ impl Instruction for OpGetTable {
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
-            "{: >FORMAT_PAD$}   Reg#{}.{} -> Reg#{}",
+            "{: >FORMAT_PAD$}    Reg#{}.{} -> Reg#{}",
             "get_table",
             self.rs,
             gc.look_up_table_key(self.attr).unwrap(),
@@ -1800,7 +1800,7 @@ impl Instruction for OpMakeTable {
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
         writeln!(
             decompiled,
-            "{: >FORMAT_PAD$}   Reg#{}",
+            "{: >FORMAT_PAD$}    Reg#{}",
             "new_table", self.rd
         )
         .unwrap()

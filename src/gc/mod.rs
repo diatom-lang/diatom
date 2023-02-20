@@ -177,22 +177,19 @@ impl<Buffer: Write> Gc<Buffer> {
         }
     }
 
-    pub fn share_reg(&mut self, id: usize, depth: usize) -> usize {
+    pub fn share_reg(&mut self, id: usize) -> usize {
         debug_assert!(id != 0);
         let stack = &mut self.call_stack;
-        let stack_len = stack.frames.len() + 1;
-        debug_assert!(depth > 0);
-        let frame = if depth == 1 {
-            stack.fp.ptr
-        } else {
-            stack.frames[stack_len - depth].ptr
-        };
-        let shared_reg = &mut self.call_stack.regs[frame + id];
+        let frame = stack.fp.ptr;
+        debug_assert!(self.call_stack.regs.len() > frame + id);
+        let shared_reg = unsafe { self.call_stack.regs.get_unchecked_mut(frame + id) };
         match shared_reg {
             StackReg::Reg(reg) => {
                 let sid = self.escaped_pool.alloc(reg.clone());
                 *shared_reg = StackReg::Shared(sid);
-                self.up_values[stack_len - depth].insert(frame + id);
+                let frame_idx = self.call_stack.frames.len();
+                debug_assert!(self.up_values.len() > frame_idx);
+                unsafe { self.up_values.get_unchecked_mut(frame_idx) }.insert(frame + id);
                 sid
             }
             StackReg::Shared(sid) => *sid,
@@ -262,15 +259,16 @@ impl<Buffer: Write> Gc<Buffer> {
     pub fn pop_call_stack(&mut self) -> (Ip, Option<usize>) {
         let stack = &mut self.call_stack;
         debug_assert!(!stack.frames.is_empty());
-        let stack_len = stack.frames.len();
-        debug_assert!(self.up_values.len() > stack_len);
-        unsafe { self.up_values.get_unchecked_mut(stack_len) }
+        let frame_idx = stack.frames.len();
+        debug_assert!(self.up_values.len() > frame_idx);
+        unsafe { self.up_values.get_unchecked_mut(frame_idx) }
             .iter()
             .for_each(|reg| {
                 debug_assert!(stack.regs.len() > *reg);
                 *unsafe { stack.regs.get_unchecked_mut(*reg) } = StackReg::Reg(Reg::Unit);
             });
 
+        debug_assert!(!stack.frames.is_empty());
         let fp = unsafe { stack.frames.pop().unwrap_unchecked() };
 
         let Frame {

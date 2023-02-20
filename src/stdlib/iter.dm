@@ -130,9 +130,7 @@ def Iter.map self f =
     map = {
         underlay = self,
     } <- Iter
-    println(Option)
     def map.__next self =
-        print(println)
         next = self.underlay.__next()
         if not(next is Option::None) then
             next.value = f(next.value)
