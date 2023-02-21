@@ -202,3 +202,9 @@ fn test_list() {
     test_err!("a = [1,2,3] a[3]");
     test_err!("a = [] a[0]");
 }
+
+#[test]
+fn test_short_circuit() {
+    test_ok!("a = [1,2] a.len()>2 and println(a[2])", "false");
+    test_ok!("a = [1,2] a.len()<=2 or println(a[2])", "true");
+}

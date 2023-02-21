@@ -1,6 +1,6 @@
 [package]
 name = "diatom"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 authors = [ "Terence Ng", "Aoyang Yu" ]
 description = "The diatom programming language"
@@ -14,6 +14,7 @@ codespan-reporting = "0.11"
 regex = "1.7"
 lazy_static = "1.4"
 bimap = "0.6"
+more-asserts = "0.3"
 ahash = { version = "0.8", default-features = false, features = ["compile-time-rng", "std"] }
 reedline = { version = "0.15", optional = true }
 nu-ansi-term = { version = "0.46", optional = true }

@@ -103,7 +103,7 @@ impl<'a, Buffer: IoWrite> ConstScanner<'a, Buffer> {
                 .register_table
                 .get_or_alloc_constant(ConstantValue::Str(s.clone()))
                 .map_err(|reg| {
-                    let sid = self.gc.alloc_str(s.clone());
+                    let sid = self.gc.alloc_str_pinned(s.clone());
                     (reg, Reg::Str(sid))
                 }),
             Const::Bool(b) => self

@@ -373,3 +373,57 @@ pub fn init_list_meta<Buffer: IoWrite>(
 
     pool.alloc(GcObject::Table(meta))
 }
+
+pub fn init_gc_meta<Buffer: IoWrite>(
+    pool: &mut Pool<GcObject<Buffer>>,
+    key_pool: &mut KeyPool,
+) -> usize {
+    let mut meta = Table {
+        attributes: Default::default(),
+        meta_table: None,
+    };
+
+    let collect = pool.alloc(new_f(|state, parameters: &[Reg], _| {
+        if !parameters.is_empty() {
+            return Err(format!(
+                "Expected 0 parameter while {} is provided",
+                parameters.len()
+            ));
+        }
+        state.gc.collect();
+        Ok(Reg::Unit)
+    }));
+
+    meta.attributes
+        .insert(key_pool.get_or_insert("collect"), Reg::Ref(collect));
+
+    let pause = pool.alloc(new_f(|state, parameters: &[Reg], _| {
+        if !parameters.is_empty() {
+            return Err(format!(
+                "Expected 0 parameter while {} is provided",
+                parameters.len()
+            ));
+        }
+        state.gc.pause();
+        Ok(Reg::Unit)
+    }));
+
+    meta.attributes
+        .insert(key_pool.get_or_insert("pause"), Reg::Ref(pause));
+
+    let resume = pool.alloc(new_f(|state, parameters: &[Reg], _| {
+        if !parameters.is_empty() {
+            return Err(format!(
+                "Expected 0 parameter while {} is provided",
+                parameters.len()
+            ));
+        }
+        state.gc.resume();
+        Ok(Reg::Unit)
+    }));
+
+    meta.attributes
+        .insert(key_pool.get_or_insert("resume"), Reg::Ref(resume));
+
+    pool.alloc(GcObject::Table(meta))
+}

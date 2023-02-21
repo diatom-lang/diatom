@@ -28,9 +28,9 @@ use crate::{
     vm::{
         error::VmError,
         op::{
-            OpAdd, OpAllocReg, OpAnd, OpBranchFalse, OpBranchTrue, OpCall, OpDiv, OpDummy, OpEq,
-            OpGt, OpIDiv, OpJump, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot, OpOr, OpPow, OpRem,
-            OpRet, OpSub, OpYield,
+            OpAdd, OpAllocReg, OpBranchFalse, OpBranchTrue, OpCall, OpDiv, OpDummy, OpEq, OpGt,
+            OpIDiv, OpJump, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot, OpPow, OpRem, OpRet, OpSub,
+            OpYield,
         },
         Instruction, Vm, VmInst,
     },
@@ -198,19 +198,29 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         // Initialize int and float meta table
         let int = interpreter.registers.declare_variable("Int", None);
         interpreter.gc.alloc_reg_file(int + 1);
+        interpreter.gc.set_main_reg_size(int + 1);
         interpreter
             .gc
             .write_reg(int, Reg::Ref(interpreter.gc.int_meta()));
         let float = interpreter.registers.declare_variable("Float", None);
         interpreter.gc.alloc_reg_file(float + 1);
+        interpreter.gc.set_main_reg_size(float + 1);
         interpreter
             .gc
             .write_reg(float, Reg::Ref(interpreter.gc.float_meta()));
         let list = interpreter.registers.declare_variable("List", None);
         interpreter.gc.alloc_reg_file(list + 1);
+        interpreter.gc.set_main_reg_size(list + 1);
         interpreter
             .gc
             .write_reg(list, Reg::Ref(interpreter.gc.list_meta()));
+
+        let gc = interpreter.registers.declare_variable("Gc", None);
+        interpreter.gc.alloc_reg_file(gc + 1);
+        interpreter.gc.set_main_reg_size(gc + 1);
+        interpreter
+            .gc
+            .write_reg(gc, Reg::Ref(interpreter.gc.gc_meta()));
 
         impl_prelude(&mut interpreter);
         load_std(&mut interpreter);
@@ -276,6 +286,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         let reg = Reg::Ref(gc_id);
         let reg_id = self.registers.declare_variable(name.into(), None);
         self.gc.alloc_reg_file(reg_id + 1);
+        self.gc.set_main_reg_size(reg_id + 1);
         self.gc.write_reg(reg_id, reg);
     }
 
@@ -342,13 +353,15 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             show_id: return_value,
         }));
 
-        //
+        // Alloc registers
         self.byte_code[0].insts.insert(
             0,
             VmInst::OpAllocReg(OpAllocReg {
                 n_reg: self.registers.assigned,
             }),
         );
+
+        self.gc.set_main_reg_size(self.registers.assigned);
 
         Ok(())
     }
@@ -903,6 +916,48 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 lhs: _,
                 rhs: _,
             } => Err(ErrorCode::InvalidAssignment(loc.clone())),
+            // short circuit and
+            Expr::Infix {
+                loc,
+                op: OpInfix::And,
+                lhs,
+                rhs,
+            } => {
+                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
+                self.compile_expr(lhs, false, Some(rd))?;
+                let br_true_to_end = FutureJump {
+                    condition_reg: Some((rd, true)),
+                    inst_offset: self.get_current_insts().len(),
+                    loc: loc.clone(),
+                };
+                self.compile_expr(rhs, false, Some(rd))?;
+                br_true_to_end.patch_forward(self.get_current_func());
+                if target.is_none() {
+                    self.registers.free_intermediate(rd);
+                }
+                Ok((rd, target.is_none()))
+            }
+            // short circuit or
+            Expr::Infix {
+                loc,
+                op: OpInfix::Or,
+                lhs,
+                rhs,
+            } => {
+                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
+                self.compile_expr(lhs, false, Some(rd))?;
+                let br_true_to_end = FutureJump {
+                    condition_reg: Some((rd, false)),
+                    inst_offset: self.get_current_insts().len(),
+                    loc: loc.clone(),
+                };
+                self.compile_expr(rhs, false, Some(rd))?;
+                br_true_to_end.patch_forward(self.get_current_func());
+                if target.is_none() {
+                    self.registers.free_intermediate(rd);
+                }
+                Ok((rd, target.is_none()))
+            }
             Expr::Infix { loc, op, lhs, rhs } => {
                 let (lhs_id, lhs_tmp) = self.compile_expr(lhs, false, None)?;
                 let (rhs_id, rhs_tmp) = self.compile_expr(rhs, false, None)?;
@@ -1363,20 +1418,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     .push(VmInst::OpIs(OpIs { loc, lhs, rhs, rd }));
                 (rd, target.is_none())
             }
-            OpInfix::Or => {
-                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
-                self.get_current_func()
-                    .insts
-                    .push(VmInst::OpOr(OpOr { loc, lhs, rhs, rd }));
-                (rd, target.is_none())
-            }
-            OpInfix::And => {
-                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
-                self.get_current_func()
-                    .insts
-                    .push(VmInst::OpAnd(OpAnd { loc, lhs, rhs, rd }));
-                (rd, target.is_none())
-            }
+            OpInfix::Or | OpInfix::And => unreachable!(),
             OpInfix::Eq => {
                 let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
                 self.get_current_func()
