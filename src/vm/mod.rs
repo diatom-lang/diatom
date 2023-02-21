@@ -32,8 +32,6 @@ pub enum VmInst {
     OpDiv,
     OpIDiv,
     OpMove,
-    OpAnd,
-    OpOr,
     OpNot,
     OpNeg,
     OpJump,

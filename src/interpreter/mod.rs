@@ -28,9 +28,9 @@ use crate::{
     vm::{
         error::VmError,
         op::{
-            OpAdd, OpAllocReg, OpAnd, OpBranchFalse, OpBranchTrue, OpCall, OpDiv, OpDummy, OpEq,
-            OpGt, OpIDiv, OpJump, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot, OpOr, OpPow, OpRem,
-            OpRet, OpSub, OpYield,
+            OpAdd, OpAllocReg, OpBranchFalse, OpBranchTrue, OpCall, OpDiv, OpDummy, OpEq, OpGt,
+            OpIDiv, OpJump, OpMakeClosure, OpMove, OpMul, OpNeg, OpNot, OpPow, OpRem, OpRet, OpSub,
+            OpYield,
         },
         Instruction, Vm, VmInst,
     },
@@ -916,6 +916,48 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 lhs: _,
                 rhs: _,
             } => Err(ErrorCode::InvalidAssignment(loc.clone())),
+            // short circuit and
+            Expr::Infix {
+                loc,
+                op: OpInfix::And,
+                lhs,
+                rhs,
+            } => {
+                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
+                self.compile_expr(lhs, false, Some(rd))?;
+                let br_true_to_end = FutureJump {
+                    condition_reg: Some((rd, true)),
+                    inst_offset: self.get_current_insts().len(),
+                    loc: loc.clone(),
+                };
+                self.compile_expr(rhs, false, Some(rd))?;
+                br_true_to_end.patch_forward(self.get_current_func());
+                if target.is_none() {
+                    self.registers.free_intermediate(rd);
+                }
+                Ok((rd, target.is_none()))
+            }
+            // short circuit or
+            Expr::Infix {
+                loc,
+                op: OpInfix::Or,
+                lhs,
+                rhs,
+            } => {
+                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
+                self.compile_expr(lhs, false, Some(rd))?;
+                let br_true_to_end = FutureJump {
+                    condition_reg: Some((rd, false)),
+                    inst_offset: self.get_current_insts().len(),
+                    loc: loc.clone(),
+                };
+                self.compile_expr(rhs, false, Some(rd))?;
+                br_true_to_end.patch_forward(self.get_current_func());
+                if target.is_none() {
+                    self.registers.free_intermediate(rd);
+                }
+                Ok((rd, target.is_none()))
+            }
             Expr::Infix { loc, op, lhs, rhs } => {
                 let (lhs_id, lhs_tmp) = self.compile_expr(lhs, false, None)?;
                 let (rhs_id, rhs_tmp) = self.compile_expr(rhs, false, None)?;
@@ -1376,20 +1418,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     .push(VmInst::OpIs(OpIs { loc, lhs, rhs, rd }));
                 (rd, target.is_none())
             }
-            OpInfix::Or => {
-                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
-                self.get_current_func()
-                    .insts
-                    .push(VmInst::OpOr(OpOr { loc, lhs, rhs, rd }));
-                (rd, target.is_none())
-            }
-            OpInfix::And => {
-                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
-                self.get_current_func()
-                    .insts
-                    .push(VmInst::OpAnd(OpAnd { loc, lhs, rhs, rd }));
-                (rd, target.is_none())
-            }
+            OpInfix::Or | OpInfix::And => unreachable!(),
             OpInfix::Eq => {
                 let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
                 self.get_current_func()

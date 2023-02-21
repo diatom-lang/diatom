@@ -479,8 +479,6 @@ impl<Buffer: IoWrite> Gc<Buffer> {
             .map(|frame| frame.ptr + frame.reg_size)
             .fold(stack.fp.ptr + stack.fp.reg_size, usize::max);
 
-        // Detect incorrect stack actually length in debug
-        #[cfg(debug_assertions)]
         stack.regs.truncate(stack_limit);
 
         self.call_stack.regs.iter().for_each(|reg| {
