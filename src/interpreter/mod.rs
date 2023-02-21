@@ -198,19 +198,29 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         // Initialize int and float meta table
         let int = interpreter.registers.declare_variable("Int", None);
         interpreter.gc.alloc_reg_file(int + 1);
+        interpreter.gc.set_main_reg_size(int + 1);
         interpreter
             .gc
             .write_reg(int, Reg::Ref(interpreter.gc.int_meta()));
         let float = interpreter.registers.declare_variable("Float", None);
         interpreter.gc.alloc_reg_file(float + 1);
+        interpreter.gc.set_main_reg_size(float + 1);
         interpreter
             .gc
             .write_reg(float, Reg::Ref(interpreter.gc.float_meta()));
         let list = interpreter.registers.declare_variable("List", None);
         interpreter.gc.alloc_reg_file(list + 1);
+        interpreter.gc.set_main_reg_size(list + 1);
         interpreter
             .gc
             .write_reg(list, Reg::Ref(interpreter.gc.list_meta()));
+
+        let gc = interpreter.registers.declare_variable("Gc", None);
+        interpreter.gc.alloc_reg_file(gc + 1);
+        interpreter.gc.set_main_reg_size(gc + 1);
+        interpreter
+            .gc
+            .write_reg(gc, Reg::Ref(interpreter.gc.gc_meta()));
 
         impl_prelude(&mut interpreter);
         load_std(&mut interpreter);
@@ -276,6 +286,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         let reg = Reg::Ref(gc_id);
         let reg_id = self.registers.declare_variable(name.into(), None);
         self.gc.alloc_reg_file(reg_id + 1);
+        self.gc.set_main_reg_size(reg_id + 1);
         self.gc.write_reg(reg_id, reg);
     }
 
@@ -342,13 +353,15 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             show_id: return_value,
         }));
 
-        //
+        // Alloc registers
         self.byte_code[0].insts.insert(
             0,
             VmInst::OpAllocReg(OpAllocReg {
                 n_reg: self.registers.assigned,
             }),
         );
+
+        self.gc.set_main_reg_size(self.registers.assigned);
 
         Ok(())
     }

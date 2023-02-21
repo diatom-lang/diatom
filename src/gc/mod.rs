@@ -1,26 +1,26 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
-    io::Write,
     rc::Rc,
 };
 
-use crate::{vm::Ip, State};
+use crate::{vm::Ip, IoWrite, State};
 
 mod key_pool;
 mod pool;
 mod prelude;
 use key_pool::KeyPool;
+use more_asserts::debug_assert_gt;
 use pool::Pool;
 
-use self::prelude::{init_float_meta, init_int_meta, init_list_meta};
+use self::prelude::{init_float_meta, init_gc_meta, init_int_meta, init_list_meta};
 
 pub struct Table {
     pub attributes: BTreeMap<usize, Reg>,
     pub meta_table: Option<usize>,
 }
 
-pub enum GcObject<Buffer: Write> {
+pub enum GcObject<Buffer: IoWrite> {
     Closure {
         func_id: usize,
         parameters: usize,
@@ -35,6 +35,12 @@ pub enum GcObject<Buffer: Write> {
     List(Vec<Reg>),
     Table(Table),
     Tuple(Vec<Reg>),
+}
+
+impl<Buffer: IoWrite> Default for GcObject<Buffer> {
+    fn default() -> Self {
+        Self::Tuple(vec![])
+    }
 }
 
 /// Diatom's unboxed value type
@@ -59,6 +65,7 @@ struct Frame {
     return_addr: Ip,
     write_back: Option<usize>,
     rid: usize,
+    reg_size: usize,
 }
 
 struct CallStack {
@@ -67,28 +74,40 @@ struct CallStack {
     fp: Frame,
 }
 
+#[derive(Default)]
+struct GrayPool {
+    pinned_string: BTreeSet<usize>,
+    escaped: BTreeSet<usize>,
+    objects: BTreeSet<usize>,
+}
+
 /// Garbage Collector
-pub struct Gc<Buffer: Write> {
+pub struct Gc<Buffer: IoWrite> {
     obj_pool: Pool<GcObject<Buffer>>,
     escaped_pool: Pool<Reg>,
     string_pool: Pool<String>,
     call_stack: CallStack,
     up_values: Vec<BTreeSet<usize>>,
+    gray_pool: GrayPool,
     key_pool: KeyPool,
     int_meta: usize,
     float_meta: usize,
     list_meta: usize,
+    gc_meta: usize,
+    threshold: usize,
+    paused: bool,
 }
 
 static UNIT_REG: Reg = Reg::Unit;
 
-impl<Buffer: Write> Gc<Buffer> {
+impl<Buffer: IoWrite> Gc<Buffer> {
     pub fn new() -> Self {
         let mut key_pool = KeyPool::default();
         let mut obj_pool = Pool::<GcObject<Buffer>>::default();
         let int_meta = init_int_meta(&mut obj_pool, &mut key_pool);
         let float_meta = init_float_meta(&mut obj_pool, &mut key_pool);
         let list_meta = init_list_meta(&mut obj_pool, &mut key_pool);
+        let gc_meta = init_gc_meta(&mut obj_pool, &mut key_pool);
 
         Self {
             call_stack: CallStack {
@@ -103,6 +122,7 @@ impl<Buffer: Write> Gc<Buffer> {
                         inst: usize::MAX,
                     },
                     write_back: None,
+                    reg_size: 0,
                 },
             },
             up_values: vec![BTreeSet::new()],
@@ -113,6 +133,10 @@ impl<Buffer: Write> Gc<Buffer> {
             int_meta,
             float_meta,
             list_meta,
+            gc_meta,
+            gray_pool: Default::default(),
+            threshold: 0,
+            paused: false,
         }
     }
 
@@ -125,11 +149,19 @@ impl<Buffer: Write> Gc<Buffer> {
     }
 
     pub fn alloc_obj(&mut self, obj: GcObject<Buffer>) -> usize {
+        self.try_collect();
         self.obj_pool.alloc(obj)
     }
 
     pub fn alloc_str(&mut self, s: String) -> usize {
+        self.try_collect();
         self.string_pool.alloc(s)
+    }
+
+    pub fn alloc_str_pinned(&mut self, s: String) -> usize {
+        let id = self.string_pool.alloc(s);
+        self.gray_pool.pinned_string.insert(id);
+        id
     }
 
     pub fn get_obj(&self, id: usize) -> Option<&GcObject<Buffer>> {
@@ -166,7 +198,8 @@ impl<Buffer: Write> Gc<Buffer> {
         }
         let stack = &self.call_stack;
         let n = stack.fp.ptr + n;
-        debug_assert!(stack.regs.len() > n);
+        debug_assert_gt!(stack.regs.len(), n);
+        debug_assert_gt!(stack.fp.ptr + stack.fp.reg_size, n);
         let reg = unsafe { self.call_stack.regs.get_unchecked(n) };
         match reg {
             StackReg::Reg(reg) => reg,
@@ -179,6 +212,7 @@ impl<Buffer: Write> Gc<Buffer> {
 
     pub fn share_reg(&mut self, id: usize) -> usize {
         debug_assert!(id != 0);
+        self.try_collect();
         let stack = &mut self.call_stack;
         let frame = stack.fp.ptr;
         debug_assert!(self.call_stack.regs.len() > frame + id);
@@ -203,7 +237,8 @@ impl<Buffer: Write> Gc<Buffer> {
         debug_assert!(n != 0);
         let stack = &mut self.call_stack;
         let n = stack.fp.ptr + n;
-        debug_assert!(stack.regs.len() > n);
+        debug_assert_gt!(stack.regs.len(), n);
+        debug_assert_gt!(stack.fp.ptr + stack.fp.reg_size, n);
         let prev = unsafe { stack.regs.get_unchecked_mut(n) };
         match prev {
             StackReg::Reg(r) => *r = reg,
@@ -227,6 +262,7 @@ impl<Buffer: Write> Gc<Buffer> {
                 return_addr,
                 write_back,
                 rid,
+                reg_size: usize::MAX,
             },
         );
         stack.frames.push(fp_old);
@@ -241,6 +277,7 @@ impl<Buffer: Write> Gc<Buffer> {
             captured, reg_size, ..
         } = unsafe { self.obj_pool.get_unchecked(rid) }
         {
+            stack.fp.reg_size = *reg_size;
             // Alloc registers
             (stack.regs.len()..ptr + reg_size)
                 .into_iter()
@@ -276,6 +313,7 @@ impl<Buffer: Write> Gc<Buffer> {
             write_back,
             ptr,
             rid,
+            ..
         } = std::mem::replace(&mut stack.fp, fp);
 
         if let GcObject::Closure { captured, .. } = unsafe { self.obj_pool.get_unchecked(rid) } {
@@ -301,6 +339,10 @@ impl<Buffer: Write> Gc<Buffer> {
 
     pub fn list_meta(&self) -> usize {
         self.list_meta
+    }
+
+    pub fn gc_meta(&self) -> usize {
+        self.gc_meta
     }
 
     pub fn clean_call_stack(&mut self) -> Vec<Ip> {
@@ -388,9 +430,154 @@ impl<Buffer: Write> Gc<Buffer> {
         }
         .unwrap();
     }
+
+    pub fn set_main_reg_size(&mut self, n: usize) {
+        assert!(self.call_stack.frames.is_empty());
+        self.call_stack.fp.reg_size = n;
+    }
+
+    /// Collect garbage if threshold requirement is met
+    #[cfg(not(test))]
+    fn try_collect(&mut self) {
+        if self.paused {
+            return;
+        }
+        let total_allocated =
+            self.string_pool.len() + self.obj_pool.len() + self.escaped_pool.len();
+        if total_allocated > self.threshold {
+            self.collect()
+        }
+
+        let total_allocated =
+            self.string_pool.len() + self.obj_pool.len() + self.escaped_pool.len();
+        self.threshold = total_allocated * 2;
+    }
+
+    #[cfg(test)]
+    fn try_collect(&mut self) {
+        if self.paused {
+            return;
+        }
+        let _ = self.threshold;
+        let _ = self.obj_pool.len();
+        self.collect()
+    }
+
+    fn clear_marks(&mut self) {
+        self.obj_pool.clear_marks();
+        self.escaped_pool.clear_marks();
+        self.string_pool.clear_marks();
+    }
+
+    fn mark_roots(&mut self) {
+        self.clear_marks();
+
+        let stack = &mut self.call_stack;
+        let stack_limit = stack
+            .frames
+            .iter()
+            .map(|frame| frame.ptr + frame.reg_size)
+            .fold(stack.fp.ptr + stack.fp.reg_size, usize::max);
+
+        // Detect incorrect stack actually length in debug
+        #[cfg(debug_assertions)]
+        stack.regs.truncate(stack_limit);
+
+        self.call_stack.regs.iter().for_each(|reg| {
+            match reg {
+                StackReg::Reg(reg) => match reg {
+                    Reg::Str(sid) => {
+                        self.string_pool.mark(*sid);
+                    }
+                    Reg::Ref(rid) => {
+                        self.gray_pool.objects.insert(*rid);
+                    }
+                    _ => (),
+                },
+                StackReg::Shared(sid) => {
+                    self.gray_pool.escaped.insert(*sid);
+                }
+            };
+        });
+        self.gray_pool
+            .pinned_string
+            .iter()
+            .for_each(|sid| self.string_pool.mark(*sid));
+    }
+
+    pub fn pause(&mut self) {
+        self.paused = true
+    }
+
+    pub fn resume(&mut self) {
+        self.paused = false
+    }
+
+    pub fn collect(&mut self) {
+        self.mark_roots();
+        let gray_pool = &mut self.gray_pool;
+
+        fn mark_reg(
+            reg: &Reg,
+            obj_gray_pool: &mut BTreeSet<usize>,
+            string_pool: &mut Pool<String>,
+        ) {
+            match reg {
+                Reg::Str(sid) => string_pool.mark(*sid),
+                Reg::Ref(rid) => {
+                    obj_gray_pool.insert(*rid);
+                }
+                _ => (),
+            }
+        }
+
+        while !gray_pool.objects.is_empty() || !gray_pool.escaped.is_empty() {
+            if !gray_pool.escaped.is_empty() {
+                // Mark all escaped variable
+                let escaped_id = gray_pool.escaped.pop_last().unwrap();
+                let (reg, marked) = unsafe { self.escaped_pool.get_unchecked_raw(escaped_id) };
+                if !marked {
+                    mark_reg(reg, &mut gray_pool.objects, &mut self.string_pool);
+                    self.escaped_pool.mark(escaped_id);
+                }
+            } else {
+                // Mark all objects
+                let obj_id = gray_pool.objects.pop_last().unwrap();
+                match unsafe { self.obj_pool.get_unchecked_raw(obj_id) } {
+                    (_, true) | (GcObject::NativeFunction { .. }, _) => (),
+                    (GcObject::List(l) | GcObject::Tuple(l), false) => {
+                        for item in l.iter() {
+                            mark_reg(item, &mut gray_pool.objects, &mut self.string_pool);
+                        }
+                    }
+                    (
+                        GcObject::Table(Table {
+                            attributes,
+                            meta_table,
+                        }),
+                        false,
+                    ) => attributes.values().for_each(|reg| {
+                        mark_reg(reg, &mut gray_pool.objects, &mut self.string_pool);
+                        if let Some(reg_id) = meta_table {
+                            gray_pool.objects.insert(*reg_id);
+                        }
+                    }),
+                    (GcObject::Closure { captured, .. }, false) => {
+                        captured.iter().for_each(|(_, reg_id)| {
+                            gray_pool.escaped.insert(*reg_id);
+                        });
+                    }
+                }
+                self.obj_pool.mark(obj_id);
+            }
+        }
+        self.escaped_pool.collect();
+        self.string_pool.collect();
+        self.obj_pool.collect();
+    }
 }
 
-impl<Buffer: Write> Default for Gc<Buffer> {
+impl<Buffer: IoWrite> Default for Gc<Buffer> {
     fn default() -> Self {
         Self::new()
     }
