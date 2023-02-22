@@ -3,7 +3,7 @@ use std::io::Write;
 use crate::{DiatomValue, Interpreter};
 
 pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
-    interpreter.add_extern_function("println".to_string(), |state, parameters, out| {
+    interpreter.impl_extern_function("println".to_string(), |state, parameters, out| {
         let mut flag = true;
         for parameter in parameters {
             if flag {
@@ -19,7 +19,7 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
         Ok(DiatomValue::Unit)
     });
 
-    interpreter.add_extern_function("print".to_string(), |state, parameters, out| {
+    interpreter.impl_extern_function("print".to_string(), |state, parameters, out| {
         let mut flag = true;
         for parameter in parameters {
             if flag {
@@ -34,7 +34,7 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
         Ok(DiatomValue::Unit)
     });
 
-    interpreter.add_extern_function("assert".to_string(), |_state, parameters, _| {
+    interpreter.impl_extern_function("assert".to_string(), |_state, parameters, _| {
         if parameters.len() != 1 {
             return Err(format!(
                 "Expected 1 parameter while {} is provided",
@@ -53,7 +53,7 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
         }
     });
 
-    interpreter.add_extern_function("panic".to_string(), |state, parameters, _| {
+    interpreter.impl_extern_function("panic".to_string(), |state, parameters, _| {
         if parameters.len() > 1 {
             return Err(format!(
                 "Expected 1 or 0 parameter while {} is provided",
@@ -74,7 +74,7 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
         }
     });
 
-    interpreter.add_extern_function("unreachable".to_string(), |_, parameters, _| {
+    interpreter.impl_extern_function("unreachable".to_string(), |_, parameters, _| {
         if !parameters.is_empty() {
             Err(format!(
                 "expect 0 parameter while {} is provided",
@@ -85,7 +85,7 @@ pub fn impl_prelude<Buffer: Write>(interpreter: &mut Interpreter<Buffer>) {
         }
     });
 
-    interpreter.add_extern_function("todo".to_string(), |_, _, _| {
+    interpreter.impl_extern_function("todo".to_string(), |_, _, _| {
         Err("Not implemented yet".to_string())
     });
 }

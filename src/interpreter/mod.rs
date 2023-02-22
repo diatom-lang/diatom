@@ -16,8 +16,8 @@ mod scanner;
 mod api;
 use crate::file_manager::FileManager;
 use crate::vm::op::{
-    OpGe, OpGetTable, OpGetTuple, OpIndex, OpIs, OpLe, OpLt, OpMakeList, OpMakeTable, OpMakeTuple,
-    OpNe, OpSetIndex, OpSetMeta, OpSetTable, OpSetTuple,
+    OpGe, OpGetTable, OpGetTuple, OpIndex, OpIs, OpLe, OpLoadExtern, OpLt, OpMakeList, OpMakeTable,
+    OpMakeTuple, OpNe, OpSetIndex, OpSetMeta, OpSetTable, OpSetTuple,
 };
 use crate::{
     file_manager::{Diagnostic, Loc},
@@ -159,7 +159,7 @@ pub struct Func {
 /// });
 ///
 /// // change value to 5
-/// interpreter.exec("set_value(5)", Default::default()).unwrap();
+/// interpreter.exec("$set_value(5)", Default::default()).unwrap();
 /// assert_eq!(value.get(), 5);
 /// ```
 pub struct Interpreter<Buffer: IoWrite> {
@@ -271,12 +271,23 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     ///     }
     /// );
     ///
-    /// interpreter.exec("hello_world()", Default::default()).unwrap();
+    /// interpreter.exec("$hello_world()", Default::default()).unwrap();
     /// let output = interpreter.replace_buffer(Vec::<u8>::new());
     /// let output = String::from_utf8(output).unwrap();
     /// assert_eq!(output, "Hello, world!")
     /// ```
     pub fn add_extern_function<F>(&mut self, name: impl Into<String>, f: F)
+    where
+        F: Fn(&mut State<Buffer>, &[DiatomValue], &mut Buffer) -> Result<DiatomValue, String>
+            + 'static,
+    {
+        let f = GcObject::NativeFunction(Rc::new(RefCell::new(f)));
+        let gc_id = self.gc.alloc_obj(f);
+        self.gc.add_extern(name, gc_id)
+    }
+
+    /// Directly declare external function as variable
+    pub fn impl_extern_function<F>(&mut self, name: impl Into<String>, f: F)
     where
         F: Fn(&mut State<Buffer>, &[DiatomValue], &mut Buffer) -> Result<DiatomValue, String>
             + 'static,
@@ -984,6 +995,16 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 }
                 None => Err(ErrorCode::NameNotDefined(loc.clone(), name.clone())),
             },
+            Expr::ExternId { loc, name } => {
+                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
+                self.get_current_insts()
+                    .push(VmInst::OpLoadExtern(OpLoadExtern {
+                        name: name.chars().skip(1).collect(),
+                        rd,
+                        loc: loc.clone(),
+                    }));
+                Ok((rd, target.is_none()))
+            }
             Expr::Parentheses { loc: _, content } => self.compile_expr(content, discard, target),
             Expr::Const { value, .. } => Ok(self.compile_constant(value, target))?,
             Expr::Error => unreachable!(),

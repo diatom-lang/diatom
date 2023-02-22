@@ -1847,3 +1847,42 @@ impl Instruction for OpSetMeta {
         .unwrap()
     }
 }
+
+pub struct OpLoadExtern {
+    pub name: String,
+    pub rd: usize,
+    pub loc: Loc,
+}
+
+impl Instruction for OpLoadExtern {
+    #[cfg_attr(feature = "profile", inline(never))]
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        match gc.get_extern(&self.name) {
+            Some(ref_id) => gc.write_reg(self.rd, Reg::Ref(ref_id)),
+            None => {
+                return Err(VmError::MissingExtern {
+                    loc: self.loc.clone(),
+                    name: self.name.clone(),
+                })
+            }
+        };
+        Ok(Ip {
+            func_id: ip.func_id,
+            inst: ip.inst + 1,
+        })
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    ${} -> Reg#{}",
+            "load_extern", self.name, self.rd
+        )
+        .unwrap()
+    }
+}

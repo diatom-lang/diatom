@@ -6,6 +6,7 @@ pub enum Token {
     Integer(i64),
     Float(f64),
     Id(String),
+    ExternId(String),
     Key(Keyword),
     Op(Operator),
 }
@@ -128,6 +129,7 @@ impl Display for Token {
             Token::Integer(i) => write!(f, "int({i})"),
             Token::Float(fp) => write!(f, "float({fp})"),
             Token::Id(id) => write!(f, "id({id})"),
+            Token::ExternId(id) => write!(f, "extern_id({id})"),
             Token::Key(key) => write!(f, "`{key}`"),
             Token::Op(op) => write!(f, "\"{op}\""),
         }

@@ -43,6 +43,7 @@ lazy_static! {
     static ref RE_STR: Regex =
         Regex::new(r#"^(("(\\.|[^\\"])*")|('(\\.|[^\\'])*')|("(\\.|[^\\"])*[\\]{0,1}$)|('(\\.|[^\\'])*[\\]{0,1}$))"#).unwrap();
     static ref RE_ID: Regex = Regex::new("^[_a-zA-Z]{1}[_0-9a-zA-Z]*").unwrap();
+    static ref RE_EXTERN_ID: Regex = Regex::new("^\\$[_a-zA-Z]{1}[_0-9a-zA-Z]*").unwrap();
     static ref RE_COMMENT: Regex = Regex::new("^\\-\\-.*").unwrap();
     static ref RE_ANY: Regex = Regex::new(r#"(.|\n)"#).unwrap();
 }
@@ -56,6 +57,10 @@ impl Highlighter for DiatomHighlighter {
                 let end = index + m.end();
                 let id = &line[index..end];
                 styled_text.push((*COMMENT_STYLE, id.to_string()));
+                index = end;
+            } else if let Some(m) = RE_EXTERN_ID.find(&line[index..]) {
+                let end = index + m.end();
+                styled_text.push((*FUNC_STYLE, line[index..end].to_string()));
                 index = end;
             } else if let Some(m) = RE_ID.find(&line[index..]) {
                 let end = index + m.end();

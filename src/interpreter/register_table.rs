@@ -71,6 +71,10 @@ impl RegisterTable {
     }
 
     pub fn declare_variable(&mut self, name: impl AsRef<str>, loc: Option<Loc>) -> usize {
+        if let Some(id) = self.variables.get_mut(name.as_ref()) {
+            id.1 = loc;
+            return id.0;
+        }
         let id = self.declare_intermediate();
         self.variables.insert(name.as_ref().to_string(), (id, loc));
         id
@@ -80,6 +84,7 @@ impl RegisterTable {
     ///
     /// This function alloc a new register instead of recycle old one
     pub fn declare_captured_variable(&mut self, name: impl AsRef<str>, loc: Option<Loc>) -> usize {
+        assert!(self.variables.get(name.as_ref()).is_none());
         let id = self.assigned;
         self.assigned += 1;
         self.variables.insert(name.as_ref().to_string(), (id, loc));

@@ -123,6 +123,10 @@ pub enum Expr {
         loc: Loc,
         name: String,
     },
+    ExternId {
+        loc: Loc,
+        name: String,
+    },
     Parentheses {
         loc: Loc,
         content: Box<Expr>,
@@ -149,6 +153,7 @@ impl Expr {
             Expr::Infix { loc, .. } => loc,
             Expr::Fn { loc, .. } => loc,
             Expr::Id { loc, .. } => loc,
+            Expr::ExternId { loc, .. } => loc,
             Expr::Parentheses { loc, .. } => loc,
             Expr::Const { loc, .. } => loc,
             Expr::_Module { loc, .. } => loc,

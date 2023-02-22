@@ -59,6 +59,7 @@ macro_rules! expr_start_pattern {
             | Token::Op(Operator::LPar)
             | Token::Op(Operator::Minus)
             | Token::Id(_)
+            | Token::ExternId(_)
             | Token::Integer(_)
             | Token::Float(_)
             | Token::Str(_)
@@ -675,6 +676,14 @@ impl<'a> Parser<'a> {
                 let s = s.clone();
                 iter.next();
                 Expr::Id {
+                    loc: start.clone(),
+                    name: s,
+                }
+            }
+            Some(ExternId(s)) => {
+                let s = s.clone();
+                iter.next();
+                Expr::ExternId {
                     loc: start.clone(),
                     name: s,
                 }

@@ -56,6 +56,8 @@ pub enum VmError {
     IndexOutOfBound { loc: Loc, bound: usize, index: i64 },
     /// E3016 Can Not Index
     CanNotIndex { loc: Loc, t1: String, t2: String },
+    /// E3017 Missing extern variable
+    MissingExtern { loc: Loc, name: String },
 }
 
 impl From<VmError> for Diagnostic {
@@ -145,6 +147,10 @@ impl From<VmError> for Diagnostic {
             VmError::CanNotIndex { loc, t1, t2 } => Diagnostic::error()
                 .with_code("E3016")
                 .with_message(format!("Type `{t1}` can not be indexed by type `{t2}`"))
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
+            VmError::MissingExtern { loc, name } => Diagnostic::error()
+                .with_code("E3017")
+                .with_message(format!("External variable `{name}` is not loaded by host"))
                 .with_labels(vec![Label::primary(loc.fid, loc)]),
         }
     }

@@ -61,6 +61,7 @@ pub enum VmInst {
     OpAllocReg,
     OpMakeClosure,
     OpLoadConstant,
+    OpLoadExtern,
     OpYield,
     OpDummy,
 }

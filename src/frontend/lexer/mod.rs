@@ -69,15 +69,22 @@ impl Lexer {
                     }
                     continue;
                 }
-                (Some(c), _) => {
-                    let result = match c {
-                        '0'..='9' => Some(Self::consume_num(&mut iter)),
-                        '"' | '\'' => Some(Self::consume_string(&mut iter)),
-                        ' ' | '\t' | '\r' | '\n' => {
+                (Some(c), next) => {
+                    let result = match (c, next) {
+                        (c, _) if c.is_ascii_digit() => Some(Self::consume_num(&mut iter)),
+                        ('"' | '\'', _) => Some(Self::consume_string(&mut iter)),
+                        (c, _) if c.is_whitespace() => {
                             iter.next();
                             None
                         } // Ignore whitespace
-                        c @ ('!'..='/' | ':'..='@' | '['..='`' | '{'..='~') if c != '_' => {
+                        ('$', Some(c))
+                            if !c.is_ascii_punctuation()
+                                && !c.is_ascii_digit()
+                                && !c.is_whitespace() =>
+                        {
+                            Some(Self::consume_id_or_key(&mut iter))
+                        }
+                        (c, _) if c.is_ascii_punctuation() && c != '_' => {
                             Some(Self::consume_op(&mut iter))
                         }
                         _ => Some(Self::consume_id_or_key(&mut iter)),
@@ -302,6 +309,10 @@ impl Lexer {
     fn consume_id_or_key(iter: &mut FileIterator) -> Result<(Token, Loc), (ErrorCode, Loc)> {
         let mut name = String::new();
         let start = iter.offset();
+        if let Some('$') = iter.peek() {
+            name.push('$');
+            iter.next();
+        }
         loop {
             match iter.peek() {
                 Some('_') => name.push('_'),
@@ -342,6 +353,10 @@ impl Lexer {
             "begin" => Ok((Token::Key(Keyword::Begin), loc)),
             "require" => Ok((Token::Key(Keyword::Require), loc)),
             "is" => Ok((Token::Op(Operator::Is), loc)),
+            _ if name.starts_with('$') => {
+                assert!(name.len() > 1);
+                Ok((Token::ExternId(name), loc))
+            }
             _ => Ok((Token::Id(name), loc)),
         }
     }
@@ -651,9 +666,9 @@ mod tests {
                 if a> 0 then return a *fac(a - 1) elsif 
                 a == 0 then return 1 else return 0
                 end end
-            ß = fac(5) å = ß**3//0x11f |> fac 
+            ß = fac(5) å = ß**3//0x11f fac 
             set = {'s', 'ma\u00E9', 65e52, 0b00110}; dict = {}.insert(('key', 98)) 
-            🐶🐱 <> "Doa\x09 and cat'?'" 
+            🐶🐱 <> "Doa\x09 and cat'?'" $x $y $acb1.0
             "#;
         test_str(code, false);
     }
@@ -662,5 +677,11 @@ mod tests {
     fn test_valid() {
         let code = "____";
         test_str(code, false);
+    }
+
+    #[test]
+    fn test_invalid() {
+        let code = "$";
+        test_str(code, true);
     }
 }

@@ -9,6 +9,7 @@ use crate::{vm::Ip, IoWrite, State};
 mod key_pool;
 mod pool;
 mod prelude;
+use ahash::AHashMap;
 use key_pool::KeyPool;
 use more_asserts::debug_assert_gt;
 use pool::Pool;
@@ -83,6 +84,7 @@ struct GrayPool {
 
 /// Garbage Collector
 pub struct Gc<Buffer: IoWrite> {
+    extern_vars: AHashMap<String, usize>,
     obj_pool: Pool<GcObject<Buffer>>,
     escaped_pool: Pool<Reg>,
     string_pool: Pool<String>,
@@ -110,6 +112,7 @@ impl<Buffer: IoWrite> Gc<Buffer> {
         let gc_meta = init_gc_meta(&mut obj_pool, &mut key_pool);
 
         Self {
+            extern_vars: Default::default(),
             call_stack: CallStack {
                 frames: vec![],
                 regs: vec![],
@@ -138,6 +141,14 @@ impl<Buffer: IoWrite> Gc<Buffer> {
             threshold: 0,
             paused: false,
         }
+    }
+
+    pub fn get_extern(&self, name: impl AsRef<str>) -> Option<usize> {
+        self.extern_vars.get(name.as_ref()).cloned()
+    }
+
+    pub fn add_extern(&mut self, name: impl Into<String>, ref_id: usize) {
+        self.extern_vars.insert(name.into(), ref_id);
     }
 
     pub fn look_up_table_key(&self, id: usize) -> Option<&str> {
@@ -501,6 +512,9 @@ impl<Buffer: IoWrite> Gc<Buffer> {
             .pinned_string
             .iter()
             .for_each(|sid| self.string_pool.mark(*sid));
+        self.extern_vars.values().for_each(|ref_id| {
+            self.gray_pool.objects.insert(*ref_id);
+        });
     }
 
     pub fn pause(&mut self) {

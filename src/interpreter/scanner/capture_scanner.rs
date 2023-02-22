@@ -111,6 +111,7 @@ impl<'a, Buffer: IoWrite> CaptureScanner<'a, Buffer> {
                     }
                 }
             }
+            Expr::ExternId { .. } => (),
             Expr::Parentheses { content, .. } => self.scan_expr(content),
             Expr::Const { value, .. } => self.scan_const(value),
             Expr::_Module { .. } => todo!(),
