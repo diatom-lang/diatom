@@ -19,16 +19,16 @@ jobs:
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
-          profile: minimal
+          profile: default
           toolchain: stable
           override: true
           
       - name: Run cargo build
         uses: actions-rs/cargo@v1
         with:
-          command: build
+          command: build --workspace
           
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
-          command: test
+          command: test --workspace
