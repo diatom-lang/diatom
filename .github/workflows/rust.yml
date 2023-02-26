@@ -26,9 +26,11 @@ jobs:
       - name: Run cargo build
         uses: actions-rs/cargo@v1
         with:
-          command: build --workspace
+          command: build
+          args: --all
           
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
-          command: test --workspace
+          command: test
+          args: --all
