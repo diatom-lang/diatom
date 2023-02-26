@@ -5,20 +5,19 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::Interpreter;
+use diatom::Interpreter;
+use diatom::VERSION;
 
 mod highlighter;
 mod prompt;
 mod validator;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-
 /// An interactive console for Diatom
-pub struct Console {
+pub struct Cli {
     interpreter: Arc<Mutex<Interpreter<Stdout>>>,
 }
 
-impl Console {
+impl Cli {
     pub fn new(interpreter: Interpreter<Stdout>) -> Self {
         Self {
             interpreter: Arc::new(Mutex::new(interpreter)),

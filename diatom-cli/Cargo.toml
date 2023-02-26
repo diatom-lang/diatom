@@ -1,0 +1,22 @@
+[package]
+name = "diatom-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+diatom = { path = ".." }
+reedline = { version = "0.15" }
+nu-ansi-term = { version = "0.46" }
+crossterm = { version = "0.24" }
+clap = { version = "4", features = ["derive"] }
+regex.workspace = true
+lazy_static.workspace = true
+
+[[bin]]
+name = "diatom"
+path = "src/main.rs"

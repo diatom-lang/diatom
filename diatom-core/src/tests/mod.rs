@@ -4,7 +4,8 @@ use crate::Interpreter;
 
 #[test]
 fn test_examples() {
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut path = path.parent().unwrap().to_path_buf();
     path.push("examples");
     let dir = fs::read_dir(path).unwrap();
     dir.for_each(|entry| {

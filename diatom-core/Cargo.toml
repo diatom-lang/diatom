@@ -1,0 +1,22 @@
+[package]
+name = "diatom-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+codespan-reporting = "0.11"
+bimap = "0.6"
+regex.workspace = true
+lazy_static.workspace = true
+more-asserts = "0.3"
+ahash = { version = "0.8", default-features = false, features = ["compile-time-rng", "std"] }
+enum_dispatch = "0.3"
+either = "1.8"
+
+[features]
+profile = []

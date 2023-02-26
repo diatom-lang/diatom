@@ -1,5 +1,18 @@
 [package]
 name = "diatom"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace]
+members = ["diatom-core", "diatom-cli"]
+
+[workspace.package]
 version = "0.6.0-alpha"
 edition = "2021"
 authors = [ "Terence Ng", "Aoyang Yu" ]
@@ -7,26 +20,13 @@ description = "The diatom programming language"
 readme = "README.md"
 license = "Apache-2.0"
 repository = "https://github.com/diatom-lang/diatom.git"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
-codespan-reporting = "0.11"
+[workspace.dependencies]
 regex = "1.7"
 lazy_static = "1.4"
-bimap = "0.6"
-more-asserts = "0.3"
-ahash = { version = "0.8", default-features = false, features = ["compile-time-rng", "std"] }
-reedline = { version = "0.15", optional = true }
-nu-ansi-term = { version = "0.46", optional = true }
-crossterm = { version = "0.24", optional = true }
-clap = { version = "4", features = ["derive"], optional = true }
-enum_dispatch = "0.3"
-either = "1.8"
 
-[features]
-default = ["console"]
-console = ["reedline", "nu-ansi-term", "crossterm", "clap"]
-profile = []
+[dependencies]
+diatom-core = { path = "diatom-core" }
 
 [profile.release]
 opt-level = 2

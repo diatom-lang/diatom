@@ -139,6 +139,7 @@ static PRELUDE_NAMES: [&str; 12] = [
 ///
 /// ## 1. Run a piece of code
 /// ```
+/// # use diatom_core as diatom;
 /// use diatom::Interpreter;
 ///
 /// // Create a new instance of interpreter
@@ -153,6 +154,7 @@ static PRELUDE_NAMES: [&str; 12] = [
 ///
 /// ## 2. Add call back to the interpreter
 /// ```
+/// # use diatom_core as diatom;
 /// use std::{cell::Cell, rc::Rc};
 /// use diatom::{DiatomValue, Interpreter};
 ///
@@ -292,6 +294,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     ///
     /// # Examples:
     /// ```
+    /// # use diatom_core as diatom;
     /// use std::io::Write;
     /// use diatom::{Interpreter, DiatomValue};
     ///

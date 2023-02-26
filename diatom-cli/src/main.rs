@@ -4,10 +4,8 @@ use std::{fs, io, path::PathBuf};
 
 use clap::{ColorChoice, Parser};
 
-#[cfg(feature = "console")]
-mod console;
-#[cfg(feature = "console")]
-pub use console::Console;
+mod cli;
+pub use cli::Cli;
 
 #[derive(Parser)]
 #[command(name = "Diatom Interpreter")]
@@ -44,14 +42,9 @@ fn main() {
     };
 
     match (&args.path, args.inspect) {
-        #[cfg(feature = "console")]
         (None, inspect) => {
-            let mut console = Console::new(interpreter);
+            let mut console = Cli::new(interpreter);
             console.run(inspect);
-        }
-        #[cfg(not(feature = "console"))]
-        (None, _) => {
-            eprintln!("Error: Diatom is not compiled with console enabled")
         }
         (Some(path), false) => {
             let code = fs::read_to_string(path).expect("Error: File can not be read!");
