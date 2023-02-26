@@ -1,8 +1,8 @@
 use std::{
     cell::RefCell,
-    ffi::{OsStr, OsString},
-    fmt::{Debug, Display},
-    ops::{Add, Deref, Range},
+    ffi::OsString,
+    fmt::Display,
+    ops::{Add, Range},
     rc::Rc,
 };
 
@@ -39,13 +39,6 @@ pub struct PathShow {
     path: Rc<OsString>,
 }
 
-impl Deref for PathShow {
-    type Target = OsStr;
-    fn deref(&self) -> &Self::Target {
-        self.path.as_ref()
-    }
-}
-
 impl Display for PathShow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(s) = self.path.to_str() {
@@ -56,24 +49,10 @@ impl Display for PathShow {
     }
 }
 
-impl Debug for PathShow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.path)
-    }
-}
-
 impl From<OsString> for PathShow {
     fn from(value: OsString) -> Self {
         PathShow {
             path: Rc::new(value),
-        }
-    }
-}
-
-impl From<&OsStr> for PathShow {
-    fn from(s: &OsStr) -> Self {
-        Self {
-            path: Rc::new(s.into()),
         }
     }
 }

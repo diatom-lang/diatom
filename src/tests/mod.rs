@@ -9,10 +9,18 @@ fn test_examples() {
     let dir = fs::read_dir(path).unwrap();
     dir.for_each(|entry| {
         let path = entry.unwrap().path();
+        if !path.is_file() {
+            return;
+        }
         let code = fs::read_to_string(&path).unwrap();
         let mut interpreter = Interpreter::new(vec![]);
         interpreter
-            .exec(code, path, false)
+            .exec(&code, &path, false)
+            .map_err(|err| println!("{err}"))
+            .expect("Example test failed");
+        let mut interpreter = Interpreter::new(vec![]);
+        interpreter
+            .decompile(&code, &path, false)
             .map_err(|err| println!("{err}"))
             .expect("Example test failed");
     });

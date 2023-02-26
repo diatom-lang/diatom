@@ -355,10 +355,10 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     pub fn decompile(
         &mut self,
         code: impl AsRef<str>,
-        source: &OsStr,
+        source: impl AsRef<OsStr>,
         is_phony: bool,
     ) -> Result<String, String> {
-        self.compile(code, source, is_phony)?;
+        self.compile(code, source.as_ref(), is_phony)?;
         let mut decompiled = String::new();
         for Func {
             id,

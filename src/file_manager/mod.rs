@@ -72,11 +72,8 @@ impl FileManager {
     pub fn add_diagnostic(&mut self, diag: Diagnostic, is_eof: bool) {
         use Severity::*;
         match diag.severity {
-            Bug => todo!(),
             Error => self.error_count += 1,
-            Warning => todo!(),
-            Note => todo!(),
-            Help => todo!(),
+            _ => unreachable!(),
         }
         if is_eof {
             self.has_eof_error = true;
