@@ -26,7 +26,7 @@ regex = "1.7"
 lazy_static = "1.4"
 
 [dependencies]
-diatom-core = { path = "diatom-core" }
+diatom-core = { path = "diatom-core", version = "0.6.0-alpha" }
 
 [profile.release]
 opt-level = 2

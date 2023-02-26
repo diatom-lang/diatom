@@ -9,7 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-diatom = { path = ".." }
+diatom = { path = "..", version = "0.6.0-alpha" }
 reedline = { version = "0.15" }
 nu-ansi-term = { version = "0.46" }
 crossterm = { version = "0.24" }
