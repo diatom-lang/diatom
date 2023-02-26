@@ -1,11 +1,13 @@
 pub mod ast;
 mod error;
+mod path_resolver;
 #[cfg(test)]
 mod tests;
 
 use crate::file_manager::{Diagnostic, FileManager, Loc};
+use crate::frontend::parser::ast::ImportItem;
 
-use self::error::ErrorCode;
+use self::{error::ErrorCode, path_resolver::try_get_mod};
 
 use super::{
     lexer::{Keyword, Operator, Token},
@@ -15,8 +17,8 @@ use super::{
 
 use ast::{Const, Expr, OpInfix, OpPostfix, OpPrefix, Stmt};
 use codespan_reporting::diagnostic::Label;
-use either::Either;
-use std::{ffi::OsStr, mem::Discriminant};
+use std::collections::BTreeMap;
+use std::{ffi::OsString, mem::Discriminant, path::PathBuf};
 
 const fn precedence_infix(op: OpInfix) -> (u16, u16) {
     use OpInfix::*;
@@ -47,14 +49,8 @@ const fn precedence_postfix() -> u16 {
 /// A pattern match all possible start of an expression
 macro_rules! expr_start_pattern {
     () => {
-        Token::Key(
-            Keyword::Fn
-                | Keyword::Require
-                | Keyword::If
-                | Keyword::Begin
-                | Keyword::True
-                | Keyword::False,
-        ) | Token::Op(Operator::LBrc)
+        Token::Key(Keyword::Fn | Keyword::If | Keyword::Begin | Keyword::True | Keyword::False)
+            | Token::Op(Operator::LBrc)
             | Token::Op(Operator::LBrk)
             | Token::Op(Operator::LPar)
             | Token::Op(Operator::Minus)
@@ -69,27 +65,51 @@ macro_rules! expr_start_pattern {
 /// The parser for Diatom.
 pub struct Parser<'a> {
     file_manager: &'a mut FileManager,
+    relative_path: Option<PathBuf>,
+    search_path: &'a [PathBuf],
+    import_stack: BTreeMap<usize, Option<Loc>>,
     fid: usize,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(file_manager: &'a mut FileManager) -> Self {
+    pub fn new(file_manager: &'a mut FileManager, search_path: &'a [PathBuf]) -> Self {
         Self {
             file_manager,
+            import_stack: Default::default(),
+            relative_path: None,
+            search_path,
             fid: 0,
         }
     }
 
-    /// Parse a file or input from other source
-    pub fn parse_file(&mut self, file: Either<(&OsStr, impl Into<String>), &OsStr>) -> Vec<Stmt> {
-        let token_stream = match file {
-            Either::Left((path, content)) => {
-                let fid = self.file_manager.add_file(path, content.into());
-                self.fid = fid;
-                Lexer::lex(self.file_manager, fid)
-            }
-            Either::Right(_) => todo!(),
+    /// Parse a file
+    pub fn parse_file(&mut self, path: impl Into<OsString>, content: impl Into<String>) -> usize {
+        let path = path.into();
+        let fid = self.file_manager.add_file(path.clone(), content.into());
+        let path = PathBuf::from(path);
+        if let Some(path) = path.parent() {
+            self.relative_path = Some(PathBuf::from(path))
         };
+        self.parse_fid(fid, None);
+        fid
+    }
+
+    /// Parse a phony file
+    pub fn parse_file_phony(
+        &mut self,
+        path: impl Into<OsString>,
+        content: impl Into<String>,
+    ) -> usize {
+        let path = path.into();
+        let fid = self.file_manager.add_file(path, content.into());
+        self.parse_fid(fid, None);
+        fid
+    }
+
+    fn parse_fid(&mut self, fid: usize, loc: Option<Loc>) {
+        self.fid = fid;
+        self.import_stack.insert(fid, loc);
+        let token_stream = Lexer::lex(self.file_manager, fid);
         let mut iter = token_stream.iter();
         let mut stmts = vec![];
 
@@ -97,11 +117,9 @@ impl<'a> Parser<'a> {
             let stmt = self.consume_stmt(&mut iter, None);
             stmts.push(stmt);
         }
-        stmts
-    }
 
-    fn consume_require(&mut self, _iter: &mut TokenIterator) -> Expr {
-        todo!()
+        self.import_stack.remove(&fid);
+        self.file_manager.set_ast(self.fid, stmts);
     }
 
     fn consume_stmt(&mut self, iter: &mut TokenIterator, not_take_on_error: Option<Token>) -> Stmt {
@@ -147,6 +165,7 @@ impl<'a> Parser<'a> {
                     expr,
                 }
             }
+            Some(Key(Import)) => self.consume_import(iter),
             Some(Key(Loop | Until)) => self.consume_loop(iter),
             Some(Key(For)) => self.consume_for(iter),
             Some(token) => {
@@ -353,6 +372,207 @@ impl<'a> Parser<'a> {
                     return Expr::Error;
                 }
             }
+        }
+    }
+
+    fn convert_expr_to_import(&mut self, mut expr: Expr) -> Result<Vec<String>, ()> {
+        let mut item = vec![];
+        loop {
+            match expr {
+                Expr::Id { name, .. } => {
+                    item.push(name);
+                    item.reverse();
+                    return Ok(item);
+                }
+                Expr::Infix {
+                    op: OpInfix::Member,
+                    lhs,
+                    rhs,
+                    ..
+                } => {
+                    if let Expr::Id { name, .. } = *rhs {
+                        item.push(name);
+                        expr = *lhs;
+                    } else {
+                        return Err(());
+                    }
+                }
+                _ => return Err(()),
+            }
+        }
+    }
+
+    fn consume_import_item(&mut self, iter: &mut TokenIterator) -> Result<ImportItem, ()> {
+        use Keyword::*;
+        use Token::*;
+        let start = iter.next_loc();
+        let path = self.consume_expr(iter, 3, None);
+        let path = self.convert_expr_to_import(path)?;
+        let mut alias = None;
+        if let (Some(Key(As)), Some(Id(name))) = iter.peek2() {
+            alias = Some(name.clone());
+            iter.next();
+            iter.next();
+        }
+        let end = iter.loc();
+        Ok(ImportItem {
+            loc: start + end,
+            alias,
+            path,
+        })
+    }
+
+    fn resolve_mod(&mut self, mod_path: &[String]) -> Option<(usize, PathBuf)> {
+        if let Some(f) = self
+            .relative_path
+            .as_ref()
+            .and_then(|path| try_get_mod(path, mod_path, self.file_manager))
+        {
+            return Some(f);
+        }
+
+        self.search_path
+            .iter()
+            .find_map(|path| try_get_mod(path, mod_path, self.file_manager))
+    }
+
+    fn consume_import(&mut self, iter: &mut TokenIterator) -> Stmt {
+        use Keyword::*;
+        use Operator::*;
+        use Token::*;
+        iter.next();
+        let start = iter.loc();
+        let mut import_items = vec![];
+        match iter.peek() {
+            Some(Op(LBrc)) => {
+                iter.next();
+                loop {
+                    match iter.peek2() {
+                        (Some(Op(Comma)), Some(Op(RBrc))) => {
+                            iter.next();
+                            iter.next();
+                            break;
+                        }
+                        (Some(Op(RBrc)), _) => {
+                            iter.next();
+                            break;
+                        }
+                        (None, _) => {
+                            self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                            return Stmt::Error;
+                        }
+                        _ => {
+                            if let Some(Op(Comma)) = iter.peek() {
+                                iter.next();
+                            }
+                            if let Ok(item) = self.consume_import_item(iter) {
+                                import_items.push(item);
+                            }
+                        }
+                    }
+                }
+            }
+            None => {
+                self.add_diagnostic(ErrorCode::UnexpectedEof, iter.loc());
+                return Stmt::Error;
+            }
+            _ => {
+                if let Ok(item) = self.consume_import_item(iter) {
+                    if let Some(Key(From)) = iter.peek() {
+                        import_items.push(item);
+                    } else {
+                        let end = iter.loc();
+
+                        let module = self.resolve_mod(&item.path);
+                        let (fid, path) = match module {
+                            Some(module) => module,
+                            None => {
+                                self.add_diagnostic(ErrorCode::ModuleNotFound, start + end);
+                                return Stmt::Error;
+                            }
+                        };
+
+                        if let Some(loc) = self.import_stack.get(&fid) {
+                            self.add_diagnostic(
+                                ErrorCode::CircularImport(loc.clone()),
+                                start + end,
+                            );
+                            return Stmt::Error;
+                        }
+
+                        let prev_path = if let Some(path) = path.parent() {
+                            std::mem::replace(&mut self.relative_path, Some(PathBuf::from(path)))
+                        } else {
+                            None
+                        };
+
+                        let loc = start + end;
+                        let fid_prev = self.fid;
+                        self.parse_fid(fid, Some(loc.clone()));
+                        self.fid = fid_prev;
+
+                        self.relative_path = prev_path;
+
+                        return Stmt::Import {
+                            loc,
+                            fid,
+                            items: vec![item],
+                            direct_import_mod: true,
+                        };
+                    }
+                } else {
+                    return Stmt::Error;
+                }
+            }
+        }
+
+        if self.consume_to_key(iter, From, Some((Key(Import), start.clone()))) {
+            return Stmt::Error;
+        };
+
+        let from = self.consume_expr(iter, 0, None);
+        let loc = from.get_loc();
+        let from = self.convert_expr_to_import(from);
+        let from = match from {
+            Ok(from) => from,
+            Err(()) => {
+                self.add_diagnostic(ErrorCode::InvalidImport, loc);
+                return Stmt::Error;
+            }
+        };
+        let import_loc = start + iter.loc();
+
+        let module = self.resolve_mod(&from);
+        let (fid, path) = match module {
+            Some(module) => module,
+            None => {
+                self.add_diagnostic(ErrorCode::ModuleNotFound, import_loc);
+                return Stmt::Error;
+            }
+        };
+
+        if let Some(loc) = self.import_stack.get(&fid) {
+            self.add_diagnostic(ErrorCode::CircularImport(loc.clone()), import_loc);
+            return Stmt::Error;
+        }
+
+        let prev_path = if let Some(path) = path.parent() {
+            std::mem::replace(&mut self.relative_path, Some(PathBuf::from(path)))
+        } else {
+            None
+        };
+
+        let fid_prev = self.fid;
+        self.parse_fid(fid, Some(import_loc.clone()));
+        self.fid = fid_prev;
+
+        self.relative_path = prev_path;
+
+        Stmt::Import {
+            loc: import_loc,
+            fid,
+            items: import_items,
+            direct_import_mod: false,
         }
     }
 
@@ -757,7 +977,6 @@ impl<'a> Parser<'a> {
             }
             Some(Key(If)) => self.consume_if(iter),
             Some(Key(Begin)) => self.consume_block(iter),
-            Some(Key(Require)) => self.consume_require(iter),
             Some(Op(LBrk)) => {
                 iter.next();
                 let previous_loc = iter.loc();
@@ -1002,36 +1221,34 @@ impl<'a> Parser<'a> {
             .with_code("E1003")
             .with_message("Table key must be an identifier")
             .with_labels(vec![Label::primary(self.fid, loc)]),
-        ErrorCode::_RequireWrongArgument => Diagnostic::error()
+        ErrorCode::ModuleNotFound => Diagnostic::error()
             .with_code("E1004")
-            .with_message("Module must be a string literal")
-            .with_labels(vec![Label::primary(self.fid, loc)]),
-        ErrorCode::_InvalidModuleString => Diagnostic::error()
-            .with_code("E1005")
-            .with_message("Invalid character in module string")
-            .with_labels(vec![Label::primary(self.fid, loc)])
-            .with_notes(vec![
-                "Module string can only contains '.', '-' and [0-9a-zA-Z_].".to_string(),
-                "Module String must not be empty.".to_string(),
-            ]),
-        ErrorCode::_ModuleNotFound(s) => Diagnostic::error()
-            .with_code("E1006")
             .with_message("Module can not be found")
             .with_labels(vec![Label::primary(self.fid, loc)])
-            .with_notes(vec![format!("Looking for `{s}.dm` or `{s}/mod.dm`")]),
-        ErrorCode::_InvalidModule => Diagnostic::error()
-            .with_code("E1007")
-            .with_message("Error encountered while parsing module")
-            .with_labels(vec![Label::primary(self.fid, loc)]),
+            .with_notes(vec!["Looking for `<module>.dm` or `<module>/mod.dm`".to_string()]),
+        ErrorCode::CircularImport(prev_loc) => {
+            let mut diag = Diagnostic::error()
+                .with_code("E1005")
+                .with_message("Circular import detected")
+                .with_labels(vec![Label::primary(self.fid, loc)]);
+            if let Some(prev_loc) = prev_loc {
+                diag = diag.with_labels(vec![Label::secondary(prev_loc.fid, prev_loc).with_message("Previously imported here")]);
+            }
+            diag
+        },
         ErrorCode::InvalidTableFormat => Diagnostic::error()
-            .with_code("E1008")
+            .with_code("E1006")
             .with_message("Invalid syntax in table")
             .with_labels(vec![Label::primary(self.fid, loc)])
             .with_notes(vec!["Table should look like `{<identifier>=<expression>, <identifier>=<expression>, ...}`".to_string()]),
         ErrorCode::DuplicateKey(prev_loc, name) => Diagnostic::error()
-            .with_code("E1009")
+            .with_code("E1007")
             .with_message(format!("Duplicate table key `{name}`"))
             .with_labels(vec![Label::primary(self.fid, loc), Label::secondary(self.fid, prev_loc).with_message("Also defined here")]),
+        ErrorCode::InvalidImport => Diagnostic::error()
+            .with_code("E1008")
+            .with_message("Not allowed in import statement")
+            .with_labels(vec![Label::primary(self.fid, loc)]),
     };
 
         self.file_manager.add_diagnostic(diag, eof);

@@ -16,7 +16,7 @@ mod file_manager;
 mod frontend;
 mod gc;
 mod interpreter;
-mod stdlib;
+mod prelude;
 mod vm;
 
 #[cfg(test)]

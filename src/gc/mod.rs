@@ -84,13 +84,23 @@ struct GrayPool {
 
 /// Garbage Collector
 pub struct Gc<Buffer: IoWrite> {
+    /// External functions
     extern_vars: AHashMap<String, usize>,
+    /// Object managed pool
     obj_pool: Pool<GcObject<Buffer>>,
+    /// Values escaped from stack
     escaped_pool: Pool<Reg>,
+    /// Immutable string pool
     string_pool: Pool<String>,
+    /// Function call stack
     call_stack: CallStack,
+    /// Up value stack
     up_values: Vec<BTreeSet<usize>>,
+    /// Modules return value cache
+    module_map: BTreeMap<usize, Option<usize>>,
+    /// Objects marked as gray
     gray_pool: GrayPool,
+    /// Constant table key string pool
     key_pool: KeyPool,
     int_meta: usize,
     float_meta: usize,
@@ -128,6 +138,7 @@ impl<Buffer: IoWrite> Gc<Buffer> {
                     reg_size: 0,
                 },
             },
+            module_map: Default::default(),
             up_values: vec![BTreeSet::new()],
             string_pool: Default::default(),
             obj_pool,
@@ -138,9 +149,21 @@ impl<Buffer: IoWrite> Gc<Buffer> {
             list_meta,
             gc_meta,
             gray_pool: Default::default(),
-            threshold: 0,
+            threshold: 100,
             paused: false,
         }
+    }
+
+    pub fn new_module(&mut self, fid: usize) {
+        self.module_map.insert(fid, None);
+    }
+
+    pub fn get_module_return(&self, fid: usize) -> Option<usize> {
+        *self.module_map.get(&fid).unwrap()
+    }
+
+    pub fn set_module_return(&mut self, fid: usize, ref_id: usize) {
+        *self.module_map.get_mut(&fid).unwrap() = Some(ref_id);
     }
 
     pub fn get_extern(&self, name: impl AsRef<str>) -> Option<usize> {
@@ -515,6 +538,12 @@ impl<Buffer: IoWrite> Gc<Buffer> {
         self.extern_vars.values().for_each(|ref_id| {
             self.gray_pool.objects.insert(*ref_id);
         });
+        self.module_map
+            .values()
+            .filter_map(|x| *x)
+            .for_each(|ref_id| {
+                self.gray_pool.objects.insert(ref_id);
+            });
     }
 
     pub fn pause(&mut self) {

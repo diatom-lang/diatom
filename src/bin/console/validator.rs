@@ -1,34 +1,27 @@
+use std::{
+    io::Stdout,
+    sync::{Arc, Mutex},
+};
+
 use reedline::{ValidationResult, Validator};
 
 use crate::Interpreter;
 
-#[derive(Default)]
-pub struct DiatomValidator;
+pub struct DiatomValidator {
+    pub interpreter: Arc<Mutex<Interpreter<Stdout>>>,
+}
 
 impl Validator for DiatomValidator {
     fn validate(&self, line: &str) -> ValidationResult {
-        if Interpreter::<Vec<u8>>::verify_input_completeness(line) {
+        if self
+            .interpreter
+            .lock()
+            .unwrap()
+            .verify_input_completeness(line)
+        {
             ValidationResult::Complete
         } else {
             ValidationResult::Incomplete
         }
     }
-}
-
-#[test]
-fn test_validator() {
-    use std::mem::discriminant;
-    let val = DiatomValidator::default();
-    assert_eq!(
-        discriminant(&val.validate("begin a,b [1,3]")),
-        discriminant(&ValidationResult::Incomplete)
-    );
-    assert_eq!(
-        discriminant(&val.validate("if a,b then [1,3]")),
-        discriminant(&ValidationResult::Incomplete)
-    );
-    assert_eq!(
-        discriminant(&val.validate("if then [1,3]")),
-        discriminant(&ValidationResult::Complete)
-    );
 }

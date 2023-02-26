@@ -17,16 +17,14 @@ pub enum ErrorCode {
     MissingExpr(Loc),
     /// E1003 Invalid Table Key
     InvalidTableKey,
-    /// E1004 Require Wrong Argument
-    _RequireWrongArgument,
-    /// E1005 Invalid module string
-    _InvalidModuleString,
-    /// E1006 Module Not Found
-    _ModuleNotFound(String),
-    /// E1007 Invalid Module, Can Not Parse
-    _InvalidModule,
-    /// E1008 Invalid Table Format
+    /// E1004 Module Not Found
+    ModuleNotFound,
+    /// E1005 Circular Import
+    CircularImport(Option<Loc>),
+    /// E1006 Invalid Table Format
     InvalidTableFormat,
-    /// E1009 Duplicate Key
+    /// E1007 Duplicate Key
     DuplicateKey(Loc, String),
+    /// E1008 Invalid import
+    InvalidImport,
 }

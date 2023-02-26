@@ -49,8 +49,12 @@ pub enum Keyword {
     Fn,
     /// begin
     Begin,
-    /// require
-    Require,
+    /// import
+    Import,
+    /// from
+    From,
+    /// as
+    As,
 }
 
 /// A enum of all operators
@@ -163,7 +167,9 @@ impl Display for Keyword {
             Keyword::Def => "def",
             Keyword::Begin => "begin",
             Keyword::Fn => "fn",
-            Keyword::Require => "require",
+            Keyword::Import => "import",
+            Keyword::From => "from",
+            Keyword::As => "as",
         };
         write!(f, "{name}")
     }

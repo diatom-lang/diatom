@@ -54,7 +54,6 @@ impl<'a, Buffer: IoWrite> ConstScanner<'a, Buffer> {
             Expr::ExternId { .. } => (),
             Expr::Parentheses { content, .. } => self.scan_expr(content),
             Expr::Const { value, .. } => self.scan_const(value),
-            Expr::_Module { .. } => todo!(),
             Expr::Error => unreachable!(),
         }
     }
@@ -82,6 +81,7 @@ impl<'a, Buffer: IoWrite> ConstScanner<'a, Buffer> {
                 body.iter().for_each(|stmt| self.scan_stmt(stmt));
             }
             Stmt::Def { variable, .. } => self.scan_expr(variable),
+            Stmt::Import { .. } => (),
             Stmt::Error => unreachable!(),
         }
     }

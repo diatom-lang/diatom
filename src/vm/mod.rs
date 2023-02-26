@@ -63,6 +63,8 @@ pub enum VmInst {
     OpLoadConstant,
     OpLoadExtern,
     OpYield,
+    OpImport,
+    OpSaveModule,
     OpDummy,
 }
 

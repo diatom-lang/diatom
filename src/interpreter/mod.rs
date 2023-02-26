@@ -1,12 +1,14 @@
+use crate::frontend::parser::ast::ImportItem;
 use crate::gc::{Gc, GcObject, Reg};
-use crate::stdlib::load_std;
+use crate::prelude::load_prelude;
 use std::cell::RefCell;
 use std::fmt::Write;
+use std::io;
+use std::path::PathBuf;
 use std::{ffi::OsStr, rc::Rc};
 
 use ahash::{AHashMap, AHashSet};
 use codespan_reporting::diagnostic::Label;
-use either::Either;
 
 mod error;
 mod prelude;
@@ -16,8 +18,8 @@ mod scanner;
 mod api;
 use crate::file_manager::FileManager;
 use crate::vm::op::{
-    OpGe, OpGetTable, OpGetTuple, OpIndex, OpIs, OpLe, OpLoadExtern, OpLt, OpMakeList, OpMakeTable,
-    OpMakeTuple, OpNe, OpSetIndex, OpSetMeta, OpSetTable, OpSetTuple,
+    OpGe, OpGetTable, OpGetTuple, OpImport, OpIndex, OpIs, OpLe, OpLoadExtern, OpLt, OpMakeList,
+    OpMakeTable, OpMakeTuple, OpNe, OpSaveModule, OpSetIndex, OpSetMeta, OpSetTable, OpSetTuple,
 };
 use crate::{
     file_manager::{Diagnostic, Loc},
@@ -112,6 +114,21 @@ pub struct Func {
     pub insts: Vec<VmInst>,
 }
 
+static PRELUDE_NAMES: [&str; 12] = [
+    "print",
+    "println",
+    "todo",
+    "assert",
+    "unreachable",
+    "panic",
+    "List",
+    "Int",
+    "Float",
+    "Iter",
+    "Range",
+    "Option",
+];
+
 /// # The Diatom Interpreter
 ///
 /// High performance interpreter for the diatom programming language. This interpreter compiles
@@ -130,7 +147,7 @@ pub struct Func {
 /// // Execute source code
 /// let output = interpreter.exec(
 ///     "print('Hello, world!')",
-///     Default::default()
+///     "<test_code>", true
 ///     ).unwrap();
 /// ```
 ///
@@ -159,7 +176,7 @@ pub struct Func {
 /// });
 ///
 /// // change value to 5
-/// interpreter.exec("$set_value(5)", Default::default()).unwrap();
+/// interpreter.exec("$set_value(5)", "<test_code>", true).unwrap();
 /// assert_eq!(value.get(), 5);
 /// ```
 pub struct Interpreter<Buffer: IoWrite> {
@@ -171,12 +188,31 @@ pub struct Interpreter<Buffer: IoWrite> {
     out: Buffer,
     file_manager: FileManager,
     color: bool,
+    repl: bool,
+    search_path: Vec<PathBuf>,
 }
+
+/// Interpreter will never pass internal `Rc<T>` to outside.
+/// Thus it is safe to implement `Send` here.
+unsafe impl<T: IoWrite> Send for Interpreter<T> {}
 
 impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// Create a new interpreter instance
     pub fn new(buffer: Buffer) -> Self {
         Self::init(buffer, false)
+    }
+
+    /// Enable or disable REPL mode (print last value to output buffer)
+    pub fn repl(&mut self, repl: bool) -> &mut Self {
+        self.repl = repl;
+        self
+    }
+
+    /// Add module search path
+    pub fn with_search_path(&mut self, path: PathBuf) -> Result<(), io::Error> {
+        let path = path.canonicalize()?;
+        self.search_path.push(path);
+        Ok(())
     }
 
     fn init(buffer: Buffer, color: bool) -> Self {
@@ -194,6 +230,8 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             out: buffer,
             file_manager: FileManager::new(),
             color,
+            repl: false,
+            search_path: vec![],
         };
         // Initialize int and float meta table
         let int = interpreter.registers.declare_variable("Int", None);
@@ -223,7 +261,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             .write_reg(gc, Reg::Ref(interpreter.gc.gc_meta()));
 
         impl_prelude(&mut interpreter);
-        load_std(&mut interpreter);
+        load_prelude(&mut interpreter);
         interpreter
     }
 
@@ -271,7 +309,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     ///     }
     /// );
     ///
-    /// interpreter.exec("$hello_world()", Default::default()).unwrap();
+    /// interpreter.exec("$hello_world()", "<test_code>", true).unwrap();
     /// let output = interpreter.replace_buffer(Vec::<u8>::new());
     /// let output = String::from_utf8(output).unwrap();
     /// assert_eq!(output, "Hello, world!")
@@ -304,18 +342,23 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// Check if input is completeness
     ///
     /// Incomplete input usually contains unclosed parentheses, quotes or open expression.
-    pub fn verify_input_completeness(code: impl AsRef<str>) -> bool {
+    pub fn verify_input_completeness(&self, code: impl AsRef<str>) -> bool {
         let mut file_manager = FileManager::new();
-        let mut parser = Parser::new(&mut file_manager);
-        let _ = parser.parse_file(Either::Left((OsStr::new(""), code.as_ref())));
+        let mut parser = Parser::new(&mut file_manager, &self.search_path);
+        let _ = parser.parse_file(OsStr::new(""), code.as_ref());
         !file_manager.input_can_continue()
     }
 
     /// Show decompiled byte code for given source code.
     ///
     /// If compilation failed, `Err` will be returned.
-    pub fn decompile(&mut self, code: impl AsRef<str>, source: &OsStr) -> Result<String, String> {
-        self.compile(code, source)?;
+    pub fn decompile(
+        &mut self,
+        code: impl AsRef<str>,
+        source: &OsStr,
+        is_phony: bool,
+    ) -> Result<String, String> {
+        self.compile(code, source, is_phony)?;
         let mut decompiled = String::new();
         for Func {
             id,
@@ -340,10 +383,19 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         std::mem::replace(&mut self.out, buffer)
     }
 
-    fn compile(&mut self, code: impl AsRef<str>, source: &OsStr) -> Result<(), String> {
+    fn compile(
+        &mut self,
+        code: impl AsRef<str>,
+        source: &OsStr,
+        is_phony: bool,
+    ) -> Result<(), String> {
         self.file_manager.clear_diagnoses();
-        let mut parser = Parser::new(&mut self.file_manager);
-        let ast = parser.parse_file(Either::Left((source, code.as_ref())));
+        let mut parser = Parser::new(&mut self.file_manager, &self.search_path);
+        let fid = if is_phony {
+            parser.parse_file_phony(source, code.as_ref())
+        } else {
+            parser.parse_file(source, code.as_ref())
+        };
         if self.file_manager.error_count() > 0 {
             return Err(self.file_manager.render(self.color));
         }
@@ -353,7 +405,8 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         self.byte_code[0].insts.clear();
         self.vm.reset_ip();
 
-        let return_value = self.compile_ast(&ast).map_err(|_| {
+        let ast = self.file_manager.get_ast(fid);
+        let return_value = self.compile_ast(&ast.borrow()).map_err(|_| {
             // restore variable table if compile failed
             self.registers = registers_prev;
             self.file_manager.render(self.color)
@@ -382,40 +435,21 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     /// # Parameters
     /// * `code` - Source code
     /// * `source` - name of source code file or where it is from
-    /// * `color` - render output with ansi color. Set to false if you do not want to print the
-    /// output to terminal.
+    /// * `is_phony` - Whether source is a real path or a place holder
     ///
     /// # Return
     /// * Return the output of the program
     /// * If compilation failed or error occurs durning execution, an `Err(String)` that
     /// illustrates the error is returned.
-    pub fn exec(&mut self, code: impl AsRef<str>, source: &OsStr) -> Result<(), String> {
-        self.compile(code, source)?;
+    pub fn exec(
+        &mut self,
+        code: impl AsRef<str>,
+        source: impl AsRef<OsStr>,
+        is_phony: bool,
+    ) -> Result<(), String> {
+        self.compile(code, source.as_ref(), is_phony)?;
         match self.vm.exec(&self.byte_code, &mut self.gc, &mut self.out) {
-            (VmError::Yield(_), _) => Ok(()),
-            (error, trace) => {
-                self.file_manager.add_diagnostic(error.into(), false);
-                trace.into_iter().for_each(|loc| {
-                    self.file_manager.add_diagnostic(
-                        Diagnostic::error()
-                            .with_message("Traceback: Panic while invoking")
-                            .with_labels(vec![Label::primary(loc.fid, loc)]),
-                        false,
-                    )
-                });
-                Err(self.file_manager.render(self.color))
-            }
-        }
-    }
-
-    /// Execute and print last statement's return value
-    ///
-    /// If return value is unit, then it will not be printed.
-    pub fn exec_repl(&mut self, code: impl AsRef<str>) -> Result<(), String> {
-        self.compile(code, OsStr::new("<interactive>"))?;
-        match self.vm.exec(&self.byte_code, &mut self.gc, &mut self.out) {
-            (VmError::Yield(None), _) => Ok(()),
-            (VmError::Yield(Some(reg_id)), _) => {
+            (VmError::Yield(Some(reg_id)), _) if self.repl => {
                 let reg = self.gc.read_reg(reg_id);
                 match reg {
                     Reg::Unit => Ok(()),
@@ -432,6 +466,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     }
                 }
             }
+            (VmError::Yield(_), _) => Ok(()),
             (error, trace) => {
                 trace.into_iter().rev().for_each(|loc| {
                     self.file_manager.add_diagnostic(
@@ -598,10 +633,8 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     let (reg, _) = self.compile_constant(&Const::Unit, None)?;
                     reg
                 };
-                self.get_current_insts().push(VmInst::OpRet(OpRet {
-                    return_reg,
-                    loc: loc.clone(),
-                }))
+                self.get_current_insts()
+                    .push(VmInst::OpRet(OpRet { return_reg }))
             }
             Stmt::For {
                 loc,
@@ -760,6 +793,130 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     discard,
                     target,
                 )?;
+            }
+            Stmt::Import {
+                loc,
+                fid,
+                items,
+                direct_import_mod,
+            } => {
+                self.gc.new_module(*fid);
+                let body = self.file_manager.get_ast(*fid);
+                let body = Expr::Block {
+                    loc: loc.clone(),
+                    body: body.borrow().clone(),
+                };
+                // Make a new closure
+                let func_id = self.byte_code.len();
+                self.byte_code.push(Func {
+                    id: func_id,
+                    parameters: 0,
+                    insts: vec![],
+                });
+                self.registers.enter_function(func_id);
+
+                let func_id = self.registers.func_id;
+                // scan all constant values
+                let mut const_scanner = ConstScanner {
+                    register_table: &mut self.registers,
+                    gc: &mut self.gc,
+                    insts: &mut self.byte_code[func_id].insts,
+                };
+                const_scanner.scan_expr(&body);
+
+                // Capture prelude
+                let mut capture_scanner = CaptureScanner {
+                    register_table: &mut self.registers,
+                    gc: &mut self.gc,
+                    insts: &mut self.byte_code[func_id].insts,
+                    overridden: AHashMap::new(),
+                };
+                PRELUDE_NAMES
+                    .iter()
+                    .for_each(|name| capture_scanner.scan_name(name));
+
+                let result = match &body {
+                    Expr::Infix {
+                        op: OpInfix::Assign,
+                        lhs,
+                        rhs,
+                        ..
+                    } => {
+                        self.compile_assignment(lhs, rhs).map_err(|err| {
+                            self.registers.leave_function();
+                            err
+                        })?;
+                        (0, false)
+                    }
+                    body => self.compile_expr(body, false, None).map_err(|err| {
+                        self.registers.leave_function();
+                        err
+                    })?,
+                };
+                // return expression value
+                self.get_current_insts().push(VmInst::OpRet(OpRet {
+                    return_reg: result.0,
+                }));
+                let reg_size = self.registers.assigned;
+                let captured_regs = self.registers.leave_function();
+
+                let module_reg = self.registers.declare_intermediate();
+                self.get_current_func()
+                    .insts
+                    .push(VmInst::OpMakeClosure(OpMakeClosure {
+                        loc: loc.clone(),
+                        func_id,
+                        parameters: 0,
+                        rd: module_reg,
+                        capture: captured_regs,
+                        reg_size,
+                    }));
+
+                // Call import closure
+                let start = self.registers.prepare_for_call(0);
+                self.get_current_insts().push(VmInst::OpImport(OpImport {
+                    start,
+                    fid: *fid,
+                    module_reg,
+                    loc: loc.clone(),
+                }));
+                // Save module
+                self.get_current_insts()
+                    .push(VmInst::OpSaveModule(OpSaveModule {
+                        loc: loc.clone(),
+                        fid: *fid,
+                        module_reg,
+                    }));
+                // Load imported variables
+                items.iter().for_each(|ImportItem { loc, alias, path }| {
+                    let name = alias.as_ref().unwrap_or(path.last().unwrap());
+                    let item_reg_id =
+                        if let Some((id, depth, _)) = self.registers.lookup_variable(name) {
+                            assert!(depth == 0);
+                            id
+                        } else {
+                            self.scopes.last_mut().unwrap().insert(name.clone());
+                            self.registers.declare_variable(name, Some(loc.clone()))
+                        };
+                    self.get_current_insts().push(VmInst::OpMove(OpMove {
+                        rs: module_reg,
+                        rd: item_reg_id,
+                    }));
+                    if !direct_import_mod {
+                        path.iter().for_each(|attr| {
+                            let key_id = self.gc.get_or_insert_table_key(attr);
+                            self.get_current_insts()
+                                .push(VmInst::OpGetTable(OpGetTable {
+                                    loc: loc.clone(),
+                                    rs: item_reg_id,
+                                    rd: item_reg_id,
+                                    attr: key_id,
+                                }))
+                        });
+                    }
+                });
+
+                self.registers.free_intermediate(module_reg);
             }
             Stmt::Error => unreachable!(),
         }
@@ -1237,7 +1394,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 body,
             } => {
                 let (func_id, parameters, capture, reg_size) =
-                    self.compile_closure(parameters, either::Left(body), loc.clone())?;
+                    self.compile_closure(parameters, body)?;
                 let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
                 self.get_current_func()
                     .insts
@@ -1251,7 +1408,6 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     }));
                 Ok((rd, target.is_none()))
             }
-            Expr::_Module { loc: _, path: _ } => todo!(),
         }
     }
 
@@ -1571,8 +1727,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
     fn compile_closure(
         &mut self,
         parameters: &[(String, Loc)],
-        body: Either<&Expr, &[Stmt]>,
-        loc: Loc,
+        body: &Expr,
     ) -> std::result::Result<(usize, usize, Vec<Capture>, usize), ErrorCode> {
         let func_id = self.byte_code.len();
         self.byte_code.push(Func {
@@ -1592,10 +1747,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             gc: &mut self.gc,
             insts: &mut self.byte_code[func_id].insts,
         };
-        match body {
-            Either::Left(expr) => const_scanner.scan_expr(expr),
-            Either::Right(stmts) => stmts.iter().for_each(|stmt| const_scanner.scan_stmt(stmt)),
-        }
+        const_scanner.scan_expr(body);
 
         // scan all captured variable (include nested closure)
         let mut capture_scanner = CaptureScanner {
@@ -1604,60 +1756,29 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             insts: &mut self.byte_code[func_id].insts,
             overridden: AHashMap::new(),
         };
-        match body {
-            Either::Left(expr) => capture_scanner.scan_expr(expr),
-            Either::Right(stmts) => stmts
-                .iter()
-                .for_each(|stmt| capture_scanner.scan_stmt(stmt)),
-        }
+        capture_scanner.scan_expr(body);
 
         let result = match body {
-            Either::Left(Expr::Infix {
+            Expr::Infix {
                 op: OpInfix::Assign,
                 lhs,
                 rhs,
                 ..
-            }) => {
+            } => {
                 self.compile_assignment(lhs, rhs).map_err(|err| {
                     self.registers.leave_function();
                     err
                 })?;
                 (0, false)
             }
-            Either::Left(body) => self.compile_expr(body, false, None).map_err(|err| {
+            body => self.compile_expr(body, false, None).map_err(|err| {
                 self.registers.leave_function();
                 err
             })?,
-            Either::Right(body) => {
-                let mut ret = None;
-                if body.is_empty() {
-                    // load a unit value
-                    let (reg, _) = self.compile_constant(&Const::Unit, None)?;
-                    ret = Some((reg, false));
-                }
-
-                for (i, stmt) in body.iter().enumerate() {
-                    if i == body.len() - 1 {
-                        let ret_this = self.compile_stmt(stmt, false, None)?;
-                        // move return value to return reg
-                        if let Some(ret_this) = ret_this {
-                            ret = Some(ret_this);
-                        } else {
-                            // load a unit value
-                            let (reg, _) = self.compile_constant(&Const::Unit, None)?;
-                            ret = Some((reg, false));
-                        }
-                    } else {
-                        self.compile_stmt(stmt, true, None)?;
-                    }
-                }
-                ret.unwrap()
-            }
         };
         // return expression value
         self.get_current_insts().push(VmInst::OpRet(OpRet {
             return_reg: result.0,
-            loc,
         }));
         let reg_size = self.registers.assigned;
         let captured_regs = self.registers.leave_function();

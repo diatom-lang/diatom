@@ -2,8 +2,9 @@ use super::*;
 
 fn test_str(code: &str, should_fail: bool) {
     let mut file_manager = FileManager::new();
-    let mut parser = Parser::new(&mut file_manager);
-    let _ = parser.parse_file(Either::Left((OsStr::new("<test>"), code)));
+    let paths = vec![];
+    let mut parser = Parser::new(&mut file_manager, &paths);
+    let _ = parser.parse_file("test", code);
     if !should_fail && file_manager.error_count() > 0 {
         print!("{}", file_manager.render(true));
     }
@@ -18,13 +19,14 @@ fn test_str(code: &str, should_fail: bool) {
 fn test_expr_postfix_ambiguous() {
     let code = "0,a(1,2,3); (3,4)[2-1]+0.333//[0, 1, 2][1]; [v]";
     let mut file_manager = FileManager::new();
-    let mut parser = Parser::new(&mut file_manager);
-    let ast = parser.parse_file(Either::Left((OsStr::new("<test>"), code)));
+    let paths = vec![];
+    let mut parser = Parser::new(&mut file_manager, &paths);
+    let fid = parser.parse_file("test", code);
     if file_manager.error_count() > 0 {
         print!("{}", file_manager.render(true));
     }
     assert_eq!(file_manager.error_count(), 0);
-    assert_eq!(ast.len(), 3);
+    assert_eq!(file_manager.get_ast(fid).as_ref().borrow().len(), 3);
 }
 
 #[test]

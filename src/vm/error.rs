@@ -58,6 +58,8 @@ pub enum VmError {
     CanNotIndex { loc: Loc, t1: String, t2: String },
     /// E3017 Missing extern variable
     MissingExtern { loc: Loc, name: String },
+    /// E3018 Module not return table
+    ModuleInvalidReturn { loc: Loc, t: String },
 }
 
 impl From<VmError> for Diagnostic {
@@ -151,6 +153,10 @@ impl From<VmError> for Diagnostic {
             VmError::MissingExtern { loc, name } => Diagnostic::error()
                 .with_code("E3017")
                 .with_message(format!("External variable `{name}` is not loaded by host"))
+                .with_labels(vec![Label::primary(loc.fid, loc)]),
+            VmError::ModuleInvalidReturn { loc, t } => Diagnostic::error()
+                .with_code("E3018")
+                .with_message(format!("Module returns type `{t}` which is not a table"))
                 .with_labels(vec![Label::primary(loc.fid, loc)]),
         }
     }

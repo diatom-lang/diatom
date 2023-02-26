@@ -184,9 +184,123 @@ impl Instruction for OpCall {
     }
 }
 
+pub struct OpImport {
+    pub start: usize,
+    pub fid: usize,
+    /// Call module_reg and write module back to module_reg
+    pub module_reg: usize,
+    pub loc: Loc,
+}
+
+impl Instruction for OpImport {
+    #[inline(never)]
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        // Check cached module
+        if let Some(ref_id) = gc.get_module_return(self.fid) {
+            gc.write_reg(self.module_reg, Reg::Ref(ref_id));
+            return Ok(Ip {
+                func_id: ip.func_id,
+                inst: ip.inst + 1,
+            });
+        }
+        // get closure
+        let obj = gc.read_reg(self.module_reg).clone();
+        match obj {
+            Reg::Ref(r) => {
+                let obj = unsafe { gc.get_obj_unchecked(r) };
+                match obj {
+                    GcObject::Closure { func_id, .. } => {
+                        let func_id = *func_id;
+
+                        // allocate call stack
+                        gc.alloc_call_stack(
+                            Ip {
+                                func_id: ip.func_id,
+                                inst: ip.inst + 1,
+                            },
+                            Some(self.module_reg),
+                            // Reg#0 is always unit type
+                            self.start - 1,
+                            r,
+                        );
+
+                        Ok(Ip { func_id, inst: 0 })
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Module#{} -> Reg#{}",
+            "import", self.fid, self.module_reg
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpSaveModule {
+    pub fid: usize,
+    pub module_reg: usize,
+    pub loc: Loc,
+}
+
+impl Instruction for OpSaveModule {
+    #[inline(never)]
+    fn exec<Buffer: IoWrite>(
+        &self,
+        ip: Ip,
+        gc: &mut Gc<Buffer>,
+        _out: &mut Buffer,
+    ) -> Result<Ip, VmError> {
+        let module = gc.read_reg(self.module_reg).clone();
+        match module {
+            Reg::Ref(rid) => {
+                if let GcObject::Table(_) = unsafe { gc.get_obj_unchecked(rid) } {
+                    gc.set_module_return(self.fid, rid);
+                    Ok(Ip {
+                        func_id: ip.func_id,
+                        inst: ip.inst + 1,
+                    })
+                } else {
+                    let t = get_type(&module, gc);
+                    Err(VmError::ModuleInvalidReturn {
+                        loc: self.loc.clone(),
+                        t,
+                    })
+                }
+            }
+            _ => {
+                let t = get_type(&module, gc);
+                Err(VmError::ModuleInvalidReturn {
+                    loc: self.loc.clone(),
+                    t,
+                })
+            }
+        }
+    }
+
+    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
+        writeln!(
+            decompiled,
+            "{: >FORMAT_PAD$}    Module#{} <- Reg#{}",
+            "sav_mod", self.fid, self.module_reg
+        )
+        .unwrap()
+    }
+}
+
 pub struct OpRet {
     pub return_reg: usize,
-    pub loc: Loc,
 }
 
 impl Instruction for OpRet {

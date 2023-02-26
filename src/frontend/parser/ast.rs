@@ -1,4 +1,11 @@
-use crate::file_manager::{DisplayableOsString, Loc};
+use crate::file_manager::Loc;
+
+#[derive(Clone)]
+pub struct ImportItem {
+    pub loc: Loc,
+    pub alias: Option<String>,
+    pub path: Vec<String>,
+}
 
 #[derive(Clone)]
 pub enum Stmt {
@@ -36,6 +43,13 @@ pub enum Stmt {
         variable: Box<Expr>,
         parameters: Vec<(String, Loc)>,
         body: Vec<Stmt>,
+    },
+    /// Import module
+    Import {
+        loc: Loc,
+        fid: usize,
+        items: Vec<ImportItem>,
+        direct_import_mod: bool,
     },
     Error,
 }
@@ -135,10 +149,6 @@ pub enum Expr {
         loc: Loc,
         value: Const,
     },
-    _Module {
-        loc: Loc,
-        path: DisplayableOsString,
-    },
     Error,
 }
 
@@ -156,7 +166,6 @@ impl Expr {
             Expr::ExternId { loc, .. } => loc,
             Expr::Parentheses { loc, .. } => loc,
             Expr::Const { loc, .. } => loc,
-            Expr::_Module { loc, .. } => loc,
             Expr::Error => unreachable!(),
             Expr::OpenRange { loc, .. } => loc,
         }

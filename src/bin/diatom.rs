@@ -55,14 +55,14 @@ fn main() {
         }
         (Some(path), false) => {
             let code = fs::read_to_string(path).expect("Error: File can not be read!");
-            match interpreter.exec(code, path.as_os_str()) {
+            match interpreter.exec(code, path.as_os_str(), false) {
                 Ok(_) => (),
                 Err(s) => print!("{s}"),
             };
         }
         (Some(path), true) => {
             let code = fs::read_to_string(path).expect("Error: File can not be read!");
-            let result = match interpreter.decompile(code, path.as_os_str()) {
+            let result = match interpreter.decompile(code, path.as_os_str(), false) {
                 Ok(s) | Err(s) => s,
             };
             print!("{result}");

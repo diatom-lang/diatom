@@ -1,6 +1,6 @@
 use ahash::AHashMap;
 
-use crate::interpreter::Capture;
+use crate::{frontend::parser::ast::ImportItem, interpreter::Capture};
 
 use super::*;
 
@@ -13,6 +13,25 @@ pub struct CaptureScanner<'a, Buffer: IoWrite> {
 }
 
 impl<'a, Buffer: IoWrite> CaptureScanner<'a, Buffer> {
+    pub fn scan_name(&mut self, name: impl AsRef<str>) {
+        let name = name.as_ref();
+        if self.overridden.get(name).is_some() {
+            return;
+        }
+        if let Some((id, depth, loc)) = self.register_table.lookup_variable(name) {
+            // variable is captured
+            // make a local copy and register capture info
+            if depth > 0 {
+                assert_eq!(depth, 1);
+                let local_id = self.register_table.declare_captured_variable(name, loc);
+                self.register_table.capture.push(Capture {
+                    rd: local_id,
+                    rs: id,
+                });
+            }
+        }
+    }
+
     pub fn scan_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::Block { body, .. } => body.iter().for_each(|stmt| self.scan_stmt(stmt)),
@@ -95,26 +114,11 @@ impl<'a, Buffer: IoWrite> CaptureScanner<'a, Buffer> {
                 })
             }
             Expr::Id { name, .. } => {
-                if self.overridden.get(name).is_some() {
-                    return;
-                }
-                if let Some((id, depth, loc)) = self.register_table.lookup_variable(name) {
-                    // variable is captured
-                    // make a local copy and register capture info
-                    if depth > 0 {
-                        assert_eq!(depth, 1);
-                        let local_id = self.register_table.declare_captured_variable(name, loc);
-                        self.register_table.capture.push(Capture {
-                            rd: local_id,
-                            rs: id,
-                        });
-                    }
-                }
+                self.scan_name(name);
             }
             Expr::ExternId { .. } => (),
             Expr::Parentheses { content, .. } => self.scan_expr(content),
             Expr::Const { value, .. } => self.scan_const(value),
-            Expr::_Module { .. } => todo!(),
             Expr::Error => unreachable!(),
         }
     }
@@ -175,6 +179,16 @@ impl<'a, Buffer: IoWrite> CaptureScanner<'a, Buffer> {
                     if *count == 0 {
                         self.overridden.remove(name);
                     }
+                })
+            }
+            Stmt::Import { items, .. } => {
+                items.iter().for_each(|ImportItem { alias, path, .. }| {
+                    let name = if let Some(alias) = alias {
+                        alias
+                    } else {
+                        path.last().unwrap()
+                    };
+                    self.scan_name(name);
                 })
             }
             Stmt::Error => unreachable!(),

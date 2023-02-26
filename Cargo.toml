@@ -1,6 +1,6 @@
 [package]
 name = "diatom"
-version = "0.5.2"
+version = "0.6.0-alpha"
 edition = "2021"
 authors = [ "Terence Ng", "Aoyang Yu" ]
 description = "The diatom programming language"
@@ -22,9 +22,6 @@ crossterm = { version = "0.24", optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
 enum_dispatch = "0.3"
 either = "1.8"
-
-[dev-dependencies]
-include_dir = { version = "0.7", features = ["glob"] }
 
 [features]
 default = ["console"]

@@ -1,4 +1,9 @@
-use std::{env, ffi::OsStr, io::Stdout};
+use std::{
+    env,
+    ffi::OsStr,
+    io::Stdout,
+    sync::{Arc, Mutex},
+};
 
 use crate::Interpreter;
 
@@ -10,12 +15,14 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// An interactive console for Diatom
 pub struct Console {
-    interpreter: Interpreter<Stdout>,
+    interpreter: Arc<Mutex<Interpreter<Stdout>>>,
 }
 
 impl Console {
     pub fn new(interpreter: Interpreter<Stdout>) -> Self {
-        Self { interpreter }
+        Self {
+            interpreter: Arc::new(Mutex::new(interpreter)),
+        }
     }
 
     /// Run this console
@@ -55,29 +62,38 @@ impl Console {
         let edit_mode = Box::new(Emacs::new(keybindings));
 
         // Validator
-        let validator = Box::<DiatomValidator>::default();
+        let validator = DiatomValidator {
+            interpreter: self.interpreter.clone(),
+        };
 
         let mut line_editor = Reedline::create()
             .with_highlighter(highlighter)
             .with_edit_mode(edit_mode)
-            .with_validator(validator);
+            .with_validator(Box::new(validator));
         let prompt = DiatomPrompt::default();
+
+        // Enable repl
+        let mut locked = self.interpreter.lock().unwrap();
+        locked.repl(true);
+        if let Ok(work_dir) = env::current_dir() {
+            let _ = locked.with_search_path(work_dir);
+        }
+        std::mem::drop(locked);
 
         loop {
             let sig = line_editor.read_line(&prompt);
             match sig {
                 Ok(Signal::Success(buffer)) => {
+                    let mut locked = self.interpreter.lock().unwrap();
                     if inspect {
-                        match self
-                            .interpreter
-                            .decompile(buffer, OsStr::new("<interactive>"))
-                        {
+                        match locked.decompile(buffer, OsStr::new("<interactive>"), true) {
                             Ok(s) => print!("{s}"),
                             Err(s) => eprint!("{s}"),
                         }
-                    } else if let Err(e) = self.interpreter.exec_repl(buffer) {
+                    } else if let Err(e) = locked.exec(buffer, OsStr::new("<interactive>"), true) {
                         eprint!("{e}")
                     };
+                    std::mem::drop(locked);
                 }
                 Ok(Signal::CtrlC) => {
                     line_editor.run_edit_commands(&[EditCommand::Clear]);

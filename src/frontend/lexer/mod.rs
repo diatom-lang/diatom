@@ -37,7 +37,7 @@ impl Lexer {
     pub fn lex(file_manager: &mut FileManager, fid: usize) -> TokenStream {
         let mut token_stream = TokenStream::default();
         let file = file_manager.get_file(fid);
-        let mut iter = FileIterator::new(&file, fid);
+        let mut iter = FileIterator::new(file.as_ref(), fid);
         // Ignore shebang (#!...) at the beginning of the file
         if let (Some('#'), Some('!')) = iter.peek2() {
             loop {
@@ -351,7 +351,9 @@ impl Lexer {
             "def" => Ok((Token::Key(Keyword::Def), loc)),
             "fn" => Ok((Token::Key(Keyword::Fn), loc)),
             "begin" => Ok((Token::Key(Keyword::Begin), loc)),
-            "require" => Ok((Token::Key(Keyword::Require), loc)),
+            "import" => Ok((Token::Key(Keyword::Import), loc)),
+            "from" => Ok((Token::Key(Keyword::From), loc)),
+            "as" => Ok((Token::Key(Keyword::As), loc)),
             "is" => Ok((Token::Op(Operator::Is), loc)),
             _ if name.starts_with('$') => {
                 assert!(name.len() > 1);
