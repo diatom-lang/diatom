@@ -1,6 +1,6 @@
 [package]
 name = "diatom-cli"
-version.workspace = true
+version = "0.2.0"
 edition.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -9,7 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-diatom = { path = "..", version = "0.6.0-alpha" }
+diatom = { path = "../diatom", version = "0.6.0-alpha" }
 reedline = { version = "0.15" }
 nu-ansi-term = { version = "0.46" }
 crossterm = { version = "0.24" }

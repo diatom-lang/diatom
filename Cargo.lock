@@ -245,11 +245,13 @@ name = "diatom"
 version = "0.6.0-alpha"
 dependencies = [
  "diatom-core",
+ "diatom-std-core",
+ "diatom-std-os",
 ]
 
 [[package]]
 name = "diatom-cli"
-version = "0.6.0-alpha"
+version = "0.2.0"
 dependencies = [
  "clap",
  "crossterm",
@@ -262,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "diatom-core"
-version = "0.6.0-alpha"
+version = "0.6.0"
 dependencies = [
  "ahash",
  "bimap",
@@ -273,6 +275,14 @@ dependencies = [
  "more-asserts",
  "regex",
 ]
+
+[[package]]
+name = "diatom-std-core"
+version = "0.1.0"
+
+[[package]]
+name = "diatom-std-os"
+version = "0.1.0"
 
 [[package]]
 name = "either"

@@ -1,19 +1,7 @@
-[package]
-name = "diatom"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-description.workspace = true
-readme.workspace = true
-license.workspace = true
-repository.workspace = true
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [workspace]
-members = ["diatom-core", "diatom-cli"]
+members = ["diatom", "diatom-core", "diatom-cli", "diatom-std-core"]
 
 [workspace.package]
-version = "0.6.0-alpha"
 edition = "2021"
 authors = [ "Terence Ng", "Aoyang Yu" ]
 description = "The diatom programming language"
@@ -24,9 +12,6 @@ repository = "https://github.com/diatom-lang/diatom.git"
 [workspace.dependencies]
 regex = "1.7"
 lazy_static = "1.4"
-
-[dependencies]
-diatom-core = { path = "diatom-core", version = "0.6.0-alpha" }
 
 [profile.release]
 opt-level = 2
