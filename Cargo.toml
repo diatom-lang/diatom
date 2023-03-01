@@ -12,6 +12,7 @@ repository = "https://github.com/diatom-lang/diatom.git"
 [workspace.dependencies]
 regex = "1.7"
 lazy_static = "1.4"
+ahash = { version = "0.8", default-features = false, features = ["compile-time-rng", "std"] }
 
 [profile.release]
 opt-level = 2
