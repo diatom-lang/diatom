@@ -1,12 +1,9 @@
 use std::{
-    cell::RefCell,
     ffi::OsString,
     fmt::Display,
     ops::{Add, Range},
-    rc::Rc,
+    sync::Arc,
 };
-
-use crate::frontend::parser::ast::Stmt;
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
@@ -36,7 +33,7 @@ impl Add<Loc> for Loc {
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct PathShow {
-    path: Rc<OsString>,
+    path: Arc<OsString>,
 }
 
 impl Display for PathShow {
@@ -52,14 +49,13 @@ impl Display for PathShow {
 impl From<OsString> for PathShow {
     fn from(value: OsString) -> Self {
         PathShow {
-            path: Rc::new(value),
+            path: Arc::new(value),
         }
     }
 }
 
 pub struct SharedFile {
-    pub file: Rc<String>,
-    pub ast: Rc<RefCell<Vec<Stmt>>>,
+    pub file: Arc<String>,
 }
 
 impl AsRef<str> for SharedFile {

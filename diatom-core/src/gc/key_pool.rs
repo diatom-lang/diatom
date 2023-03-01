@@ -19,4 +19,8 @@ impl KeyPool {
     pub fn look_up_key(&self, id: usize) -> Option<&str> {
         self.pool.get_by_right(&id).map(|s| s.as_str())
     }
+
+    pub fn get_key(&self, key: impl AsRef<str>) -> Option<usize> {
+        self.pool.get_by_left(key.as_ref()).cloned()
+    }
 }

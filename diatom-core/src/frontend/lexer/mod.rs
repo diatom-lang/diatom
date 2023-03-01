@@ -355,10 +355,6 @@ impl Lexer {
             "from" => Ok((Token::Key(Keyword::From), loc)),
             "as" => Ok((Token::Key(Keyword::As), loc)),
             "is" => Ok((Token::Op(Operator::Is), loc)),
-            _ if name.starts_with('$') => {
-                assert!(name.len() > 1);
-                Ok((Token::ExternId(name), loc))
-            }
             _ => Ok((Token::Id(name), loc)),
         }
     }

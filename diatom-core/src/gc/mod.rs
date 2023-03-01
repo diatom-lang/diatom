@@ -1,21 +1,17 @@
 use std::{
-    cell::RefCell,
     collections::{BTreeMap, BTreeSet},
-    rc::Rc,
+    sync::Arc,
 };
 
-use crate::{vm::Ip, IoWrite, State};
+use crate::{ffi::ForeignFunction, vm::Ip, IoWrite};
 
 mod key_pool;
 mod pool;
-mod prelude;
-use ahash::AHashMap;
 use key_pool::KeyPool;
 use more_asserts::debug_assert_gt;
 use pool::Pool;
 
-use self::prelude::{init_float_meta, init_gc_meta, init_int_meta, init_list_meta};
-
+#[derive(Default)]
 pub struct Table {
     pub attributes: BTreeMap<usize, Reg>,
     pub meta_table: Option<usize>,
@@ -29,10 +25,7 @@ pub enum GcObject<Buffer: IoWrite> {
         /// local id, shared reg
         captured: Vec<(usize, usize)>,
     },
-    #[allow(clippy::type_complexity)]
-    NativeFunction(
-        Rc<RefCell<dyn Fn(&mut State<Buffer>, &[Reg], &mut Buffer) -> Result<Reg, String>>>,
-    ),
+    NativeFunction(Arc<ForeignFunction<Buffer>>),
     List(Vec<Reg>),
     Table(Table),
     Tuple(Vec<Reg>),
@@ -78,14 +71,38 @@ struct CallStack {
 #[derive(Default)]
 struct GrayPool {
     pinned_string: BTreeSet<usize>,
+    pinned_obj: BTreeSet<usize>,
     escaped: BTreeSet<usize>,
     objects: BTreeSet<usize>,
 }
 
+pub enum PrimitiveMeta {
+    Int,
+    Float,
+    Str,
+    List,
+}
+
+struct MetaMap {
+    int_meta: usize,
+    float_meta: usize,
+    list_meta: usize,
+    str_meta: usize,
+}
+
+impl MetaMap {
+    const fn get(&self, key: PrimitiveMeta) -> usize {
+        match key {
+            PrimitiveMeta::Int => self.int_meta,
+            PrimitiveMeta::Float => self.float_meta,
+            PrimitiveMeta::Str => self.str_meta,
+            PrimitiveMeta::List => self.list_meta,
+        }
+    }
+}
+
 /// Garbage Collector
 pub struct Gc<Buffer: IoWrite> {
-    /// External functions
-    extern_vars: AHashMap<String, usize>,
     /// Object managed pool
     obj_pool: Pool<GcObject<Buffer>>,
     /// Values escaped from stack
@@ -102,10 +119,8 @@ pub struct Gc<Buffer: IoWrite> {
     gray_pool: GrayPool,
     /// Constant table key string pool
     key_pool: KeyPool,
-    int_meta: usize,
-    float_meta: usize,
-    list_meta: usize,
-    gc_meta: usize,
+    /// Meta table id for primitive type
+    meta_map: MetaMap,
     threshold: usize,
     paused: bool,
 }
@@ -114,15 +129,15 @@ static UNIT_REG: Reg = Reg::Unit;
 
 impl<Buffer: IoWrite> Gc<Buffer> {
     pub fn new() -> Self {
-        let mut key_pool = KeyPool::default();
-        let mut obj_pool = Pool::<GcObject<Buffer>>::default();
-        let int_meta = init_int_meta(&mut obj_pool, &mut key_pool);
-        let float_meta = init_float_meta(&mut obj_pool, &mut key_pool);
-        let list_meta = init_list_meta(&mut obj_pool, &mut key_pool);
-        let gc_meta = init_gc_meta(&mut obj_pool, &mut key_pool);
-
-        Self {
-            extern_vars: Default::default(),
+        let key_pool = KeyPool::default();
+        let obj_pool = Pool::<GcObject<Buffer>>::default();
+        let meta_map = MetaMap {
+            int_meta: usize::MAX,
+            float_meta: usize::MAX,
+            list_meta: usize::MAX,
+            str_meta: usize::MAX,
+        };
+        let mut gc = Self {
             call_stack: CallStack {
                 frames: vec![],
                 regs: vec![],
@@ -144,18 +159,25 @@ impl<Buffer: IoWrite> Gc<Buffer> {
             obj_pool,
             escaped_pool: Default::default(),
             key_pool,
-            int_meta,
-            float_meta,
-            list_meta,
-            gc_meta,
             gray_pool: Default::default(),
             threshold: 100,
             paused: false,
-        }
+            meta_map,
+        };
+        let meta_map = MetaMap {
+            int_meta: gc.alloc_obj_pinned(GcObject::Table(Default::default())),
+            float_meta: gc.alloc_obj_pinned(GcObject::Table(Default::default())),
+            list_meta: gc.alloc_obj_pinned(GcObject::Table(Default::default())),
+            str_meta: gc.alloc_obj_pinned(GcObject::Table(Default::default())),
+        };
+        gc.meta_map = meta_map;
+        gc
     }
 
     pub fn new_module(&mut self, fid: usize) {
-        self.module_map.insert(fid, None);
+        if self.module_map.get(&fid).is_none() {
+            self.module_map.insert(fid, None);
+        }
     }
 
     pub fn get_module_return(&self, fid: usize) -> Option<usize> {
@@ -166,14 +188,6 @@ impl<Buffer: IoWrite> Gc<Buffer> {
         *self.module_map.get_mut(&fid).unwrap() = Some(ref_id);
     }
 
-    pub fn get_extern(&self, name: impl AsRef<str>) -> Option<usize> {
-        self.extern_vars.get(name.as_ref()).cloned()
-    }
-
-    pub fn add_extern(&mut self, name: impl Into<String>, ref_id: usize) {
-        self.extern_vars.insert(name.into(), ref_id);
-    }
-
     pub fn look_up_table_key(&self, id: usize) -> Option<&str> {
         self.key_pool.look_up_key(id)
     }
@@ -182,9 +196,19 @@ impl<Buffer: IoWrite> Gc<Buffer> {
         self.key_pool.get_or_insert(key)
     }
 
+    pub fn get_table_key(&self, key: impl AsRef<str>) -> Option<usize> {
+        self.key_pool.get_key(key)
+    }
+
     pub fn alloc_obj(&mut self, obj: GcObject<Buffer>) -> usize {
         self.try_collect();
         self.obj_pool.alloc(obj)
+    }
+
+    pub fn alloc_obj_pinned(&mut self, obj: GcObject<Buffer>) -> usize {
+        let id = self.obj_pool.alloc(obj);
+        self.gray_pool.pinned_obj.insert(id);
+        id
     }
 
     pub fn alloc_str(&mut self, s: String) -> usize {
@@ -200,6 +224,10 @@ impl<Buffer: IoWrite> Gc<Buffer> {
 
     pub fn get_obj(&self, id: usize) -> Option<&GcObject<Buffer>> {
         self.obj_pool.get(id)
+    }
+
+    pub fn get_obj_mut(&mut self, id: usize) -> Option<&mut GcObject<Buffer>> {
+        self.obj_pool.get_mut(id)
     }
 
     pub unsafe fn get_obj_unchecked(&self, id: usize) -> &GcObject<Buffer> {
@@ -363,20 +391,8 @@ impl<Buffer: IoWrite> Gc<Buffer> {
         (return_addr, write_back)
     }
 
-    pub fn int_meta(&self) -> usize {
-        self.int_meta
-    }
-
-    pub fn float_meta(&self) -> usize {
-        self.float_meta
-    }
-
-    pub fn list_meta(&self) -> usize {
-        self.list_meta
-    }
-
-    pub fn gc_meta(&self) -> usize {
-        self.gc_meta
+    pub fn get_meta(&self, key: PrimitiveMeta) -> usize {
+        self.meta_map.get(key)
     }
 
     pub fn clean_call_stack(&mut self) -> Vec<Ip> {
@@ -408,8 +424,15 @@ impl<Buffer: IoWrite> Gc<Buffer> {
                     write!(buffer, "<Recursive ref@{}>", *r).unwrap();
                     return;
                 }
+                let obj = self.get_obj(*r);
+                let obj = if let Some(obj) = obj {
+                    obj
+                }else{
+                    write!(buffer, "<Invalid Ref@{r}>").unwrap();
+                    return;
+                };
                 visited.insert(*r);
-                match self.get_obj(*r).unwrap() {
+                match obj {
                     GcObject::Closure {
                         func_id,
                         parameters: _,
@@ -419,7 +442,7 @@ impl<Buffer: IoWrite> Gc<Buffer> {
                         write!(buffer, "Closure[{func_id}]")
                     }
                     GcObject::NativeFunction(f) => {
-                        write!(buffer, "External function@{:p}", f.as_ptr())
+                        write!(buffer, "External function@{:p}", Arc::as_ptr(f))
                     }
                     GcObject::List(l) => {
                         write!(buffer, "[").unwrap();
@@ -531,13 +554,16 @@ impl<Buffer: IoWrite> Gc<Buffer> {
                 }
             };
         });
+
         self.gray_pool
             .pinned_string
             .iter()
             .for_each(|sid| self.string_pool.mark(*sid));
-        self.extern_vars.values().for_each(|ref_id| {
-            self.gray_pool.objects.insert(*ref_id);
+
+        self.gray_pool.pinned_obj.iter().for_each(|sid| {
+            self.gray_pool.objects.insert(*sid);
         });
+
         self.module_map
             .values()
             .filter_map(|x| *x)

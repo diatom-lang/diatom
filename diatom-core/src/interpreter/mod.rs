@@ -1,27 +1,28 @@
 use crate::frontend::parser::ast::ImportItem;
-use crate::gc::{Gc, GcObject, Reg};
-use crate::prelude::load_prelude;
-use std::cell::RefCell;
+use crate::gc::{Gc, GcObject, PrimitiveMeta, Reg, Table};
+use std::ffi::OsStr;
 use std::fmt::Write;
 use std::io;
+use std::marker::PhantomData;
 use std::path::PathBuf;
-use std::{ffi::OsStr, rc::Rc};
+use std::sync::Arc;
 
 use ahash::{AHashMap, AHashSet};
 use codespan_reporting::diagnostic::Label;
 
 mod error;
-mod prelude;
 mod register_table;
 mod scanner;
+mod std_core;
 
-mod api;
+pub mod ffi;
 use crate::file_manager::FileManager;
 use crate::vm::op::{
-    OpGe, OpGetTable, OpGetTuple, OpImport, OpIndex, OpIs, OpLe, OpLoadExtern, OpLt, OpMakeList,
+    OpGe, OpGetTable, OpGetTuple, OpImport, OpIndex, OpIs, OpLe, OpLt, OpMakeList,
     OpMakeTable, OpMakeTuple, OpNe, OpSaveModule, OpSetIndex, OpSetMeta, OpSetTable, OpSetTuple,
 };
 use crate::{
+    ffi::{DiatomValue, State},
     file_manager::{Diagnostic, Loc},
     frontend::{
         parser::ast::{Const, Expr, OpInfix, OpPrefix, Stmt},
@@ -36,16 +37,15 @@ use crate::{
         },
         Instruction, Vm, VmInst,
     },
-    DiatomValue, IoWrite,
+    IoWrite,
 };
-pub use api::State;
 
 use error::ErrorCode;
-use prelude::impl_prelude;
 pub use register_table::Capture;
 use register_table::{ConstantValue, Loop, RegisterTable};
 
 use self::scanner::{CaptureScanner, ConstScanner};
+pub use self::std_core::{Extension, ExtensionKind, StdCore};
 
 #[derive(Clone)]
 pub struct FutureJump {
@@ -114,74 +114,7 @@ pub struct Func {
     pub insts: Vec<VmInst>,
 }
 
-static PRELUDE_NAMES: [&str; 12] = [
-    "print",
-    "println",
-    "todo",
-    "assert",
-    "unreachable",
-    "panic",
-    "List",
-    "Int",
-    "Float",
-    "Iter",
-    "Range",
-    "Option",
-];
-
-/// # The Diatom Interpreter
-///
-/// High performance interpreter for the diatom programming language. This interpreter compiles
-/// diatom source code into byte code and executes the byte code with carefully tuned virtual
-/// machine. Our benchmark shows it can match or even surpass the execution speed of Lua 5.4 .
-///
-/// # Example
-///
-/// ## 1. Run a piece of code
-/// ```
-/// # use diatom_core as diatom;
-/// use diatom::Interpreter;
-///
-/// // Create a new instance of interpreter
-/// // Enable colored output
-/// let mut interpreter = Interpreter::with_color(std::io::stdout());
-/// // Execute source code
-/// let output = interpreter.exec(
-///     "print('Hello, world!')",
-///     "<test_code>", true
-///     ).unwrap();
-/// ```
-///
-/// ## 2. Add call back to the interpreter
-/// ```
-/// # use diatom_core as diatom;
-/// use std::{cell::Cell, rc::Rc};
-/// use diatom::{DiatomValue, Interpreter};
-///
-/// // this value will be modified
-/// let value = Rc::new(Cell::new(0));
-/// let value_capture = value.clone();
-///
-/// let mut interpreter = Interpreter::new(std::io::stdout());
-/// // add a callback named "set_value"
-/// interpreter.add_extern_function("set_value", move |_state, parameters, _out| {
-///     if parameters.len() != 1 {
-///         return Err("Expected 1 parameter!".to_string());
-///     }
-///     match parameters[0] {
-///         DiatomValue::Int(i) => {
-///             value_capture.set(i);
-///             Ok(DiatomValue::Unit)
-///         }
-///         _ => Err("Invalid type".to_string()),
-///     }
-/// });
-///
-/// // change value to 5
-/// interpreter.exec("$set_value(5)", "<test_code>", true).unwrap();
-/// assert_eq!(value.get(), 5);
-/// ```
-pub struct Interpreter<Buffer: IoWrite> {
+pub struct Interpreter<Buffer: IoWrite, LibCore: StdCore> {
     registers: RegisterTable,
     scopes: Vec<AHashSet<String>>,
     byte_code: Vec<Func>,
@@ -192,13 +125,10 @@ pub struct Interpreter<Buffer: IoWrite> {
     color: bool,
     repl: bool,
     search_path: Vec<PathBuf>,
+    marker: PhantomData<LibCore>,
 }
 
-/// Interpreter will never pass internal `Rc<T>` to outside.
-/// Thus it is safe to implement `Send` here.
-unsafe impl<T: IoWrite> Send for Interpreter<T> {}
-
-impl<Buffer: IoWrite> Interpreter<Buffer> {
+impl<Buffer: IoWrite, LibCore: StdCore> Interpreter<Buffer, LibCore> {
     /// Create a new interpreter instance
     pub fn new(buffer: Buffer) -> Self {
         Self::init(buffer, false)
@@ -223,6 +153,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             parameters: 0,
             insts: vec![],
         };
+
         let mut interpreter = Self {
             registers: RegisterTable::new(0),
             scopes: vec![AHashSet::new()],
@@ -234,36 +165,36 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
             color,
             repl: false,
             search_path: vec![],
+            marker: PhantomData::default(),
         };
         // Initialize int and float meta table
-        let int = interpreter.registers.declare_variable("Int", None);
-        interpreter.gc.alloc_reg_file(int + 1);
-        interpreter.gc.set_main_reg_size(int + 1);
-        interpreter
-            .gc
-            .write_reg(int, Reg::Ref(interpreter.gc.int_meta()));
-        let float = interpreter.registers.declare_variable("Float", None);
-        interpreter.gc.alloc_reg_file(float + 1);
-        interpreter.gc.set_main_reg_size(float + 1);
-        interpreter
-            .gc
-            .write_reg(float, Reg::Ref(interpreter.gc.float_meta()));
-        let list = interpreter.registers.declare_variable("List", None);
-        interpreter.gc.alloc_reg_file(list + 1);
-        interpreter.gc.set_main_reg_size(list + 1);
-        interpreter
-            .gc
-            .write_reg(list, Reg::Ref(interpreter.gc.list_meta()));
+        [
+            ("Int", PrimitiveMeta::Int),
+            ("Float", PrimitiveMeta::Float),
+            ("List", PrimitiveMeta::List),
+            ("String", PrimitiveMeta::Str),
+        ]
+        .into_iter()
+        .for_each(|(name, t)| {
+            let int = interpreter.registers.declare_variable(name, None);
+            interpreter.gc.alloc_reg_file(int + 1);
+            interpreter.gc.set_main_reg_size(int + 1);
+            interpreter
+                .gc
+                .write_reg(int, Reg::Ref(interpreter.gc.get_meta(t)));
+        });
 
-        let gc = interpreter.registers.declare_variable("Gc", None);
-        interpreter.gc.alloc_reg_file(gc + 1);
-        interpreter.gc.set_main_reg_size(gc + 1);
-        interpreter
-            .gc
-            .write_reg(gc, Reg::Ref(interpreter.gc.gc_meta()));
+        // Load prelude extension
+        interpreter.load_ext(LibCore::prelude_extension()).map_err(|_|()).unwrap();
 
-        impl_prelude(&mut interpreter);
-        load_prelude(&mut interpreter);
+        // Execute prelude files
+        LibCore::prelude_files().iter().for_each(|(name, code)| {
+            if let Err(err) = interpreter.exec(code, name, true) {
+                print!("{err}");
+                panic!("Standard library failed to load: `{name}`");
+            }
+        });
+
         interpreter
     }
 
@@ -272,68 +203,75 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         Self::init(buffer, true)
     }
 
-    /// Register an external rust function
-    ///
-    /// This function does not accept due to potential recursive calls on a FnMut would violating
-    /// borrow rules. You may want to use interior mutability if Fn is not flexible enough.
-    /// External function should **NEVER PANIC**, otherwise it will crush the virtual machine.
-    ///
-    /// # External function parameters:
-    /// * `State` - Access state and heap memory of the virtual machine.
-    /// * `[DiatomValue]` - Parameters passed. The function is expected to check type and the
-    /// number of parameters it received.
-    /// * `Buffer` - Output buffer
-    ///
-    /// # External function return value:
-    /// * Return a single unboxed value as return value. If the function does not intended to
-    /// return anything, return an unit type `DiatomValue::Unit`.
-    /// * If any unrecoverable error happens, return an `Err(String)` that illustrates the error.
-    /// This will cause virtual machine to enter **panic mode** and stop execution.
-    /// * If return value is `DiatomValue::Str` or `DiatomValue::Ref`, the reference id is checked.
-    /// An invalid id would cause virtual machine to enter **panic mode** and stop execution.
-    ///
-    /// # Examples:
-    /// ```
-    /// # use diatom_core as diatom;
-    /// use std::io::Write;
-    /// use diatom::{Interpreter, DiatomValue};
-    ///
-    /// let buffer = Vec::<u8>::new();
-    /// let mut interpreter = Interpreter::new(buffer);
-    /// interpreter.add_extern_function(
-    ///     "hello_world",
-    ///     |state, parameters, out| {
-    ///         if !parameters.is_empty(){
-    ///             Err("Too many parameters!".to_string())
-    ///         }else{
-    ///             write!(out, "Hello, world!");
-    ///             Ok(DiatomValue::Unit)
-    ///         }
-    ///     }
-    /// );
-    ///
-    /// interpreter.exec("$hello_world()", "<test_code>", true).unwrap();
-    /// let output = interpreter.replace_buffer(Vec::<u8>::new());
-    /// let output = String::from_utf8(output).unwrap();
-    /// assert_eq!(output, "Hello, world!")
-    /// ```
-    pub fn add_extern_function<F>(&mut self, name: impl Into<String>, f: F)
-    where
-        F: Fn(&mut State<Buffer>, &[DiatomValue], &mut Buffer) -> Result<DiatomValue, String>
-            + 'static,
-    {
-        let f = GcObject::NativeFunction(Rc::new(RefCell::new(f)));
-        let gc_id = self.gc.alloc_obj(f);
-        self.gc.add_extern(name, gc_id)
+    fn traverse_ext(
+        &mut self,
+        path_stack: &mut Vec<String>,
+        Extension { name, kind }: Extension<Buffer>,
+    ) {
+        // Invalid names
+        if name.contains('/') {
+            return;
+        }
+        path_stack.push(name);
+        match kind {
+            ExtensionKind::ForeignFunctions(functions) => {
+                let mut table = Table {
+                    attributes: Default::default(),
+                    meta_table: None,
+                };
+                functions.into_iter().for_each(|(name, f)| {
+                    let table_key = self.gc.get_or_insert_table_key(name);
+                    let f = self.gc.alloc_obj(GcObject::NativeFunction(f));
+                    table.attributes.insert(table_key, Reg::Ref(f));
+                });
+                let table = self.gc.alloc_obj(GcObject::Table(table));
+                let mut path = PathBuf::new();
+                path_stack.iter().for_each(|name| path.push(name));
+                path.set_extension("dm");
+                let fid = self.file_manager.add_file(path, "".to_string());
+                self.gc.new_module(fid);
+                self.gc.set_module_return(fid, table);
+            }
+            ExtensionKind::File(code) => {
+                let mut path = PathBuf::new();
+                path_stack.iter().for_each(|name| path.push(name));
+                path.set_extension("dm");
+                let fid = self.file_manager.add_file(path, code);
+                self.gc.new_module(fid);
+            }
+            ExtensionKind::SubExtensions(exts) => {
+                exts.into_iter()
+                    .for_each(|ext| self.traverse_ext(path_stack, ext));
+            }
+        }
+        path_stack.pop();
+    }
+
+    pub fn load_ext(&mut self, extension: Extension<Buffer>) -> Result<(), Extension<Buffer>> {
+        if self.file_manager.is_ext_name(&extension.name)
+            || extension.name.contains('/')
+        {
+            return Err(extension);
+        } else {
+            self.file_manager.new_ext(extension.name.clone());
+        }
+        // Prevent modules being collected while registering
+        self.gc.pause();
+        let mut path_stack = vec![];
+        self.traverse_ext(&mut path_stack, extension);
+        self.gc.resume();
+        Ok(())
     }
 
     /// Directly declare external function as variable
     pub fn impl_extern_function<F>(&mut self, name: impl Into<String>, f: F)
     where
         F: Fn(&mut State<Buffer>, &[DiatomValue], &mut Buffer) -> Result<DiatomValue, String>
-            + 'static,
+            + 'static
+            + Send
+            + Sync,
     {
-        let f = GcObject::NativeFunction(Rc::new(RefCell::new(f)));
+        let f = GcObject::NativeFunction(Arc::new(f));
         let gc_id = self.gc.alloc_obj(f);
         let reg = Reg::Ref(gc_id);
         let reg_id = self.registers.declare_variable(name.into(), None);
@@ -409,7 +347,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         self.vm.reset_ip();
 
         let ast = self.file_manager.get_ast(fid);
-        let return_value = self.compile_ast(&ast.borrow()).map_err(|_| {
+        let return_value = self.compile_ast(&ast).map_err(|_| {
             // restore variable table if compile failed
             self.registers = registers_prev;
             self.file_manager.render(self.color)
@@ -807,7 +745,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 let body = self.file_manager.get_ast(*fid);
                 let body = Expr::Block {
                     loc: loc.clone(),
-                    body: body.borrow().clone(),
+                    body: body.to_vec(),
                 };
                 // Make a new closure
                 let func_id = self.byte_code.len();
@@ -834,7 +772,7 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                     insts: &mut self.byte_code[func_id].insts,
                     overridden: AHashMap::new(),
                 };
-                PRELUDE_NAMES
+                LibCore::prelude_names()
                     .iter()
                     .for_each(|name| capture_scanner.scan_name(name));
 
@@ -1155,16 +1093,6 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
                 }
                 None => Err(ErrorCode::NameNotDefined(loc.clone(), name.clone())),
             },
-            Expr::ExternId { loc, name } => {
-                let rd = target.unwrap_or_else(|| self.registers.declare_intermediate());
-                self.get_current_insts()
-                    .push(VmInst::OpLoadExtern(OpLoadExtern {
-                        name: name.chars().skip(1).collect(),
-                        rd,
-                        loc: loc.clone(),
-                    }));
-                Ok((rd, target.is_none()))
-            }
             Expr::Parentheses { loc: _, content } => self.compile_expr(content, discard, target),
             Expr::Const { value, .. } => Ok(self.compile_constant(value, target))?,
             Expr::Error => unreachable!(),

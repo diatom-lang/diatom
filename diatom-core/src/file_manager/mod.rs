@@ -1,10 +1,10 @@
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use codespan_reporting::{
     diagnostic::{self, Severity},
     files::SimpleFiles,
     term::{self, termcolor::Buffer, Chars},
 };
-use std::{cell::RefCell, ffi::OsString, io::Write, rc::Rc};
+use std::{collections::BTreeMap, ffi::OsString, io::Write, sync::Arc};
 
 use crate::frontend::parser::ast::Stmt;
 
@@ -18,7 +18,9 @@ use util::{PathShow, SharedFile};
 pub struct FileManager {
     files: SimpleFiles<PathShow, SharedFile>,
     file_map: AHashMap<PathShow, usize>,
+    ast_map: BTreeMap<usize, Arc<Vec<Stmt>>>,
     diagnoses: Vec<Diagnostic>,
+    extensions: AHashSet<String>,
     error_count: usize,
     has_eof_error: bool,
     has_non_eof_error: bool,
@@ -29,11 +31,21 @@ impl FileManager {
         Self {
             files: SimpleFiles::new(),
             file_map: AHashMap::new(),
+            ast_map: BTreeMap::new(),
             diagnoses: vec![],
+            extensions: AHashSet::new(),
             error_count: 0,
             has_eof_error: false,
             has_non_eof_error: false,
         }
+    }
+
+    pub fn new_ext(&mut self, name: String) -> bool{
+        self.extensions.insert(name)
+    }
+
+    pub fn is_ext_name(&mut self, name: impl AsRef<str>) -> bool {
+        self.extensions.get(name.as_ref()).is_some()
     }
 
     pub fn add_file(&mut self, path: impl Into<OsString>, file: String) -> usize {
@@ -41,8 +53,7 @@ impl FileManager {
         let fid = self.files.add(
             path.clone(),
             SharedFile {
-                file: Rc::new(file),
-                ast: Default::default(),
+                file: Arc::new(file),
             },
         );
         self.file_map.insert(path, fid);
@@ -53,16 +64,17 @@ impl FileManager {
         self.file_map.get(&PathShow::from(path.into())).cloned()
     }
 
-    pub fn get_file(&self, fid: usize) -> Rc<String> {
+    pub fn get_file(&self, fid: usize) -> Arc<String> {
         self.files.get(fid).unwrap().source().file.clone()
     }
 
-    pub fn set_ast(&self, fid: usize, ast: Vec<Stmt>) {
-        *self.files.get(fid).unwrap().source().ast.borrow_mut() = ast;
+    pub fn set_ast(&mut self, fid: usize, ast: Vec<Stmt>) {
+        assert!(self.files.get(fid).is_ok());
+        self.ast_map.insert(fid, Arc::new(ast));
     }
 
-    pub fn get_ast(&self, fid: usize) -> Rc<RefCell<Vec<Stmt>>> {
-        self.files.get(fid).unwrap().source().ast.clone()
+    pub fn get_ast(&self, fid: usize) -> Arc<Vec<Stmt>> {
+        self.ast_map.get(&fid).unwrap().clone()
     }
 
     pub fn input_can_continue(&self) -> bool {

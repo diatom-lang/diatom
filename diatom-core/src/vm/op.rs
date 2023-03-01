@@ -1,8 +1,9 @@
 use crate::{
+    ffi::State,
     file_manager::Loc,
-    gc::{Gc, GcObject, Reg, Table},
+    gc::{Gc, GcObject, PrimitiveMeta, Reg, Table},
     interpreter::Capture,
-    IoWrite, State,
+    IoWrite,
 };
 use std::{collections::BTreeMap, fmt::Write};
 
@@ -117,7 +118,6 @@ impl Instruction for OpCall {
                     }
                     GcObject::NativeFunction(f) => {
                         let f = f.clone();
-                        let f = f.borrow();
                         let mut parameters = vec![];
                         (self.start..self.start + self.parameters)
                             .into_iter()
@@ -1664,7 +1664,7 @@ impl Instruction for OpGetTable {
                     });
                 }
                 GcObject::List(_) => {
-                    let meta = unsafe { gc.get_obj_unchecked(gc.list_meta()) };
+                    let meta = unsafe { gc.get_obj_unchecked(gc.get_meta(PrimitiveMeta::List)) };
                     if let GcObject::Table(t) = meta {
                         let value = t
                             .attributes
@@ -1687,29 +1687,24 @@ impl Instruction for OpGetTable {
             }
         }
 
-        match table {
+        let meta = match table {
             Reg::Int(_) => {
-                let meta = unsafe { gc.get_obj_unchecked(gc.int_meta()) };
-                if let GcObject::Table(t) = meta {
-                    let value = t
-                        .attributes
-                        .get(&self.attr)
-                        .ok_or(VmError::NoSuchKey {
-                            loc: self.loc.clone(),
-                            attr: gc.look_up_table_key(self.attr).unwrap().to_string(),
-                        })?
-                        .clone();
-                    gc.write_reg(self.rd, value);
-                    return Ok(Ip {
-                        func_id: ip.func_id,
-                        inst: ip.inst + 1,
-                    });
-                } else {
-                    unreachable!()
-                }
+                let meta = unsafe { gc.get_obj_unchecked(gc.get_meta(PrimitiveMeta::Int)) };
+                Some(meta)
             }
             Reg::Float(_) => {
-                let meta = unsafe { gc.get_obj_unchecked(gc.float_meta()) };
+                let meta = unsafe { gc.get_obj_unchecked(gc.get_meta(PrimitiveMeta::Float)) };
+                Some(meta)
+            }
+            Reg::Str(_) => {
+                let meta = unsafe { gc.get_obj_unchecked(gc.get_meta(PrimitiveMeta::Str)) };
+                Some(meta)
+            }
+            _ => None,
+        };
+
+        match meta {
+            Some(meta) => {
                 if let GcObject::Table(t) = meta {
                     let value = t
                         .attributes
@@ -1720,22 +1715,22 @@ impl Instruction for OpGetTable {
                         })?
                         .clone();
                     gc.write_reg(self.rd, value);
-                    return Ok(Ip {
+                    Ok(Ip {
                         func_id: ip.func_id,
                         inst: ip.inst + 1,
-                    });
+                    })
                 } else {
                     unreachable!()
                 }
             }
-            _ => (),
+            _ => {
+                let t = get_type(table, gc);
+                Err(VmError::NotATable {
+                    loc: self.loc.clone(),
+                    t,
+                })
+            }
         }
-
-        let t = get_type(table, gc);
-        Err(VmError::NotATable {
-            loc: self.loc.clone(),
-            t,
-        })
     }
 
     fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, gc: &Gc<Buffer>) {
@@ -1962,41 +1957,3 @@ impl Instruction for OpSetMeta {
     }
 }
 
-pub struct OpLoadExtern {
-    pub name: String,
-    pub rd: usize,
-    pub loc: Loc,
-}
-
-impl Instruction for OpLoadExtern {
-    #[cfg_attr(feature = "profile", inline(never))]
-    fn exec<Buffer: IoWrite>(
-        &self,
-        ip: Ip,
-        gc: &mut Gc<Buffer>,
-        _out: &mut Buffer,
-    ) -> Result<Ip, VmError> {
-        match gc.get_extern(&self.name) {
-            Some(ref_id) => gc.write_reg(self.rd, Reg::Ref(ref_id)),
-            None => {
-                return Err(VmError::MissingExtern {
-                    loc: self.loc.clone(),
-                    name: self.name.clone(),
-                })
-            }
-        };
-        Ok(Ip {
-            func_id: ip.func_id,
-            inst: ip.inst + 1,
-        })
-    }
-
-    fn decompile<Buffer: IoWrite>(&self, decompiled: &mut String, _gc: &Gc<Buffer>) {
-        writeln!(
-            decompiled,
-            "{: >FORMAT_PAD$}    ${} -> Reg#{}",
-            "load_extern", self.name, self.rd
-        )
-        .unwrap()
-    }
-}

@@ -51,7 +51,6 @@ impl<'a, Buffer: IoWrite> ConstScanner<'a, Buffer> {
             }
             Expr::Fn { .. } => (),
             Expr::Id { .. } => (),
-            Expr::ExternId { .. } => (),
             Expr::Parentheses { content, .. } => self.scan_expr(content),
             Expr::Const { value, .. } => self.scan_const(value),
             Expr::Error => unreachable!(),

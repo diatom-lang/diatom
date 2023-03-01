@@ -39,6 +39,14 @@ impl<T: Default> Pool<T> {
         }
     }
 
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
+        if idx < self.pool.len() && self.free.get(&idx).is_none() {
+            Some(&mut self.pool[idx].0)
+        } else {
+            None
+        }
+    }
+
     pub unsafe fn get_unchecked_raw(&self, idx: usize) -> &(T, bool) {
         debug_assert!(self.pool.len() > idx && self.free.get(&idx).is_none());
         self.pool.get_unchecked(idx)

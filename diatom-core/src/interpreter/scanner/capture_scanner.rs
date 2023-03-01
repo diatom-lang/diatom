@@ -116,7 +116,6 @@ impl<'a, Buffer: IoWrite> CaptureScanner<'a, Buffer> {
             Expr::Id { name, .. } => {
                 self.scan_name(name);
             }
-            Expr::ExternId { .. } => (),
             Expr::Parentheses { content, .. } => self.scan_expr(content),
             Expr::Const { value, .. } => self.scan_const(value),
             Expr::Error => unreachable!(),

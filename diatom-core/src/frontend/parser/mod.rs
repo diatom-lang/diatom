@@ -55,7 +55,6 @@ macro_rules! expr_start_pattern {
             | Token::Op(Operator::LPar)
             | Token::Op(Operator::Minus)
             | Token::Id(_)
-            | Token::ExternId(_)
             | Token::Integer(_)
             | Token::Float(_)
             | Token::Str(_)
@@ -423,6 +422,10 @@ impl<'a> Parser<'a> {
     }
 
     fn resolve_mod(&mut self, mod_path: &[String]) -> Option<(usize, PathBuf)> {
+        if self.file_manager.is_ext_name(&mod_path[0]){
+            return try_get_mod(&PathBuf::new(), mod_path, self.file_manager);
+        }
+
         if let Some(f) = self
             .relative_path
             .as_ref()
@@ -896,14 +899,6 @@ impl<'a> Parser<'a> {
                 let s = s.clone();
                 iter.next();
                 Expr::Id {
-                    loc: start.clone(),
-                    name: s,
-                }
-            }
-            Some(ExternId(s)) => {
-                let s = s.clone();
-                iter.next();
-                Expr::ExternId {
                     loc: start.clone(),
                     name: s,
                 }
