@@ -53,3 +53,20 @@ pub struct Extension<Buffer: IoWrite> {
     /// The kind of this extension
     pub kind: ExtensionKind<Buffer>,
 }
+
+pub(crate) struct LibDummy;
+
+impl StdCore for LibDummy {
+    fn prelude_names() -> &'static [&'static str] {
+        &[]
+    }
+    fn prelude_files() -> &'static [(&'static str, &'static str)] {
+        &[]
+    }
+    fn prelude_extension<Buffer: IoWrite>() -> Extension<Buffer> {
+        Extension {
+            name: "prelude".to_string(),
+            kind: ExtensionKind::SubExtensions(vec![]),
+        }
+    }
+}

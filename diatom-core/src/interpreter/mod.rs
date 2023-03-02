@@ -13,7 +13,7 @@ use codespan_reporting::diagnostic::Label;
 mod error;
 mod register_table;
 mod scanner;
-mod std_core;
+pub mod std_core;
 
 pub mod ffi;
 use crate::file_manager::FileManager;
@@ -45,7 +45,7 @@ pub use register_table::Capture;
 use register_table::{ConstantValue, Loop, RegisterTable};
 
 use self::scanner::{CaptureScanner, ConstScanner};
-pub use self::std_core::{Extension, ExtensionKind, StdCore};
+use self::std_core::{Extension, ExtensionKind, StdCore};
 
 #[derive(Clone)]
 pub struct FutureJump {

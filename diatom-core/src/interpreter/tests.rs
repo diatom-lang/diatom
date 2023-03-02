@@ -1,4 +1,6 @@
-use super::*;
+use super::std_core::LibDummy;
+
+type Interpreter<Buffer> = super::Interpreter<Buffer, LibDummy>;
 
 macro_rules! test_ok {
     ($code: literal, $output_expected: literal) => {
@@ -118,9 +120,9 @@ fn test_closure() {
     end
     f()
     x2(10)
-    assert(x1() == 10)
+    x1() == 10
     "#,
-        ""
+        "true"
     );
 }
 
@@ -183,19 +185,20 @@ fn test_tuple() {
 
 #[test]
 fn test_method() {
-    test_ok!("a = {println = println} a::println(1)", "1");
-    test_ok_ignore!("a = {println = println} a.println(1)");
-    test_ok!("a = (1, println) a.1(1)", "1");
+    test_ok!("a = {println = fn x = x} a::println(1)", "1");
+    test_ok_ignore!("a = {println = fn a b = ()} a.println(1)");
+    test_ok!("a = (1, fn x = x) a.1(1)", "1");
 }
 
 #[test]
 fn test_meta_table() {
-    test_ok_ignore!(
+    test_ok!(
         r#"
         meta_table = {name = 'abc'}
         table = {} <- meta_table
-        assert(table.name == 'abc')
-    "#
+        table.name == 'abc'
+    "#,
+        "true"
     );
 }
 
@@ -212,6 +215,6 @@ fn test_list() {
 
 #[test]
 fn test_short_circuit() {
-    test_ok!("a = [1,2] a.len()>2 and println(a[2])", "false");
-    test_ok!("a = [1,2] a.len()<=2 or println(a[2])", "true");
+    test_ok!("false and true + false", "false");
+    test_ok!("true or true + 1.1", "true");
 }

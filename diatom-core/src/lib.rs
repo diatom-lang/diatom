@@ -8,8 +8,8 @@ mod vm;
 #[cfg(test)]
 mod tests;
 
+pub use interpreter::std_core::StdCore;
 pub use interpreter::Interpreter;
-pub use interpreter::StdCore;
 pub use std::io::Write as IoWrite;
 
 /// Diatom Foreign Function Interface
@@ -45,32 +45,6 @@ pub mod ffi {
     /// This will cause virtual machine to enter **panic mode** and stop execution.
     /// * If return value is `DiatomValue::Str` or `DiatomValue::Ref`, the reference id is checked.
     /// An invalid id would cause virtual machine to enter **panic mode** and stop execution.
-    ///
-    /// # Examples:
-    /// ```
-    /// # use diatom_core as diatom;
-    /// use std::io::Write;
-    /// use diatom::{Interpreter, DiatomValue};
-    ///
-    /// let buffer = Vec::<u8>::new();
-    /// let mut interpreter = Interpreter::new(buffer);
-    /// interpreter.add_extern_function(
-    ///     "hello_world",
-    ///     |state, parameters, out| {
-    ///         if !parameters.is_empty(){
-    ///             Err("Too many parameters!".to_string())
-    ///         }else{
-    ///             write!(out, "Hello, world!");
-    ///             Ok(DiatomValue::Unit)
-    ///         }
-    ///     }
-    /// );
-    ///
-    /// interpreter.exec("$hello_world()", "<test_code>", true).unwrap();
-    /// let output = interpreter.replace_buffer(Vec::<u8>::new());
-    /// let output = String::from_utf8(output).unwrap();
-    /// assert_eq!(output, "Hello, world!")
-    /// ```
     pub type ForeignFunction<Buffer> = dyn Fn(&mut State<Buffer>, &[DiatomValue], &mut Buffer) -> Result<DiatomValue, String>
         + Send
         + Sync;
@@ -78,6 +52,7 @@ pub mod ffi {
 
 /// Diatom rust extension
 pub mod extension {
-    pub use super::interpreter::Extension;
-    pub use super::interpreter::ExtensionKind;
+    pub use super::interpreter::std_core::Extension;
+    pub use super::interpreter::std_core::ExtensionKind;
+    pub use ahash::AHashMap;
 }

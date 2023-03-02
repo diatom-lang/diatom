@@ -26,7 +26,7 @@ fn test_expr_postfix_ambiguous() {
         print!("{}", file_manager.render(true));
     }
     assert_eq!(file_manager.error_count(), 0);
-    assert_eq!(file_manager.get_ast(fid).as_ref().borrow().len(), 3);
+    assert_eq!(file_manager.get_ast(fid).len(), 3);
 }
 
 #[test]

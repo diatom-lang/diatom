@@ -1,4 +1,83 @@
-#![doc = include_str!("../../README.md")]
+//! # The Diatom Programming Language
+//! ![Unit Tests](https://github.com/diatom-lang/diatom/actions/workflows/rust.yml/badge.svg)
+//! ![doc](https://github.com/diatom-lang/diatom/actions/workflows/rustdoc.yml/badge.svg)
+//! [![Crates.io][crates-badge]][crates-url]
+//! [![license][license-badge]][crates-url]
+//!
+//! [![dependency status](https://deps.rs/repo/github/diatom-lang/diatom/status.svg)](https://deps.rs/repo/github/diatom-lang/diatom)
+//! ![issue](https://img.shields.io/github/issues/diatom-lang/diatom)
+//! ![pr](https://img.shields.io/github/issues-pr/diatom-lang/diatom)
+//! ![coverage](https://img.shields.io/codecov/c/github/diatom-lang/diatom)
+//!
+//! [crates-badge]: https://img.shields.io/crates/v/diatom.svg
+//! [crates-url]: https://crates.io/crates/diatom
+//! [license-badge]: https://img.shields.io/crates/l/diatom
+//!
+//! A dynamic typed scripting language for embedded use in applications. This project is yet another attempt of being a "better" lua.
+//!
+//! **Warning**: Project is still in experimental stage and API is considered as unstable.
+//! # Example
+//!
+//! ## 1. Run a piece of code
+//! ```
+//! use diatom::Interpreter;
+//!
+//! // Create a new instance of interpreter
+//! // Enable colored output
+//! let mut interpreter = Interpreter::with_color(std::io::stdout());
+//! // Execute source code
+//! let output = interpreter.exec(
+//!     "print('Hello, world!')",
+//!     "<test_code>", true
+//!     ).unwrap();
+//! ```
+//!
+//! ## 2. Create a custom extension
+//! ```
+//! use std::sync::{Arc, atomic::{AtomicIsize, Ordering}};
+//! use diatom::{
+//!     ffi::{DiatomValue, ForeignFunction},
+//!     extension::{Extension, ExtensionKind, AHashMap},
+//!     Interpreter,
+//!     IoWrite,
+//! };
+//!
+//! // this value will be modified
+//! let value = Arc::new(AtomicIsize::new(1));
+//! let value_capture = value.clone();
+//!
+//! let mut interpreter = Interpreter::new(std::io::stdout());
+//!
+//! pub fn my_ext<Buffer: IoWrite>(value: Arc<AtomicIsize>) -> Extension<Buffer> {
+//!     let mut funcs: AHashMap<String, Arc<ForeignFunction<Buffer>>> = AHashMap::default();
+//!     funcs.insert(
+//!         "set_value".to_string(),
+//!         Arc::new(move |_, parameters, _| {
+//!             if parameters.len() == 1{
+//!                 if let DiatomValue::Int(i) = parameters[0] {
+//!                     value.store(i as isize, Ordering::Relaxed);
+//!                     return Ok(DiatomValue::Unit);
+//!                 }
+//!             }
+//!             Err("Expect an `Int` as parameter!".to_string())
+//!         }),
+//!     );
+//!    
+//!     Extension {
+//!         name: "my_ext".to_string(),
+//!         kind: ExtensionKind::ForeignFunctions(funcs),
+//!     }
+//! }
+//!
+//! // register extension
+//! interpreter.load_ext(my_ext(value_capture)).map_err(|_|()).unwrap();
+//! // change value to 5
+//! interpreter.exec(r#"
+//!     import set_value from my_ext
+//!     set_value(5)
+//! "#, "<test_code>", true).unwrap();
+//! assert_eq!(value.load(Ordering::Relaxed), 5);
+//! ```
 
 use std::{ffi::OsStr, io, path::PathBuf};
 
@@ -16,52 +95,6 @@ use diatom_std_core::StdLibCore;
 /// diatom source code into byte code and executes the byte code with carefully tuned virtual
 /// machine. Our benchmark shows it can match or even surpass the execution speed of Lua 5.4 .
 ///
-/// # Example
-///
-/// ## 1. Run a piece of code
-/// ```
-/// # use diatom_core as diatom;
-/// use diatom::Interpreter;
-///
-/// // Create a new instance of interpreter
-/// // Enable colored output
-/// let mut interpreter = Interpreter::with_color(std::io::stdout());
-/// // Execute source code
-/// let output = interpreter.exec(
-///     "print('Hello, world!')",
-///     "<test_code>", true
-///     ).unwrap();
-/// ```
-///
-/// ## 2. Add call back to the interpreter
-/// ```
-/// # use diatom_core as diatom;
-/// use std::{cell::Cell, rc::Rc};
-/// use diatom::{DiatomValue, Interpreter};
-///
-/// // this value will be modified
-/// let value = Rc::new(Cell::new(0));
-/// let value_capture = value.clone();
-///
-/// let mut interpreter = Interpreter::new(std::io::stdout());
-/// // add a callback named "set_value"
-/// interpreter.add_extern_function("set_value", move |_state, parameters, _out| {
-///     if parameters.len() != 1 {
-///         return Err("Expected 1 parameter!".to_string());
-///     }
-///     match parameters[0] {
-///         DiatomValue::Int(i) => {
-///             value_capture.set(i);
-///             Ok(DiatomValue::Unit)
-///         }
-///         _ => Err("Invalid type".to_string()),
-///     }
-/// });
-///
-/// // change value to 5
-/// interpreter.exec("$set_value(5)", "<test_code>", true).unwrap();
-/// assert_eq!(value.get(), 5);
-/// ```
 pub struct Interpreter<Buffer: IoWrite>(__Interpreter<Buffer, StdLibCore>);
 
 impl<Buffer: IoWrite> Interpreter<Buffer> {
@@ -138,5 +171,55 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
         extension: extension::Extension<Buffer>,
     ) -> Result<(), extension::Extension<Buffer>> {
         self.0.load_ext(extension)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use crate::Interpreter;
+
+    #[test]
+    fn test_examples() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut path = path.parent().unwrap().to_path_buf();
+        path.push("examples");
+        let dir = fs::read_dir(path).unwrap();
+        dir.for_each(|entry| {
+            let path = entry.unwrap().path();
+            if !path.is_file() {
+                return;
+            }
+            let code = fs::read_to_string(&path).unwrap();
+            let mut interpreter = Interpreter::new(vec![]);
+            interpreter
+                .exec(&code, &path, false)
+                .map_err(|err| println!("{err}"))
+                .expect("Example test failed");
+            let mut interpreter = Interpreter::new(vec![]);
+            interpreter
+                .decompile(&code, &path, false)
+                .map_err(|err| println!("{err}"))
+                .expect("Example test failed");
+        });
+    }
+
+    #[test]
+    fn test_overflow() {
+        let mut interpreter = Interpreter::new(vec![]);
+        interpreter
+            .exec("Int::MIN.abs()", "test", true)
+            .map_err(|err| println!("{err}"))
+            .expect("Test failed");
+    }
+
+    #[test]
+    fn test_for_macro() {
+        let mut interpreter = Interpreter::new(vec![]);
+        interpreter
+            .exec("fn = begin for i in 1..5 do end end", "test", true)
+            .map_err(|err| println!("{err}"))
+            .expect("Test failed");
     }
 }

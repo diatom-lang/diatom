@@ -109,7 +109,7 @@ pub fn list_extension<Buffer: IoWrite>() -> Extension<Buffer> {
     funcs.insert(
         "remove".to_string(),
         Arc::new(|state, parameters, _| {
-            assure_para_len!(parameters, 3);
+            assure_para_len!(parameters, 2);
             match (&parameters[0], &parameters[1]) {
                 (DiatomValue::Ref(id), DiatomValue::Int(idx)) => match state.get_obj_mut(*id) {
                     Some(DiatomObjectMut::List(mut l)) => {
