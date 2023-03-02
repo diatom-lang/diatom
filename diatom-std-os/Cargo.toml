@@ -1,0 +1,15 @@
+[package]
+name = "diatom-std-os"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+description.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+diatom-core = { path = "../diatom-core", version = "0.6.0" }
+chrono = "0.4.23"
+humantime = "2.1.0"
+ahash.workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "diatom"
+version = "0.6.0-alpha"
+edition.workspace = true
+authors.workspace = true
+description.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+diatom-core = { path = "../diatom-core" , version = "0.6.0"}
+diatom-std-core = { path = "../diatom-std-core", version = "0.1.0" }
+diatom-std-os = { path = "../diatom-std-os", version = "0.1.0", optional = true }
+
+[features]
+std-os = [ "diatom-std-os" ]
+

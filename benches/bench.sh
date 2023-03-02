@@ -4,7 +4,7 @@ dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd $dir
 
 alias bench="hyperfine --warmup 1 --runs 3 --ignore-failure"
-diatom="../target/release/diatom"
+diatom="../target/release/diatom-cli"
 
 font="\033[1;31m"
 normal="\033[0m"

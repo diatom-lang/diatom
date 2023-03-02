@@ -19,7 +19,7 @@ jobs:
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
-          profile: minimal
+          profile: default
           toolchain: stable
           override: true
           
@@ -27,8 +27,10 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
+          args: --all
           
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --all

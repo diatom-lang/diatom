@@ -44,9 +44,9 @@ You can try diatom at [the online playground](https://diatom-lang.github.io/diat
 #### Install with cargo
 Make sure you have [Rust and Cargo](https://doc.rust-lang.org/book/ch01-01-installation.html) installed.
 ```sh
-cargo install diatom
-diatom --help # show help for diatom CLI
-diatom # Enter diatom REPL console
+cargo install diatom-cli
+diatom-cli --help # show help for diatom CLI
+diatom-cli # Enter diatom REPL console
 ```
 
 #### Build from source
@@ -67,7 +67,7 @@ cargo run --release # Run interactive console
 The Diatom Reference (with examples) is available at [here](https://diatom-lang.github.io/reference/). 
 
 #### Examples
-For standard library function and built-in types and methods checks [examples](examples/). These examples are checked by unit tests and will never out of date.
+For standard library function and built-in types and methods checks [examples](examples/). These examples are checked by unit tests.
 
 ## Embedding in Application
 

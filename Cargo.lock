@@ -242,21 +242,56 @@ dependencies = [
 
 [[package]]
 name = "diatom"
-version = "0.5.2"
+version = "0.6.0-alpha"
 dependencies = [
- "ahash",
- "bimap",
+ "diatom-core",
+ "diatom-std-core",
+ "diatom-std-os",
+]
+
+[[package]]
+name = "diatom-cli"
+version = "0.2.0"
+dependencies = [
  "clap",
- "codespan-reporting",
  "crossterm",
- "either",
- "enum_dispatch",
- "include_dir",
+ "diatom",
  "lazy_static",
- "more-asserts",
  "nu-ansi-term",
  "reedline",
  "regex",
+]
+
+[[package]]
+name = "diatom-core"
+version = "0.6.0"
+dependencies = [
+ "ahash",
+ "bimap",
+ "codespan-reporting",
+ "either",
+ "enum_dispatch",
+ "lazy_static",
+ "more-asserts",
+ "regex",
+]
+
+[[package]]
+name = "diatom-std-core"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "diatom-core",
+]
+
+[[package]]
+name = "diatom-std-os"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "chrono",
+ "diatom-core",
+ "humantime",
 ]
 
 [[package]]
@@ -321,12 +356,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "glob"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
-
-[[package]]
 name = "heck"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -340,6 +369,12 @@ checksum = "ee512640fe35acbfb4bb779db6f0d80704c2cacfa2e39b601ef3e3f47d1ae4c7"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "humantime"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "iana-time-zone"
@@ -363,26 +398,6 @@ checksum = "0703ae284fc167426161c2e3f1da3ea71d94b21bedbcc9494e92b28e334e3dca"
 dependencies = [
  "cxx",
  "cxx-build",
-]
-
-[[package]]
-name = "include_dir"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18762faeff7122e89e0857b02f7ce6fcc0d101d5e9ad2ad7846cc01d61b7f19e"
-dependencies = [
- "glob",
- "include_dir_macros",
-]
-
-[[package]]
-name = "include_dir_macros"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b139284b5cf57ecfa712bcc66950bb635b31aff41c188e8a4cfc758eca374a3f"
-dependencies = [
- "proc-macro2",
- "quote",
 ]
 
 [[package]]
@@ -644,9 +659,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.7.0"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e076559ef8e241f2ae3479e36f97bd5741c0330689e217ad51ce2c76808b868a"
+checksum = "48aaa5748ba571fb95cd2c85c09f629215d3a6ece942baa100950af03a34f733"
 dependencies = [
  "aho-corasick",
  "memchr",

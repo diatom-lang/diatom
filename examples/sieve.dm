@@ -1,11 +1,14 @@
 -- Example: Prime Number Sieve
+import sqrt from std.math
+import {now, show_as_duration} from std.os.time
+
 def sieve n = 
     -- Create a list of [(0, true)], (1, true), ..]
     list = (0..).take(n)
         .map(fn x = (x, true))
         .collect()
    
-    for i in 2..n//2 do
+    for i in 2..sqrt(n).ceil().int() do
         if list[i].1 then
             (2..).map(fn x = x*i)
                 .take_until(fn i = i >= n)
@@ -20,5 +23,11 @@ def sieve n =
 end
         
 n = 100
-println("All prime numbers within", n, "=")
-println(sieve(n))
+
+start = now()
+sieve_n = sieve(n)
+finish = now()
+
+println("Finished in", show_as_duration(finish - start))
+println("All prime numbers within", n, "=") 
+println(sieve_n)
