@@ -4,12 +4,12 @@ pub fn int_extension<Buffer: IoWrite>() -> Extension<Buffer> {
     let mut funcs: AHashMap<String, Arc<ForeignFunction<Buffer>>> = AHashMap::default();
     funcs.insert(
         "MAX".to_string(),
-        Arc::new(|_, _, _| {Ok(DiatomValue::Int(i64::MAX))}),
+        Arc::new(|_, _, _| Ok(DiatomValue::Int(i64::MAX))),
     );
 
     funcs.insert(
         "MIN".to_string(),
-        Arc::new(|_, _, _| {Ok(DiatomValue::Int(i64::MIN))}),
+        Arc::new(|_, _, _| Ok(DiatomValue::Int(i64::MIN))),
     );
 
     funcs.insert(

@@ -422,7 +422,7 @@ impl<'a> Parser<'a> {
     }
 
     fn resolve_mod(&mut self, mod_path: &[String]) -> Option<(usize, PathBuf)> {
-        if self.file_manager.is_ext_name(&mod_path[0]){
+        if self.file_manager.is_ext_name(&mod_path[0]) {
             return try_get_mod(&PathBuf::new(), mod_path, self.file_manager);
         }
 

@@ -18,12 +18,12 @@ pub mod ffi {
     pub use super::gc::Reg as DiatomValue;
     use super::interpreter::ffi;
     pub use ffi::DiatomList;
-    pub use ffi::DiatomObject;
-    pub use ffi::DiatomTable;
-    pub use ffi::DiatomTuple;
     pub use ffi::DiatomListMut;
+    pub use ffi::DiatomObject;
     pub use ffi::DiatomObjectMut;
+    pub use ffi::DiatomTable;
     pub use ffi::DiatomTableMut;
+    pub use ffi::DiatomTuple;
     pub use ffi::DiatomTupleMut;
     pub use ffi::State;
     /// # Foreign Rust Function/Closure type

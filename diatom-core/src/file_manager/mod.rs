@@ -40,7 +40,7 @@ impl FileManager {
         }
     }
 
-    pub fn new_ext(&mut self, name: String) -> bool{
+    pub fn new_ext(&mut self, name: String) -> bool {
         self.extensions.insert(name)
     }
 

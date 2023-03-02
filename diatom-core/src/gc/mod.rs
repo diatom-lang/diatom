@@ -427,7 +427,7 @@ impl<Buffer: IoWrite> Gc<Buffer> {
                 let obj = self.get_obj(*r);
                 let obj = if let Some(obj) = obj {
                     obj
-                }else{
+                } else {
                     write!(buffer, "<Invalid Ref@{r}>").unwrap();
                     return;
                 };

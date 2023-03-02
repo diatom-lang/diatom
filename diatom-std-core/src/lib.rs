@@ -14,7 +14,7 @@ use diatom_core::{
     IoWrite, StdCore,
 };
 
-static PRELUDE_NAMES: [&str; 15] = [
+static PRELUDE_NAMES: [&str; 17] = [
     "print",
     "println",
     "todo",
@@ -24,6 +24,8 @@ static PRELUDE_NAMES: [&str; 15] = [
     "List",
     "Int",
     "Float",
+    "String",
+    "Table",
     "Iter",
     "Range",
     "Option",
@@ -50,6 +52,7 @@ impl StdCore for StdLibCore {
                 built_in::built_in_extension(),
                 int::int_extension(),
                 float::float_extension(),
+                list::list_extension(),
             ]),
         }
     }

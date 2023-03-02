@@ -57,3 +57,30 @@ begin
     Float.is_nan = is_nan
     Float.is_inf = is_inf
 end
+
+-- Initialize list
+begin
+    import {
+        len, 
+        clear, 
+        reverse, 
+        append, 
+        insert, 
+        remove
+    } from prelude.list
+    List.len = len
+    List.clear = clear
+    List.reverse = reverse
+    List.append = append
+    List.insert = insert
+    List.remove = remove
+end
+
+-- Initialize string
+begin
+    -- TODO
+end
+    
+-- Initialize table
+-- TODO
+Table = {}

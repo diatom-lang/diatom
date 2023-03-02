@@ -23,7 +23,7 @@ impl<'a, Buffer: IoWrite> DiatomTable<'a, Buffer> {
         }
     }
 
-    pub fn fields(&self) -> Keys<usize, DiatomValue>{
+    pub fn fields(&self) -> Keys<usize, DiatomValue> {
         let table = self.gc.get_obj(self.ref_id).unwrap();
         match table {
             GcObject::Table(t) => t.attributes.keys(),

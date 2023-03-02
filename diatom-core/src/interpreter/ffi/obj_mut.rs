@@ -1,10 +1,10 @@
 use super::*;
 
-fn check_value<Buffer: IoWrite>(gc: &Gc<Buffer>, value: &DiatomValue) -> bool{
+fn check_value<Buffer: IoWrite>(gc: &Gc<Buffer>, value: &DiatomValue) -> bool {
     match value {
         DiatomValue::Ref(rid) => gc.get_obj(*rid).is_some(),
         DiatomValue::Str(sid) => gc.get_str(*sid).is_some(),
-        _ => true
+        _ => true,
     }
 }
 
@@ -81,7 +81,7 @@ impl<'a, Buffer: IoWrite> DiatomListMut<'a, Buffer> {
 
     /// Return true if value is valid
     pub fn push(&mut self, value: DiatomValue) -> bool {
-        if !check_value(self.gc, &value){
+        if !check_value(self.gc, &value) {
             return false;
         }
         self.to_list_mut().push(value);
@@ -89,11 +89,11 @@ impl<'a, Buffer: IoWrite> DiatomListMut<'a, Buffer> {
     }
 
     /// Clear the whole list
-    pub fn clear(&mut self){
+    pub fn clear(&mut self) {
         self.to_list_mut().clear()
     }
 
-    pub fn reverse(&mut self){
+    pub fn reverse(&mut self) {
         self.to_list_mut().reverse()
     }
 
@@ -103,7 +103,7 @@ impl<'a, Buffer: IoWrite> DiatomListMut<'a, Buffer> {
 
     /// Set value at index, return false if idx out of bound or value is not valid
     pub fn set_idx(&mut self, idx: usize, value: DiatomValue) -> bool {
-        if !check_value(self.gc, &value){
+        if !check_value(self.gc, &value) {
             return false;
         }
         let l = self.to_list_mut();
@@ -116,7 +116,7 @@ impl<'a, Buffer: IoWrite> DiatomListMut<'a, Buffer> {
 
     /// Insert value at index, return false if idx out of bound or value is not valid
     pub fn insert(&mut self, idx: usize, value: DiatomValue) -> bool {
-        if !check_value(self.gc, &value){
+        if !check_value(self.gc, &value) {
             return false;
         }
         let l = self.to_list_mut();
@@ -127,6 +127,15 @@ impl<'a, Buffer: IoWrite> DiatomListMut<'a, Buffer> {
         true
     }
 
+    /// Remove value at index, return false if idx out of bound or value is not valid
+    pub fn remove(&mut self, idx: usize) -> bool {
+        let l = self.to_list_mut();
+        if l.len() <= idx {
+            return false;
+        }
+        l.remove(idx);
+        true
+    }
 }
 
 /// Mutable reference to a diatom table

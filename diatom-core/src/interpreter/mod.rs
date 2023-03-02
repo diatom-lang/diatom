@@ -18,8 +18,8 @@ mod std_core;
 pub mod ffi;
 use crate::file_manager::FileManager;
 use crate::vm::op::{
-    OpGe, OpGetTable, OpGetTuple, OpImport, OpIndex, OpIs, OpLe, OpLt, OpMakeList,
-    OpMakeTable, OpMakeTuple, OpNe, OpSaveModule, OpSetIndex, OpSetMeta, OpSetTable, OpSetTuple,
+    OpGe, OpGetTable, OpGetTuple, OpImport, OpIndex, OpIs, OpLe, OpLt, OpMakeList, OpMakeTable,
+    OpMakeTuple, OpNe, OpSaveModule, OpSetIndex, OpSetMeta, OpSetTable, OpSetTuple,
 };
 use crate::{
     ffi::{DiatomValue, State},
@@ -185,7 +185,10 @@ impl<Buffer: IoWrite, LibCore: StdCore> Interpreter<Buffer, LibCore> {
         });
 
         // Load prelude extension
-        interpreter.load_ext(LibCore::prelude_extension()).map_err(|_|()).unwrap();
+        interpreter
+            .load_ext(LibCore::prelude_extension())
+            .map_err(|_| ())
+            .unwrap();
 
         // Execute prelude files
         LibCore::prelude_files().iter().for_each(|(name, code)| {
@@ -248,9 +251,7 @@ impl<Buffer: IoWrite, LibCore: StdCore> Interpreter<Buffer, LibCore> {
     }
 
     pub fn load_ext(&mut self, extension: Extension<Buffer>) -> Result<(), Extension<Buffer>> {
-        if self.file_manager.is_ext_name(&extension.name)
-            || extension.name.contains('/')
-        {
+        if self.file_manager.is_ext_name(&extension.name) || extension.name.contains('/') {
             return Err(extension);
         } else {
             self.file_manager.new_ext(extension.name.clone());

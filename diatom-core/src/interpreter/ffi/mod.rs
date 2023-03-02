@@ -98,14 +98,14 @@ impl<'a, Buffer: IoWrite> State<'a, Buffer> {
     /// Pause garbage collection
     ///
     /// Do nothing if gc is already paused.
-    pub fn pause_gc(&mut self){
+    pub fn pause_gc(&mut self) {
         self.gc.pause()
     }
 
     /// Resume garbage collection
     ///
     /// Do nothing if gc is not paused.
-    pub fn resume_gc(&mut self){
+    pub fn resume_gc(&mut self) {
         self.gc.resume()
     }
 }
