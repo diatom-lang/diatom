@@ -185,10 +185,7 @@ impl<Buffer: IoWrite, LibCore: StdCore> Interpreter<Buffer, LibCore> {
         });
 
         // Load prelude extension
-        interpreter
-            .load_ext(LibCore::prelude_extension())
-            .map_err(|_| ())
-            .unwrap();
+        interpreter.load_ext(LibCore::prelude_extension()).unwrap();
 
         // Execute prelude files
         LibCore::prelude_files().iter().for_each(|(name, code)| {

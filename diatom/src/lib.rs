@@ -70,7 +70,7 @@
 //! }
 //!
 //! // register extension
-//! interpreter.load_ext(my_ext(value_capture)).map_err(|_|()).unwrap();
+//! interpreter.load_ext(my_ext(value_capture)).unwrap();
 //! // change value to 5
 //! interpreter.exec(r#"
 //!     import set_value from my_ext
@@ -86,8 +86,8 @@ pub use diatom_core::{extension, ffi, IoWrite};
 /// The version of this build
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-use diatom_core::Interpreter as __Interpreter;
-use diatom_std_core::StdLibCore;
+use diatom_core::{extension::Extension, Interpreter as __Interpreter};
+use diatom_std_core::{std_lib, StdLibCore};
 
 /// # The Diatom Interpreter
 ///
@@ -98,9 +98,24 @@ use diatom_std_core::StdLibCore;
 pub struct Interpreter<Buffer: IoWrite>(__Interpreter<Buffer, StdLibCore>);
 
 impl<Buffer: IoWrite> Interpreter<Buffer> {
+    fn load_std(&mut self) {
+        #[allow(unused_mut)]
+        let mut std_lib_exts = std_lib();
+        #[cfg(feature = "std-os")]
+        std_lib_exts.push(diatom_std_os::os_extension());
+
+        let std = Extension {
+            name: "std".to_string(),
+            kind: extension::ExtensionKind::SubExtensions(std_lib_exts),
+        };
+        self.load_ext(std).unwrap();
+    }
+
     /// Create a new interpreter instance
     pub fn new(buffer: Buffer) -> Self {
-        Self(__Interpreter::new(buffer))
+        let mut interpreter = Self(__Interpreter::new(buffer));
+        interpreter.load_std();
+        interpreter
     }
 
     /// Enable or disable REPL mode (print last value to output buffer)
@@ -116,7 +131,9 @@ impl<Buffer: IoWrite> Interpreter<Buffer> {
 
     /// Enable ansi colored error message
     pub fn with_color(buffer: Buffer) -> Self {
-        Self(__Interpreter::with_color(buffer))
+        let mut interpreter = Self(__Interpreter::with_color(buffer));
+        interpreter.load_std();
+        interpreter
     }
 
     /// Check if input is completeness

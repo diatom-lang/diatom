@@ -287,6 +287,12 @@ dependencies = [
 [[package]]
 name = "diatom-std-os"
 version = "0.1.0"
+dependencies = [
+ "ahash",
+ "chrono",
+ "diatom-core",
+ "humantime",
+]
 
 [[package]]
 name = "either"
@@ -363,6 +369,12 @@ checksum = "ee512640fe35acbfb4bb779db6f0d80704c2cacfa2e39b601ef3e3f47d1ae4c7"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "humantime"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "iana-time-zone"

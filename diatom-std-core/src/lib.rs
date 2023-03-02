@@ -3,6 +3,7 @@ mod files;
 mod float;
 mod int;
 mod list;
+mod math;
 mod string;
 
 use std::sync::Arc;
@@ -56,6 +57,10 @@ impl StdCore for StdLibCore {
             ]),
         }
     }
+}
+
+pub fn std_lib<Buffer: IoWrite>() -> Vec<Extension<Buffer>> {
+    vec![math::math_extension()]
 }
 
 macro_rules! assure_para_len {

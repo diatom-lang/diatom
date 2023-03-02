@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use ahash::AHashMap;
@@ -52,6 +53,12 @@ pub struct Extension<Buffer: IoWrite> {
     pub name: String,
     /// The kind of this extension
     pub kind: ExtensionKind<Buffer>,
+}
+
+impl<Buffer: IoWrite> Debug for Extension<Buffer> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Extension<{}>", self.name)
+    }
 }
 
 pub(crate) struct LibDummy;
