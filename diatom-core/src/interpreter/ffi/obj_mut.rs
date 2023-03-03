@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use super::*;
 
 fn check_value<Buffer: IoWrite>(gc: &Gc<Buffer>, value: &DiatomValue) -> bool {
@@ -31,10 +33,17 @@ impl<'a, Buffer: IoWrite> DiatomTableMut<'a, Buffer> {
         }
     }
 
-    pub fn fields(&self) -> Keys<usize, DiatomValue> {
+    pub fn fields(&self) -> Vec<&str> {
         let table = self.gc.get_obj(self.ref_id).unwrap();
         match table {
-            GcObject::Table(t) => t.attributes.keys(),
+            GcObject::Table(t) => {
+                let mut fields = vec![];
+                t.attributes.keys().for_each(|k| {
+                    let field = self.gc.look_up_table_key(*k).unwrap();
+                    fields.push(field);
+                });
+                fields
+            }
             _ => unreachable!(),
         }
     }
@@ -174,16 +183,37 @@ impl<'a, Buffer: IoWrite> DiatomTupleMut<'a, Buffer> {
     }
 }
 
+pub struct UserDataMut<'a, Buffer: IoWrite> {
+    pub(super) gc: &'a mut Gc<Buffer>,
+    pub(super) ref_id: usize,
+}
+
+impl<'a, Buffer: IoWrite> UserDataMut<'a, Buffer> {
+    pub fn ref_id(&self) -> usize {
+        self.ref_id
+    }
+
+    pub fn get(&mut self) -> &mut Box<dyn Any + Send> {
+        let table = self.gc.get_obj_mut(self.ref_id).unwrap();
+        match table {
+            GcObject::UserData(data) => data,
+            _ => unreachable!(),
+        }
+    }
+}
+
 /// Mutable reference to a diatom heap allocated object
 pub enum DiatomObjectMut<'a, Buffer: IoWrite> {
     /// Native Diatom Closure
     Closure(usize),
     /// Foreign rust closure
-    ForeignFunction(Arc<ForeignFunction<Buffer>>),
+    ForeignFunction,
     /// Table
     Table(DiatomTableMut<'a, Buffer>),
     /// Tuple
     Tuple(DiatomTupleMut<'a, Buffer>),
     /// List
     List(DiatomListMut<'a, Buffer>),
+    /// UserData
+    UserData(UserDataMut<'a, Buffer>),
 }

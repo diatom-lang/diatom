@@ -1,8 +1,11 @@
+use std::{any::Any, collections::BTreeMap};
+
 use super::*;
 
 /// Immutable reference to a diatom table
 pub struct DiatomTable<'a, Buffer: IoWrite> {
     pub(super) gc: &'a Gc<Buffer>,
+    pub(super) table: &'a BTreeMap<usize, DiatomValue>,
     pub(super) ref_id: usize,
 }
 
@@ -16,91 +19,64 @@ impl<'a, Buffer: IoWrite> DiatomTable<'a, Buffer> {
             Some(id) => id,
             None => return None,
         };
-        let table = self.gc.get_obj(self.ref_id).unwrap();
-        match table {
-            GcObject::Table(t) => t.attributes.get(&key_id).cloned(),
-            _ => unreachable!(),
-        }
+        self.table.get(&key_id).cloned()
     }
 
-    pub fn fields(&self) -> Keys<usize, DiatomValue> {
-        let table = self.gc.get_obj(self.ref_id).unwrap();
-        match table {
-            GcObject::Table(t) => t.attributes.keys(),
-            _ => unreachable!(),
-        }
+    pub fn fields(&self) -> Vec<&str> {
+        let mut fields = vec![];
+        self.table.keys().for_each(|k| {
+            let field = self.gc.look_up_table_key(*k).unwrap();
+            fields.push(field);
+        });
+        fields
     }
 }
 
 /// Immutable reference to a diatom list
-pub struct DiatomList<'a, Buffer: IoWrite> {
-    pub(super) gc: &'a Gc<Buffer>,
+pub struct DiatomList<'a> {
+    pub(super) list: &'a [DiatomValue],
     pub(super) ref_id: usize,
 }
 
-impl<'a, Buffer: IoWrite> DiatomList<'a, Buffer> {
+impl<'a> DiatomList<'a> {
     pub fn ref_id(&self) -> usize {
         self.ref_id
     }
 
     pub fn get(&self, idx: usize) -> Option<DiatomValue> {
-        let list = self.gc.get_obj(self.ref_id).unwrap();
-        match list {
-            GcObject::List(l) => l.get(idx).cloned(),
-            _ => unreachable!(),
-        }
+        self.list.get(idx).cloned()
     }
 
     pub fn len(&self) -> usize {
-        let list = self.gc.get_obj(self.ref_id).unwrap();
-        match list {
-            GcObject::List(l) => l.len(),
-            _ => unreachable!(),
-        }
+        self.list.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        let list = self.gc.get_obj(self.ref_id).unwrap();
-        match list {
-            GcObject::List(l) => l.is_empty(),
-            _ => unreachable!(),
-        }
+        self.list.is_empty()
     }
 }
 
 /// Immutable reference to diatom tuple
-pub struct DiatomTuple<'a, Buffer: IoWrite> {
-    pub(super) gc: &'a Gc<Buffer>,
+pub struct DiatomTuple<'a> {
+    pub(super) tuple: &'a [DiatomValue],
     pub(super) ref_id: usize,
 }
 
-impl<'a, Buffer: IoWrite> DiatomTuple<'a, Buffer> {
+impl<'a> DiatomTuple<'a> {
     pub fn ref_id(&self) -> usize {
         self.ref_id
     }
 
     pub fn get(&self, idx: usize) -> Option<DiatomValue> {
-        let list = self.gc.get_obj(self.ref_id).unwrap();
-        match list {
-            GcObject::List(l) => l.get(idx).cloned(),
-            _ => unreachable!(),
-        }
+        self.tuple.get(idx).cloned()
     }
 
     pub fn len(&self) -> usize {
-        let list = self.gc.get_obj(self.ref_id).unwrap();
-        match list {
-            GcObject::List(l) => l.len(),
-            _ => unreachable!(),
-        }
+        self.tuple.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        let list = self.gc.get_obj(self.ref_id).unwrap();
-        match list {
-            GcObject::List(l) => l.is_empty(),
-            _ => unreachable!(),
-        }
+        self.tuple.is_empty()
     }
 }
 
@@ -109,11 +85,13 @@ pub enum DiatomObject<'a, Buffer: IoWrite> {
     /// Native Diatom Closure (Contains its id)
     Closure(usize),
     /// Foreign rust closure
-    ForeignFunction(&'a Arc<ForeignFunction<Buffer>>),
+    ForeignFunction,
     /// Table
     Table(DiatomTable<'a, Buffer>),
     /// Tuple
-    Tuple(DiatomTuple<'a, Buffer>),
+    Tuple(DiatomTuple<'a>),
     /// List
-    List(DiatomList<'a, Buffer>),
+    List(DiatomList<'a>),
+    /// UserData
+    UserData(&'a Box<dyn Any + Send>),
 }

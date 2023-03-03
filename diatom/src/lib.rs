@@ -34,7 +34,7 @@
 //!
 //! ## 2. Create a custom extension
 //! ```
-//! use std::sync::{Arc, atomic::{AtomicIsize, Ordering}};
+//! use std::sync::{Arc, Mutex};
 //! use diatom::{
 //!     ffi::{DiatomValue, ForeignFunction},
 //!     extension::{Extension, ExtensionKind, AHashMap},
@@ -43,19 +43,19 @@
 //! };
 //!
 //! // this value will be modified
-//! let value = Arc::new(AtomicIsize::new(1));
+//! let value = Arc::new(Mutex::new(1));
 //! let value_capture = value.clone();
 //!
 //! let mut interpreter = Interpreter::new(std::io::stdout());
 //!
-//! pub fn my_ext<Buffer: IoWrite>(value: Arc<AtomicIsize>) -> Extension<Buffer> {
+//! pub fn my_ext<Buffer: IoWrite>(value: Arc<Mutex<i64>>) -> Extension<Buffer> {
 //!     let mut funcs: AHashMap<String, Arc<ForeignFunction<Buffer>>> = AHashMap::default();
 //!     funcs.insert(
 //!         "set_value".to_string(),
 //!         Arc::new(move |_, parameters, _| {
 //!             if parameters.len() == 1{
 //!                 if let DiatomValue::Int(i) = parameters[0] {
-//!                     value.store(i as isize, Ordering::Relaxed);
+//!                     *value.lock().unwrap() = i;
 //!                     return Ok(DiatomValue::Unit);
 //!                 }
 //!             }
@@ -76,7 +76,7 @@
 //!     import set_value from my_ext
 //!     set_value(5)
 //! "#, "<test_code>", true).unwrap();
-//! assert_eq!(value.load(Ordering::Relaxed), 5);
+//! assert_eq!(*value.lock().unwrap(), 5);
 //! ```
 
 use std::{ffi::OsStr, io, path::PathBuf};
