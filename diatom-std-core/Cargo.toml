@@ -1,6 +1,6 @@
 [package]
 name = "diatom-std-core"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 description = "Diatom core standard library"
 license.workspace = true

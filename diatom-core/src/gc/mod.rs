@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
@@ -25,6 +26,7 @@ pub enum GcObject<Buffer: IoWrite> {
         /// local id, shared reg
         captured: Vec<(usize, usize)>,
     },
+    UserData(Box<dyn Any + Send>),
     NativeFunction(Arc<ForeignFunction<Buffer>>),
     List(Vec<Reg>),
     Table(Table),
@@ -444,6 +446,9 @@ impl<Buffer: IoWrite> Gc<Buffer> {
                     GcObject::NativeFunction(f) => {
                         write!(buffer, "External function@{:p}", Arc::as_ptr(f))
                     }
+                    GcObject::UserData(data) => {
+                        write!(buffer, "UserData@{:p}", &data)
+                    }
                     GcObject::List(l) => {
                         write!(buffer, "[").unwrap();
                         for (i, value) in l.iter().enumerate() {
@@ -611,7 +616,7 @@ impl<Buffer: IoWrite> Gc<Buffer> {
                 // Mark all objects
                 let obj_id = gray_pool.objects.pop_last().unwrap();
                 match unsafe { self.obj_pool.get_unchecked_raw(obj_id) } {
-                    (_, true) | (GcObject::NativeFunction { .. }, _) => (),
+                    (_, true) | (GcObject::NativeFunction { .. } | GcObject::UserData(_), _) => (),
                     (GcObject::List(l) | GcObject::Tuple(l), false) => {
                         for item in l.iter() {
                             mark_reg(item, &mut gray_pool.objects, &mut self.string_pool);

@@ -29,6 +29,7 @@ fn get_type<Buffer: IoWrite>(reg: &Reg, gc: &Gc<Buffer>) -> String {
                 GcObject::Table(_) => "Table".to_string(),
                 GcObject::Tuple(_) => "Tuple".to_string(),
                 GcObject::List(_) => "List".to_string(),
+                GcObject::UserData(_) => "UserData".to_string(),
             }
         }
     }
