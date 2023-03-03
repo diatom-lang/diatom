@@ -9,7 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-diatom-core = { path = "../diatom-core" , version = "0.6.0"}
+diatom-core = { path = "../diatom-core" , version = "0.6.1"}
 diatom-std-core = { path = "../diatom-std-core", version = "0.1.1" }
 diatom-std-os = { path = "../diatom-std-os", version = "0.1.1", optional = true }
 

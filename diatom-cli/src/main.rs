@@ -10,7 +10,7 @@ pub use cli::Cli;
 #[derive(Parser)]
 #[command(name = "Diatom Interpreter")]
 #[command(author = "Terence Ng")]
-#[command(version)]
+#[command(version = diatom::VERSION)]
 #[command(help_template = "\
 {name} v{version} by {author-with-newline}
 {usage-heading} {usage}
