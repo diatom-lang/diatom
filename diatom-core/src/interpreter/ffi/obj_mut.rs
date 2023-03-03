@@ -208,7 +208,7 @@ pub enum DiatomObjectMut<'a, Buffer: IoWrite> {
     /// Native Diatom Closure
     Closure(usize),
     /// Foreign rust closure
-    ForeignFunction(Arc<ForeignFunction<Buffer>>),
+    ForeignFunction,
     /// Table
     Table(DiatomTableMut<'a, Buffer>),
     /// Tuple

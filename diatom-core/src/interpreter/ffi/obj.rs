@@ -85,7 +85,7 @@ pub enum DiatomObject<'a, Buffer: IoWrite> {
     /// Native Diatom Closure (Contains its id)
     Closure(usize),
     /// Foreign rust closure
-    ForeignFunction(&'a Arc<ForeignFunction<Buffer>>),
+    ForeignFunction,
     /// Table
     Table(DiatomTable<'a, Buffer>),
     /// Tuple

@@ -1,6 +1,6 @@
 [package]
 name = "diatom"
-version = "0.6.0-alpha"
+version = "0.6.0-alpha.1"
 edition.workspace = true
 authors.workspace = true
 description.workspace = true
