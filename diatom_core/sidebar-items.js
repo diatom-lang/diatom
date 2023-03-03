@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["extension","Diatom rust extension"],["ffi","Diatom Foreign Function Interface"]],"struct":[["Interpreter",""]],"trait":[["IoWrite","A trait for objects which are byte-oriented sinks."],["StdCore","Interface with standard library core"]]};

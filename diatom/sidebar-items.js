@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["VERSION","The version of this build"]],"mod":[["extension","Diatom rust extension"],["ffi","Diatom Foreign Function Interface"]],"struct":[["Interpreter","The Diatom Interpreter"]],"trait":[["IoWrite","A trait for objects which are byte-oriented sinks."]]};

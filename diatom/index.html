@@ -1,0 +1,67 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The Diatom Programming Language"><meta name="keywords" content="rust, rustlang, rust-lang, diatom"><title>diatom - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceSerif4-Regular-1f7d512b176f0f72.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceSerif4-Bold-124a1ca42af929b6.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../static.files/rustdoc-6827029ac823cab7.css" id="mainThemeStyle"><link rel="stylesheet" id="themeStyle" href="../static.files/light-ebce58d0a40c3431.css"><link rel="stylesheet" disabled href="../static.files/dark-f23faae4a2daf9a6.css"><link rel="stylesheet" disabled href="../static.files/ayu-8af5e100b21cd173.css"><script id="default-settings" ></script><script src="../static.files/storage-d43fa987303ecbbb.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-c55e1eb52e1886b4.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../diatom/index.html"><div class="logo-container"><img class="rust-logo" src="../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></div></a><h2></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../diatom/index.html"><div class="logo-container"><img class="rust-logo" src="../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></div></a><h2 class="location"><a href="#">Crate diatom</a></h2><div class="sidebar-elems"><ul class="block"><li class="version">Version 0.6.0-alpha.1</li><li><a id="all-types" href="all.html">All Items</a></li></ul><section><ul class="block"><li><a href="#modules">Modules</a></li><li><a href="#structs">Structs</a></li><li><a href="#constants">Constants</a></li><li><a href="#traits">Traits</a></li></ul></section></div></nav><main><div class="width-limiter"><nav class="sub"><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../static.files/wheel-5ec35bf9ca753509.svg"></a></div></form></nav><section id="main-content" class="content"><div class="main-heading"><h1 class="fqn">Crate <a class="mod" href="#">diatom</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../static.files/clipboard-7571035ce49a181d.svg" width="19" height="18" alt="Copy item path"></button></h1><span class="out-of-band"><a class="srclink" href="../src/diatom/lib.rs.html#1-242">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="the-diatom-programming-language"><a href="#the-diatom-programming-language">The Diatom Programming Language</a></h2>
+<p><img src="https://github.com/diatom-lang/diatom/actions/workflows/rust.yml/badge.svg" alt="Unit Tests" />
+<img src="https://github.com/diatom-lang/diatom/actions/workflows/rustdoc.yml/badge.svg" alt="doc" />
+<a href="https://crates.io/crates/diatom"><img src="https://img.shields.io/crates/v/diatom.svg" alt="Crates.io" /></a>
+<a href="https://crates.io/crates/diatom"><img src="https://img.shields.io/crates/l/diatom" alt="license" /></a></p>
+<p><a href="https://deps.rs/repo/github/diatom-lang/diatom"><img src="https://deps.rs/repo/github/diatom-lang/diatom/status.svg" alt="dependency status" /></a>
+<img src="https://img.shields.io/github/issues/diatom-lang/diatom" alt="issue" />
+<img src="https://img.shields.io/github/issues-pr/diatom-lang/diatom" alt="pr" />
+<img src="https://img.shields.io/codecov/c/github/diatom-lang/diatom" alt="coverage" /></p>
+<p>A dynamic typed scripting language for embedded use in applications. This project is yet another attempt of being a “better” lua.</p>
+<p><strong>Warning</strong>: Project is still in experimental stage and API is considered as unstable.</p>
+<h2 id="example"><a href="#example">Example</a></h2><h3 id="1-run-a-piece-of-code"><a href="#1-run-a-piece-of-code">1. Run a piece of code</a></h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>diatom::Interpreter;
+
+<span class="comment">// Create a new instance of interpreter
+// Enable colored output
+</span><span class="kw">let </span><span class="kw-2">mut </span>interpreter = Interpreter::with_color(std::io::stdout());
+<span class="comment">// Execute source code
+</span><span class="kw">let </span>output = interpreter.exec(
+    <span class="string">&quot;print(&#39;Hello, world!&#39;)&quot;</span>,
+    <span class="string">&quot;&lt;test_code&gt;&quot;</span>, <span class="bool-val">true
+    </span>).unwrap();</code></pre></div>
+<h3 id="2-create-a-custom-extension"><a href="#2-create-a-custom-extension">2. Create a custom extension</a></h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::sync::{Arc, Mutex};
+<span class="kw">use </span>diatom::{
+    ffi::{DiatomValue, ForeignFunction},
+    extension::{Extension, ExtensionKind, AHashMap},
+    Interpreter,
+    IoWrite,
+};
+
+<span class="comment">// this value will be modified
+</span><span class="kw">let </span>value = Arc::new(Mutex::new(<span class="number">1</span>));
+<span class="kw">let </span>value_capture = value.clone();
+
+<span class="kw">let </span><span class="kw-2">mut </span>interpreter = Interpreter::new(std::io::stdout());
+
+<span class="kw">pub fn </span>my_ext&lt;Buffer: IoWrite&gt;(value: Arc&lt;Mutex&lt;i64&gt;&gt;) -&gt; Extension&lt;Buffer&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>funcs: AHashMap&lt;String, Arc&lt;ForeignFunction&lt;Buffer&gt;&gt;&gt; = AHashMap::default();
+    funcs.insert(
+        <span class="string">&quot;set_value&quot;</span>.to_string(),
+        Arc::new(<span class="kw">move </span>|<span class="kw">_</span>, parameters, <span class="kw">_</span>| {
+            <span class="kw">if </span>parameters.len() == <span class="number">1</span>{
+                <span class="kw">if let </span>DiatomValue::Int(i) = parameters[<span class="number">0</span>] {
+                    <span class="kw-2">*</span>value.lock().unwrap() = i;
+                    <span class="kw">return </span><span class="prelude-val">Ok</span>(DiatomValue::Unit);
+                }
+            }
+            <span class="prelude-val">Err</span>(<span class="string">&quot;Expect an `Int` as parameter!&quot;</span>.to_string())
+        }),
+    );
+    
+    Extension {
+        name: <span class="string">&quot;my_ext&quot;</span>.to_string(),
+        kind: ExtensionKind::ForeignFunctions(funcs),
+    }
+}
+
+<span class="comment">// register extension
+</span>interpreter.load_ext(my_ext(value_capture)).unwrap();
+<span class="comment">// change value to 5
+</span>interpreter.exec(<span class="string">r#&quot;
+    import set_value from my_ext
+    set_value(5)
+&quot;#</span>, <span class="string">&quot;&lt;test_code&gt;&quot;</span>, <span class="bool-val">true</span>).unwrap();
+<span class="macro">assert_eq!</span>(<span class="kw-2">*</span>value.lock().unwrap(), <span class="number">5</span>);</code></pre></div>
+</div></details><h2 id="modules" class="small-section-header"><a href="#modules">Modules</a></h2><div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="mod" href="extension/index.html" title="diatom::extension mod">extension</a></div><div class="item-right docblock-short">Diatom rust extension</div></div><div class="item-row"><div class="item-left module-item"><a class="mod" href="ffi/index.html" title="diatom::ffi mod">ffi</a></div><div class="item-right docblock-short">Diatom Foreign Function Interface</div></div></div><h2 id="structs" class="small-section-header"><a href="#structs">Structs</a></h2><div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.Interpreter.html" title="diatom::Interpreter struct">Interpreter</a></div><div class="item-right docblock-short">The Diatom Interpreter</div></div></div><h2 id="constants" class="small-section-header"><a href="#constants">Constants</a></h2><div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="constant" href="constant.VERSION.html" title="diatom::VERSION constant">VERSION</a></div><div class="item-right docblock-short">The version of this build</div></div></div><h2 id="traits" class="small-section-header"><a href="#traits">Traits</a></h2><div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="trait" href="trait.IoWrite.html" title="diatom::IoWrite trait">IoWrite</a></div><div class="item-right docblock-short">A trait for objects which are byte-oriented sinks.</div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="diatom" data-themes="" data-resource-suffix="" data-rustdoc-version="1.67.1 (d5a82bbd2 2023-02-07)" data-search-js="search-444266647c4dba98.js" data-settings-js="settings-bebeae96e00e4617.js" data-settings-css="settings-af96d9e2fc13e081.css" ></div></body></html>

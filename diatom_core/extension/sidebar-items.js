@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["ExtensionKind","Kind of extension"]],"struct":[["AHashMap","A `HashMap` using `RandomState` to hash the items. (Requires the `std` feature to be enabled.)"],["Extension","Diatom rust extension"]]};

@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"diatom_core":[["impl&lt;Buffer:&nbsp;<a class=\"trait\" href=\"diatom_core/trait.IoWrite.html\" title=\"trait diatom_core::IoWrite\">IoWrite</a>&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.67.1/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"struct\" href=\"diatom_core/extension/struct.Extension.html\" title=\"struct diatom_core::extension::Extension\">Extension</a>&lt;Buffer&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

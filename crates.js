@@ -1,0 +1,1 @@
+window.ALL_CRATES = ["diatom","diatom_cli","diatom_core","diatom_std_core","diatom_std_os"];

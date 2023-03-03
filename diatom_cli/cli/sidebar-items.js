@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["highlighter",""],["prompt",""],["validator",""]],"struct":[["Cli","An interactive console for Diatom"]]};
