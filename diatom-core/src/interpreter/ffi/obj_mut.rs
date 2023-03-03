@@ -38,12 +38,12 @@ impl<'a, Buffer: IoWrite> DiatomTableMut<'a, Buffer> {
         match table {
             GcObject::Table(t) => {
                 let mut fields = vec![];
-                t.attributes.keys().for_each(|k|{
+                t.attributes.keys().for_each(|k| {
                     let field = self.gc.look_up_table_key(*k).unwrap();
                     fields.push(field);
                 });
                 fields
-            },
+            }
             _ => unreachable!(),
         }
     }
@@ -183,7 +183,7 @@ impl<'a, Buffer: IoWrite> DiatomTupleMut<'a, Buffer> {
     }
 }
 
-pub struct UserDataMut<'a, Buffer: IoWrite>{
+pub struct UserDataMut<'a, Buffer: IoWrite> {
     pub(super) gc: &'a mut Gc<Buffer>,
     pub(super) ref_id: usize,
 }
@@ -202,7 +202,6 @@ impl<'a, Buffer: IoWrite> UserDataMut<'a, Buffer> {
     }
 }
 
-
 /// Mutable reference to a diatom heap allocated object
 pub enum DiatomObjectMut<'a, Buffer: IoWrite> {
     /// Native Diatom Closure
@@ -216,5 +215,5 @@ pub enum DiatomObjectMut<'a, Buffer: IoWrite> {
     /// List
     List(DiatomListMut<'a, Buffer>),
     /// UserData
-    UserData(UserDataMut<'a, Buffer>)
+    UserData(UserDataMut<'a, Buffer>),
 }

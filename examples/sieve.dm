@@ -1,6 +1,6 @@
 -- Example: Prime Number Sieve
 import sqrt from std.math
-import {now, show_as_duration} from std.os.time
+import {DateTime, Duration} from std.os.time
 
 def sieve n = 
     -- Create a list of [(0, true)], (1, true), ..]
@@ -24,10 +24,10 @@ end
         
 n = 100
 
-start = now()
+start = DateTime::now()
 sieve_n = sieve(n)
-finish = now()
+finish = DateTime::now()
 
-println("Finished in", show_as_duration(finish - start))
+println("Finished in", Duration::new(start, finish).show())
 println("All prime numbers within", n, "=") 
 println(sieve_n)

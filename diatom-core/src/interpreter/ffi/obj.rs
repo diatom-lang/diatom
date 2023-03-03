@@ -24,7 +24,7 @@ impl<'a, Buffer: IoWrite> DiatomTable<'a, Buffer> {
 
     pub fn fields(&self) -> Vec<&str> {
         let mut fields = vec![];
-        self.table.keys().for_each(|k|{
+        self.table.keys().for_each(|k| {
             let field = self.gc.look_up_table_key(*k).unwrap();
             fields.push(field);
         });

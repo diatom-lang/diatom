@@ -42,9 +42,7 @@ macro_rules! load_func_mut {
 
 pub fn list_extension<Buffer: IoWrite>() -> Extension<Buffer> {
     let mut funcs: AHashMap<String, Arc<ForeignFunction<Buffer>>> = AHashMap::default();
-    load_func!(funcs, len, |l: DiatomList| DiatomValue::Int(
-        l.len() as i64
-    ));
+    load_func!(funcs, len, |l: DiatomList| DiatomValue::Int(l.len() as i64));
     load_func!(funcs, is_empty, |l: DiatomList| DiatomValue::Bool(
         l.is_empty()
     ));
